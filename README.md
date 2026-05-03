@@ -6,6 +6,11 @@
 
 <p align="center"><i>Your little offline reading buddy.</i></p>
 
+<p align="center">
+  <video src="https://github.com/tigyijanos/pippal/raw/main/docs/pippal_intro.mp4"
+         width="480" autoplay loop muted playsinline></video>
+</p>
+
 ---
 
 A tray-resident Windows app that reads any selected text aloud with a
