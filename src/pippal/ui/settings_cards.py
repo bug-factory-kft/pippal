@@ -251,6 +251,6 @@ def build_about_card(sw: SettingsWindow, body: ttk.Frame) -> None:
     _link(link_row, "Licence (MIT)",
           "https://github.com/tigyijanos/pippal/blob/main/LICENSE")
     _link(link_row, "Privacy",
-          "https://github.com/tigyijanos/pippal/blob/main/PRIVACY.md")
+          "https://github.com/tigyijanos/pippal/blob/main/docs/PRIVACY.md")
     _link(link_row, "Terms",
-          "https://github.com/tigyijanos/pippal/blob/main/TERMS.md")
+          "https://github.com/tigyijanos/pippal/blob/main/docs/TERMS.md")

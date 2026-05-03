@@ -42,11 +42,15 @@ machine.
   defaults without touching the core. The paid build adds Kokoro, AI
   actions and mood presets through this same API.
 
-## Free build vs. paid build
+## Editions
 
-| | Free (this repo) | Paid (Microsoft Store) |
+PipPal ships in two editions. The Community edition is this open-source
+repo; the Microsoft Store edition adds a few quality-of-life features
+on top through a separate proprietary plugin.
+
+| | Community (this repo) | Microsoft Store edition |
 |---|---|---|
-| Source | MIT, [public](https://github.com/tigyijanos/pippal) | Bundles [`pippal_pro`](#what-the-paid-build-adds) |
+| Source | MIT, [public](https://github.com/tigyijanos/pippal) | Community + the proprietary `pippal_pro` plugin |
 | Engine | Piper | Piper + Kokoro |
 | Hotkeys | Read / Queue / Pause / Stop | + Summary / Explain / Translate / Define |
 | AI | — | Local Ollama (offline LLM) |
@@ -54,8 +58,11 @@ machine.
 | Settings cards | Voice / Speech / Hotkeys / Panel / Integration / About | + AI / Ollama |
 | Audio export | — | Save selection as WAV |
 
-The paid build is the same binary plus one extra Python package — see
-[the plugin host architecture](#how-the-plugin-host-works) below.
+The Store edition is the same binary plus one extra Python package
+(see [the plugin host architecture](#how-the-plugin-host-works)
+below). The Community edition stays fully usable on its own — Piper +
+the floating reader panel + the right-click integration are the
+backbone, the Store edition layers convenience on top.
 
 ## Install (Windows, build from source)
 
@@ -76,9 +83,9 @@ Startup folder:
 copy start_server.vbs "$env:APPDATA\Microsoft\Windows\Start Menu\Programs\Startup\PipPal.vbs"
 ```
 
-`reader_app.py` works whether or not `pippal_pro` is installed — without
-it you get the Free feature set; with it (paid users) Pro features
-appear.
+`reader_app.py` works whether or not `pippal_pro` is installed —
+without it you get the Community feature set; the Microsoft Store
+edition bundles it and lights up the extra features.
 
 ## Usage
 
@@ -99,11 +106,12 @@ last 10 readings), and **Quit**.
 
 ## How the plugin host works
 
-`pippal/plugins.py` exposes registries for engines, hotkey actions,
-settings cards, tray items, AI handlers and config defaults. The Free
-package self-registers Piper + four selection-driven hotkeys + six
-settings cards in `pippal/_register_free.py`. A sibling proprietary
-package (`pippal_pro`, distributed only with the paid build) adds:
+`src/pippal/plugins.py` exposes registries for engines, hotkey
+actions, settings cards, tray items, AI handlers and config defaults.
+The Community package self-registers Piper + four selection-driven
+hotkeys + six settings cards in `src/pippal/_register_free.py`. A
+sibling proprietary package (`pippal_pro`, distributed with the
+Microsoft Store edition) adds:
 
 - Kokoro engine
 - Four AI actions (Summary / Explain / Translate / Define) over local
@@ -112,10 +120,10 @@ package (`pippal_pro`, distributed only with the paid build) adds:
 - AI / Ollama settings card
 - Audio export
 
-Discovery is presence-based: `pippal/__init__.py` does
+Discovery is presence-based: `src/pippal/__init__.py` does
 `importlib.util.find_spec("pippal_pro")` then imports it if found.
-There is no licence/entitlement check in the source — Microsoft Store
-delivers a signed MSIX bundling both packages to paid users.
+There is no licence/entitlement check in the source — the Microsoft
+Store ships a signed MSIX that bundles both packages.
 
 A third-party plugin (e.g. `pippal-elevenlabs`, `pippal-edge-tts`)
 could ship today by registering its engine + voice provider through
@@ -150,13 +158,15 @@ the same API. The contract is pinned by `tests/test_plugin_host.py`.
 
 **v0.2.0 — public release.** 142 tests, ruff clean. End-to-end smoke
 test of the live app on Windows 11: green. See
-[CODEREVIEW.md](CODEREVIEW.md) for the multi-reviewer audit (codex CLI
-+ independent Claude agent + ruff + mypy) that closed every HIGH and
-MEDIUM finding before this release.
+[docs/CODEREVIEW.md](docs/CODEREVIEW.md) for the multi-reviewer audit
+(codex CLI + independent Claude agent + ruff + mypy) that closed
+every HIGH and MEDIUM finding before this release.
 
 ## Licence
 
 PipPal source is **MIT-licensed** — see [LICENSE](LICENSE).
 Third-party dependencies and downloaded run-time artefacts (Piper,
 voice models) are listed with their respective licences in
-[THIRD_PARTY.md](THIRD_PARTY.md).
+[docs/THIRD_PARTY.md](docs/THIRD_PARTY.md).
+For privacy and terms see [docs/PRIVACY.md](docs/PRIVACY.md) and
+[docs/TERMS.md](docs/TERMS.md).
