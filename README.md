@@ -22,8 +22,10 @@ machine.
 
 - 🔊 Reads any selected text via a global hotkey, layout-independent.
 - 🎙 Local neural TTS via [Piper](https://github.com/rhasspy/piper).
-  60+ curated voices across 8 languages installable from the built-in
-  Voice Manager.
+  A built-in Voice Manager installs curated voices from the
+  [piper-voices](https://huggingface.co/rhasspy/piper-voices)
+  catalogue (currently 18 voices spanning English / German / Spanish
+  / French / Italian / Hungarian / Polish / Dutch / Portuguese).
 - 📺 Floating reader panel: the sentence sits still, only a thin mint
   underline slides under the spoken word; surrounding words gently fade
   in and out as the cursor passes.

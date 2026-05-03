@@ -49,8 +49,9 @@ roadmap.
   - Windows context-menu integration for `.txt` and `.md`.
   - Apply / Save / Reset to defaults / Cancel buttons.
 - Voice Manager: one-click install/remove of curated Piper voices
-  from huggingface.co/rhasspy/piper-voices. 60+ voices across 8
-  languages.
+  from huggingface.co/rhasspy/piper-voices. 18 voices across 9
+  languages (English US/UK, German, Spanish, French, Italian,
+  Hungarian, Polish, Dutch, Portuguese).
 - Layered config: only user overrides land in `config.json`; plugin
   defaults overlay at runtime. Uninstalling a plugin doesn't strand
   its defaults on disk.
