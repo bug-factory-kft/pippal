@@ -18,6 +18,7 @@ from ..context_menu import (
 )
 from ..ollama_client import OllamaClient
 from ..voices import KOKORO_CURATED, installed_voices
+from . import theme
 from .theme import UI, apply_dark_theme
 from .voice_manager import VoiceManagerDialog
 
@@ -89,14 +90,32 @@ class SettingsWindow:
             y = max(0, (sh - win_h) // 2)
         w.geometry(f"{win_w}x{win_h}+{x}+{y}")
         w.minsize(560, 600)
-        # Native Windows title bar stays — `apply_dark_theme` asks DWM
-        # to render it in dark mode + paint our caption colour on
-        # Win 11 22H2+. Older Windows shows the default light strip;
-        # acceptable trade-off for keeping the title bar's drag/snap/
-        # taskbar/Alt+Tab/system-menu behaviour all working natively.
         apply_dark_theme(w)
-        # Esc still closes — convenient even with a native title bar.
+        # Hide the native title bar via the canonical Win32 WndProc
+        # subclass — WM_NCCALCSIZE returns 0 so Windows treats the
+        # whole window as client area, no caption strip drawn. The
+        # window remains a normal app window from the WM's view, so
+        # taskbar / Alt+Tab / focus all keep working.
+        #
+        # Tk creates the HWND lazily; firing on `<Map>` (the moment
+        # the window becomes visible) is more reliable than a blind
+        # `after(10, ...)` timer. The `_did_chromeless` guard stops
+        # us re-running the WndProc subclass each time the window is
+        # iconified+restored.
+        def _apply_chromeless(_e=None):
+            if getattr(self, "_did_chromeless", False):
+                return
+            self._did_chromeless = True
+            theme.make_chromeless_keep_taskbar(w)
+            theme.apply_rounded_corners(w)
+        w.bind("<Map>", _apply_chromeless)
+        # Also fire after 50 ms in case the window is mapped before
+        # the binding takes effect (race-y on some Tk builds).
+        w.after(50, _apply_chromeless)
+        # The chromeless window has no system menu; bind Esc + Alt+F4
+        # so the user has both standard ways to close it.
         w.bind("<Escape>", lambda _e: self._close())
+        w.bind("<Alt-F4>", lambda _e: self._close())
 
         self._build_header(w)
         body = self._build_scrollable_body(w)
@@ -135,8 +154,16 @@ class SettingsWindow:
 
     def _build_header(self, w: tk.Toplevel) -> None:
         brand = self.config.get("brand_name", "PipPal")
-        header = ttk.Frame(w, style="Header.TFrame", padding=(24, 18, 24, 14))
+        header = ttk.Frame(w, style="Header.TFrame", padding=(24, 14, 8, 14))
         header.pack(fill="x")
+
+        # Custom-titlebar window controls. Just a close button — this
+        # is a fixed-size dialog, no min/max needed. Pack it first so
+        # the title row gets `expand=True` and the ✕ stays right-edge.
+        ttk.Button(
+            header, text="✕", style="TitleClose.TButton",
+            command=self._close, width=3, takefocus=False,
+        ).pack(side="right", padx=(0, 4))
 
         title_row = ttk.Frame(header, style="Header.TFrame")
         title_row.pack(side="left", fill="x", expand=True)
@@ -164,9 +191,18 @@ class SettingsWindow:
             dot.create_oval(2, 2, 12, 12, fill=UI["accent"], outline="")
             dot.pack(side="left", padx=(0, 10))
         ttk.Label(title_row, text=brand, style="Title.TLabel").pack(side="left")
+        # Inline subtitle next to the brand, baseline-shifted so it
+        # sits one row with the brand and the right-side ✕ button
+        # rather than dangling below them.
         ttk.Label(
-            header, text="Settings", style="Sub.TLabel",
-        ).pack(anchor="w", pady=(2, 0))
+            title_row, text="Settings", style="Sub.TLabel",
+        ).pack(side="left", padx=(10, 0), pady=(7, 0))
+
+        # Native title bar is hidden — without `enable_drag_to_move`
+        # the user couldn't move the window. Drag handlers go on the
+        # whole header; clicks on the ✕ button or any interactive
+        # widget pass through unaffected.
+        theme.enable_drag_to_move(w, header)
 
     def _build_scrollable_body(self, w: tk.Toplevel) -> ttk.Frame:
         body_outer = ttk.Frame(w, style="TFrame")

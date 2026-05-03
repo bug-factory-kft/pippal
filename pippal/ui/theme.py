@@ -235,127 +235,106 @@ _DWMWA_WINDOW_CORNER_PREFERENCE = 33  # Win 11 22H2+
 _DWMWCP_ROUND = 2  # full rounded corners; 3 = small radius
 
 
+def _chromeless_log(msg: str) -> None:
+    """Opt-in diagnostic logger. Append a one-line debug message to
+    `%TEMP%/pippal-chromeless.log` only when `PIPPAL_DEBUG_CHROMELESS`
+    is set in the environment — pythonw.exe sends stderr to nowhere,
+    so a file is the only useful diagnostic channel for the windowed
+    build, but we don't want a stray file growing every session."""
+    try:
+        import os
+        if not os.environ.get("PIPPAL_DEBUG_CHROMELESS"):
+            return
+        import tempfile
+        import time
+        log_path = os.path.join(tempfile.gettempdir(), "pippal-chromeless.log")
+        with open(log_path, "a", encoding="utf-8") as f:
+            f.write(f"{time.strftime('%H:%M:%S')} {msg}\n")
+    except Exception:
+        pass
+
+
 def make_chromeless_keep_taskbar(window: tk.Toplevel) -> None:
     """Hide the native title bar while keeping the window in the
-    taskbar and Alt+Tab list. Canonical Win32 technique: keep the
-    `WS_OVERLAPPEDWINDOW` essence so Explorer treats the window as
-    a real application, but **subclass the WndProc** so we return
-    0 from `WM_NCCALCSIZE` — the non-client area becomes zero, the
-    caption strip never gets drawn.
+    taskbar and Alt+Tab list.
 
-    Apps like VS Code and Discord do exactly this. The Python
-    library `hPyT` documents the same recipe; we inline it here so
-    we don't take an extra dependency.
+    Tk on Windows draws the title bar itself (the underlying HWND is
+    a WS_POPUP without WS_CAPTION), so Win32 style strips have no
+    visible effect. The only Tk-blessed way to hide the chrome is
+    `overrideredirect(True)`, which by default also drops the window
+    from the taskbar / Alt+Tab. We restore those by:
 
-    Notes:
-    - The WndProc callback object is stored on the window so the GC
-      doesn't collect it while Windows still routes messages through.
-    - `WS_CAPTION` is also stripped from `GWL_STYLE` for safety, but
-      the WM_NCCALCSIZE return is what does the visible work.
-    - WM_NCACTIVATE returns 1 so the inactive-window frame doesn't
-      flicker through on focus changes.
+    1. Breaking the owner relationship to the Tk root (otherwise the
+       Toplevel is an *owned* popup and Alt+Tab skips it).
+    2. Flipping `WS_EX_APPWINDOW` on (and clearing `WS_EX_TOOLWINDOW`)
+       so the WM treats it as a stand-alone application.
+    3. Bouncing it through withdraw/deiconify so Explorer rebuilds
+       the Alt+Tab cache with the new flags.
     """
     import sys
+    _chromeless_log(f"called for window id={window.winfo_id()}")
     if sys.platform != "win32":
+        _chromeless_log("not win32, skipping")
         return
     try:
         import ctypes
         from ctypes import wintypes
 
-        GWL_STYLE = -16
-        GWLP_WNDPROC = -4
-        WS_CAPTION = 0x00C00000
-        WS_THICKFRAME = 0x00040000
-        WS_MINIMIZEBOX = 0x00020000
-        WS_MAXIMIZEBOX = 0x00010000
-        WS_BORDER = 0x00800000
-        WM_NCCALCSIZE = 0x0083
-        WM_NCACTIVATE = 0x0086
-        WM_NCPAINT = 0x0085
-        SWP_NOMOVE = 0x0002
-        SWP_NOSIZE = 0x0001
-        SWP_NOZORDER = 0x0004
-        SWP_FRAMECHANGED = 0x0020
+        GWL_EXSTYLE = -20
+        GWLP_HWNDPARENT = -8
+        WS_EX_TOOLWINDOW = 0x00000080
+        WS_EX_APPWINDOW = 0x00040000
 
         user32 = ctypes.windll.user32
 
-        # GetWindowLongPtrW / SetWindowLongPtrW are pointer-sized; use
-        # them on 64-bit Python. Fall back to LongW on 32-bit.
         is_64bit = ctypes.sizeof(ctypes.c_void_p) == 8
-        if is_64bit:
+        if is_64bit and hasattr(user32, "GetWindowLongPtrW"):
             get_long = user32.GetWindowLongPtrW
             set_long = user32.SetWindowLongPtrW
         else:
             get_long = user32.GetWindowLongW
             set_long = user32.SetWindowLongW
-        get_long.restype = ctypes.c_void_p
+        get_long.restype = ctypes.c_ssize_t
         get_long.argtypes = [wintypes.HWND, ctypes.c_int]
-        set_long.restype = ctypes.c_void_p
-        set_long.argtypes = [wintypes.HWND, ctypes.c_int, ctypes.c_void_p]
+        set_long.restype = ctypes.c_ssize_t
+        set_long.argtypes = [wintypes.HWND, ctypes.c_int, ctypes.c_ssize_t]
 
-        WNDPROC = ctypes.WINFUNCTYPE(
-            ctypes.c_void_p,
-            wintypes.HWND, wintypes.UINT,
-            wintypes.WPARAM, wintypes.LPARAM,
-        )
-        user32.CallWindowProcW.restype = ctypes.c_void_p
-        user32.CallWindowProcW.argtypes = [
-            ctypes.c_void_p,
-            wintypes.HWND, wintypes.UINT,
-            wintypes.WPARAM, wintypes.LPARAM,
-        ]
+        # Step 1 — let Tk hide its self-drawn title bar. Tk on Windows
+        # uses WS_POPUP for the visible Toplevel and paints the chrome
+        # itself; overrideredirect is the only Tk-blessed way to turn
+        # that chrome off.
+        window.overrideredirect(True)
+        _chromeless_log("overrideredirect(True) applied")
 
-        hwnd = user32.GetParent(window.winfo_id())
+        hwnd = window.winfo_id()
         if not hwnd:
+            _chromeless_log("no HWND, giving up")
             return
 
-        orig_wndproc = get_long(hwnd, GWLP_WNDPROC)
+        # Step 2 — break the owner relationship to the Tk root window.
+        # An owned popup is excluded from Alt+Tab regardless of any
+        # extended-style flag, so this clear is mandatory.
+        prev_owner = set_long(hwnd, GWLP_HWNDPARENT, 0)
+        _chromeless_log(f"cleared owner (was {prev_owner})")
 
-        def _new_wndproc(hwnd_inner, msg, wparam, lparam):
-            if msg == WM_NCCALCSIZE:
-                # Returning 0 here when wparam is TRUE keeps the
-                # entire window area as the client area: there's no
-                # non-client strip left for Windows to paint a title
-                # bar onto.
-                return 0
-            if msg == WM_NCACTIVATE:
-                # Suppress the inactive-frame flicker on focus
-                # changes by claiming the activation was handled.
-                return 1
-            if msg == WM_NCPAINT:
-                return 0
-            return user32.CallWindowProcW(
-                orig_wndproc, hwnd_inner, msg, wparam, lparam,
-            )
-
-        new_proc = WNDPROC(_new_wndproc)
-        # Stash the callback + the original WndProc on the window so
-        # the references outlive the function (Windows keeps using
-        # them as long as the HWND lives).
-        if not hasattr(window, "_chromeless_refs"):
-            window._chromeless_refs = []  # type: ignore[attr-defined]
-        window._chromeless_refs.append((new_proc, orig_wndproc))  # type: ignore[attr-defined]
-
-        set_long(hwnd, GWLP_WNDPROC,
-                 ctypes.cast(new_proc, ctypes.c_void_p).value or 0)
-
-        # Belt-and-braces style strip — match what hPyT does. The
-        # WM_NCCALCSIZE return is what hides the caption visually,
-        # but stripping the style avoids stray hit-testing edges.
-        old_style = get_long(hwnd, GWL_STYLE)
-        old_style_int = int(old_style) if old_style is not None else 0
-        new_style = (old_style_int & ~(
-            WS_CAPTION | WS_THICKFRAME
-            | WS_MINIMIZEBOX | WS_MAXIMIZEBOX
-        )) | WS_BORDER
-        set_long(hwnd, GWL_STYLE, ctypes.c_void_p(new_style).value or 0)
-
-        user32.SetWindowPos(
-            hwnd, 0, 0, 0, 0, 0,
-            SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_FRAMECHANGED,
+        # Step 3 — flip WS_EX_APPWINDOW on, WS_EX_TOOLWINDOW off, so
+        # the WM treats the window as a stand-alone application and
+        # adds it back to the taskbar / Alt+Tab.
+        ex_style = get_long(hwnd, GWL_EXSTYLE)
+        new_ex = (ex_style & ~WS_EX_TOOLWINDOW) | WS_EX_APPWINDOW
+        set_long(hwnd, GWL_EXSTYLE, new_ex)
+        _chromeless_log(
+            f"ex_style 0x{ex_style & 0xFFFFFFFF:08x} -> 0x{new_ex & 0xFFFFFFFF:08x}"
         )
-    except Exception:
-        pass
+
+        # Step 4 — bounce the window so Explorer rebuilds its Alt+Tab
+        # cache with the new flags. withdraw() unmaps; deiconify()
+        # remaps it 30 ms later (Windows wants a beat between).
+        window.withdraw()
+        window.after(30, window.deiconify)
+        _chromeless_log("withdraw + deiconify scheduled")
+    except Exception as e:
+        _chromeless_log(f"FAILED: {type(e).__name__}: {e}")
 
 
 def apply_rounded_corners(window: tk.Misc) -> None:
