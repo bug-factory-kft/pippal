@@ -2,7 +2,7 @@
 
 The factory has zero name-awareness of specific engines: it just looks
 up the requested engine name in the plugin registry. The Free
-distribution always registers `piper` (in `pippal/_register_free.py`),
+distribution always registers `piper` (in `pippal/_register.py`),
 so the always-available fallback is `plugins.get_engine("piper")`.
 The optional `pippal_pro` package registers e.g. `kokoro`. A
 hypothetical third-party plugin could register `elevenlabs`,
@@ -39,7 +39,7 @@ def make_backend(config: dict[str, Any]) -> TTSBackend:
             f"[engine] {name!r} is not a registered engine; falling back to piper",
             file=sys.stderr,
         )
-    # Always-available fallback. The Free package guarantees this is
+    # Always-available fallback. The core guarantees this is
     # registered; if it isn't, something has gone seriously wrong with
     # the plugin host, so let the import error surface naturally.
     piper_cls = plugins.get_engine("piper") or PiperBackend

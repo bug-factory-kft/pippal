@@ -149,7 +149,7 @@ def main() -> None:
     # The action → handler mapping is composed from two sources:
     #   1. Built-in selection-driven actions, supplied by the engine.
     #   2. AI actions, looked up in plugins.ai_actions(). When pippal_pro
-    #      is loaded, those are populated; in a Free build they're empty
+    #      is loaded, those are populated; in a core build they're empty
     #      and the corresponding hotkeys simply skip binding.
     builtin_handlers: dict[str, Callable[[], None]] = {
         "speak": engine.speak_selection_async,
@@ -167,7 +167,7 @@ def main() -> None:
         # Legacy path: the engine still carries `speak_<action>_async`
         # methods until Stage 2 moves them to pippal_pro. Once
         # pippal.engine drops those, this branch becomes unreachable
-        # in a Free build (correctly — no Pro = no AI hotkeys).
+        # when no extension registered an AI handler.
         legacy = getattr(engine, f"speak_{action_id}_async", None)
         return legacy if callable(legacy) else None
 
@@ -257,7 +257,7 @@ def main() -> None:
     # Tray menu is composed from registered builders. Each builder
     # gets a context object (engine, config, overlay, settings, root,
     # quit_action, tray_action, save_config) and returns an iterable
-    # of pystray items. The Free pippal package registers Recent,
+    # of pystray items. The the core package registers Recent,
     # Settings and Quit; pippal_pro adds Mood. Order is controlled by
     # the registered (zone, order) tuple — see plugins.tray_items().
     tray_ctx = SimpleNamespace(

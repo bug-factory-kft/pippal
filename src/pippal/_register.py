@@ -1,18 +1,18 @@
-"""Free distribution self-registration.
+"""Built-in self-registration.
 
-Imported once at package import time (`pippal/__init__.py`) so that the
-plugin registries (`pippal.plugins`) come up populated with everything
-the Free build provides:
+Imported once at package import time (`pippal/__init__.py`) so that
+the plugin registries (`pippal.plugins`) come up populated with
+everything the core ships:
 
 - the Piper engine
 - four selection-driven hotkey actions (read / queue / pause / stop)
 - six settings cards (Voice / Speech / Hotkeys / Panel / Integration / About)
 - three tray-item builders (Recent submenu, Settings, Quit)
-- the Free config defaults
+- the core config defaults
 
 If you're a third-party plugin author, this file is a good worked
 example of how to fill the registries from your own package's
-`__init__.py` — pippal_pro does the same thing.
+`__init__.py`.
 """
 
 from __future__ import annotations
@@ -28,7 +28,7 @@ from .engines.piper import PiperBackend
 from .plugins import Zone
 
 # ---------------------------------------------------------------------------
-# Tray item builders for the Free distribution.
+# Tray item builders for the built-in package.
 # ---------------------------------------------------------------------------
 # Builders are called at app-compose time with a SimpleNamespace context
 # (engine, config, overlay, settings, root, quit_action, tray_action,
@@ -95,14 +95,14 @@ def _register() -> None:
         "windows+shift+b",
     )
 
-    # ----- Tray items (Recent, then Pro can slot Mood here, then
-    # Settings + Quit). The numeric orders give Pro plenty of room to
+    # ----- Tray items (Recent, then extensions can slot items here, then
+    # Settings + Quit). The numeric orders give extensions plenty of room to
     # insert before Settings without colliding. -----
     plugins.register_tray_item(_recent_tray_builder,   zone=Zone.ADVANCED, order=10)
     plugins.register_tray_item(_settings_tray_builder, zone=Zone.ADVANCED, order=80)
     plugins.register_tray_item(_quit_tray_builder,     zone=Zone.ADVANCED, order=90)
 
-    # ----- Free config defaults -----
+    # ----- Core config defaults -----
     free_defaults: dict[str, Any] = {
         k: v for k, v in DEFAULT_CONFIG.items()
         if not k.startswith("hotkey_")

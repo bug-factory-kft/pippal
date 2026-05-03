@@ -1,37 +1,31 @@
 """Plugin host registries for PipPal.
 
-PipPal is split into a public MIT core (`pippal`) and an optional
-proprietary extension package (`pippal_pro`). The core has zero
-name-awareness of Pro features: it never imports `kokoro`, `ai_runner`,
-`moods`, etc. Instead, this module exposes registries that any plugin
-package — including the Free `pippal` package itself — can fill.
+The core has no name-awareness of any specific extension: it never
+imports `kokoro`, `ai_runner`, etc. directly. Instead, this module
+exposes registries that any plugin package — including the `pippal`
+package itself — can fill.
 
-The Free distribution self-registers Piper, the four selection-driven
-hotkey actions (read / queue / pause / stop), the Free settings cards,
-the Free tray items, and the Free config defaults. The Pro distribution,
-when installed alongside, self-registers Kokoro, the AI actions, AI
-hotkeys, AI settings card, Mood tray submenu, and Pro defaults.
+`pippal` self-registers Piper, the four selection-driven hotkey
+actions (read / queue / pause / stop), the built-in settings cards,
+the tray items, and the default config values. Optional extension
+packages may add more engines, AI actions, settings cards, tray
+items and defaults through the same API.
 
-EXPERIMENTAL — the registry shape is not yet a stable API. It will move
-toward a 1.0 contract once Pro has shipped against it for a few
-releases. Third-party plugins should pin to a specific PipPal minor
-version until then.
+EXPERIMENTAL — the registry shape is not yet a stable API. Third-
+party plugins should pin to a specific PipPal minor version until
+the contract settles.
 
 Discovery (`pippal/__init__.py`):
 
-    if importlib.util.find_spec("pippal_pro") is not None:
+    if importlib.util.find_spec("pippal_extensions") is not None:
         try:
-            import pippal_pro  # self-registers
+            import pippal_extensions  # self-registers
         except Exception as exc:
-            # Don't silently swallow: a partial Pro install is worse
-            # than no Pro install. Log and continue with Free only.
-            print(f"[pippal] pippal_pro present but failed to load: {exc}",
+            print(f"[pippal] extension load failed: {exc}",
                   file=sys.stderr)
 
-There is no `is_pro_user()` orthogonal license check. The presence of
-`pippal_pro` IS the gate — Microsoft Store delivers an MSIX bundling
-both packages to paid users; Free users `pip install pippal` and only
-ever see the Free registry.
+Discovery is presence-based: install the extension package alongside
+`pippal` and it self-registers on import.
 """
 
 from __future__ import annotations
@@ -93,8 +87,8 @@ def register_engine(name: str, cls: EngineCls) -> None:
 
     The engine name is what shows up in `config["engine"]` and in the
     Settings → Voice → Engine combobox. Re-registering an existing name
-    overwrites — last writer wins, which is intentional so Pro can
-    replace a Free fallback if both are present."""
+    overwrites — last writer wins, which is intentional so an extension can
+    replace a built-in fallback if both are present."""
     _engines[name] = cls
 
 
@@ -221,29 +215,39 @@ def defaults() -> dict[str, Any]:
 # Discovery
 # ---------------------------------------------------------------------------
 
-def load_pro_plugin() -> bool:
-    """Try to load `pippal_pro` if installed. Returns True on success.
+# Names of optional extension packages this build looks for at
+# import time. Each must self-register on import (call into the
+# `register_*` functions from this module). Add a name here, ship a
+# package by that name, and the host picks it up automatically.
+_EXTENSION_NAMES: tuple[str, ...] = ("pippal_pro",)
 
-    Uses `find_spec` first so an `ImportError` from inside the package
-    (broken Pro dependency) doesn't get conflated with 'Pro not
-    installed'. A partial install logs to stderr and we continue with
-    Free only — the user shouldn't get a half-Pro experience silently.
+
+def load_extensions() -> int:
+    """Discover and load any optional extension packages installed
+    alongside `pippal`. Returns the number of extensions loaded.
+
+    Uses `find_spec` before `import_module` so an `ImportError` from
+    inside an extension (broken dependency) isn't conflated with
+    'not installed'. A partial install logs to stderr and we
+    continue; a half-loaded plugin would be worse than none.
     """
     import importlib
     import importlib.util
 
-    if importlib.util.find_spec("pippal_pro") is None:
-        return False
-    try:
-        importlib.import_module("pippal_pro")
-        return True
-    except Exception as exc:
-        print(
-            f"[pippal] pippal_pro is installed but failed to load: {exc}. "
-            "Continuing with Free features only.",
-            file=sys.stderr,
-        )
-        return False
+    loaded = 0
+    for name in _EXTENSION_NAMES:
+        if importlib.util.find_spec(name) is None:
+            continue
+        try:
+            importlib.import_module(name)
+            loaded += 1
+        except Exception as exc:
+            print(
+                f"[pippal] extension {name!r} is installed but failed "
+                f"to load: {exc}. Continuing without it.",
+                file=sys.stderr,
+            )
+    return loaded
 
 
 # ---------------------------------------------------------------------------

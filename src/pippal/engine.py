@@ -102,7 +102,7 @@ class TTSEngine:
 
         Resolution goes through the plugin host (`pippal.plugins`) so
         the engine has zero name-awareness of which AI handler is
-        active. In a Free build no AI handler is registered and this
+        active. In a core build no AI handler is registered and this
         method is a silent no-op."""
         handler = plugins.get_ai_action(action_id)
         if handler is None:

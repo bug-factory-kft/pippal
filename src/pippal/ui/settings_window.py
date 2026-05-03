@@ -22,16 +22,15 @@ from . import theme
 from .theme import UI, apply_dark_theme
 from .voice_manager import VoiceManagerDialog
 
+# Single bridge point for the optional Kokoro install flow. The
+# core package never depends on Kokoro; if an extension provides it
+# the helpers below return non-None, otherwise the Settings UI
+# falls through to a "not available" state.
 
-# Pro-only behaviour that the Settings window touches when the user
-# picks the Kokoro engine. The Free distribution doesn't ship these
-# modules; if pippal_pro isn't installed the engine combo never offers
-# 'kokoro' as an option (plugins.engines() doesn't include it), so
-# the lazy lookups below are unreachable in a Free-only build.
-def _pro_kokoro_helpers() -> tuple[Any | None, Any | None]:
+def _optional_kokoro_helpers() -> tuple[Any | None, Any | None]:
     """Return (kokoro_installed_fn, KokoroInstallDialog_cls) or (None, None)
-    when pippal_pro isn't loaded. Localised here so the Settings UI
-    only has one bridge point to the Pro package."""
+    when no Kokoro-capable extension is loaded. Localised here so
+    the core only has one bridge point to an optional package."""
     try:
         from pippal_pro.moods import kokoro_installed
         from pippal_pro.ui.kokoro_install import KokoroInstallDialog
@@ -120,9 +119,9 @@ class SettingsWindow:
         self._build_header(w)
         body = self._build_scrollable_body(w)
         # Cards are registered into the plugin host (pippal.plugins) by
-        # whichever package supplies them — the Free pippal package
+        # whichever package supplies them — the core
         # registers Voice/Speech/Hotkeys/Panel/Integration/About via
-        # `_register_free.py`; pippal_pro adds the AI card. The order
+        # `_register.py`; pippal_pro adds the AI card. The order
         # comes from each registration's `zone` (with `order` as a
         # tie-breaker).
         for builder in plugins.settings_cards():
@@ -295,13 +294,13 @@ class SettingsWindow:
             cur = str(self.vars["kokoro_voice"].get() or "af_bella")
             match = next((lab for lab in labels if lab.startswith(cur + " —")), labels[0])
             self.vars["voice_display"].set(match)
-            kokoro_installed, _dlg = _pro_kokoro_helpers()
+            kokoro_installed, _dlg = _optional_kokoro_helpers()
             if kokoro_installed is None:
-                # Pro not loaded — shouldn't happen because the engine
+                # extension not loaded — shouldn't happen because the engine
                 # combo wouldn't even have offered 'kokoro', but degrade
                 # gracefully if the user typed it manually into config.
                 self.engine_hint.config(
-                    text="Kokoro engine requires PipPal Pro.")
+                    text="Kokoro engine is not available in this build.")
                 self.kokoro_install_btn.pack_forget()
                 self.manage_btn.pack_forget()
             elif kokoro_installed():
@@ -326,7 +325,7 @@ class SettingsWindow:
             self.manage_btn.pack(side="left", padx=(10, 0))
 
     def _install_kokoro(self) -> None:
-        _, KokoroInstallDialog = _pro_kokoro_helpers()
+        _, KokoroInstallDialog = _optional_kokoro_helpers()
         if KokoroInstallDialog is not None:
             KokoroInstallDialog(self.win, on_done=self._on_engine_change)
 

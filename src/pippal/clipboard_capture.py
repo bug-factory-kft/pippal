@@ -32,7 +32,7 @@ __all__ = ["CLIPBOARD_PROBE_TOKEN",
 
 def _config_key_for(action: str) -> str:
     """Look up the config-key for an action_id by walking the registry.
-    Returns an empty string if the action isn't registered (Free build
+    Returns an empty string if the action isn't registered (core build
     that doesn't include AI actions, or unknown action)."""
     for action_id, config_key, _label, _default in plugins.hotkey_actions():
         if action_id == action:

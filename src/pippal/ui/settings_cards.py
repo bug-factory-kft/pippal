@@ -30,15 +30,15 @@ def build_voice_card(sw: SettingsWindow, body: ttk.Frame) -> None:
     ttk.Label(erow, text="Engine", style="Card.TLabel",
               width=14, anchor="w").pack(side="left")
     # Engine combo lists every TTS backend that any plugin has
-    # registered. Free pippal registers `piper`; pippal_pro adds
+    # registered. the core registers `piper`; pippal_pro adds
     # `kokoro`. A future ElevenLabs or Edge TTS plugin would slot in
     # here without touching this card.
     available_engines = sorted(plugins.engines().keys()) or ["piper"]
     # If the saved engine isn't registered (e.g. user picked Kokoro
-    # under Pro, then dropped to Free), surface "piper" in the form
+    # with an extension that registered it, then dropped without it), surface "piper" in the form
     # rather than the unregistered name. Codex' "Unavailable action"
     # principle: don't destroy the persisted value (config.json keeps
-    # 'kokoro' so a future Pro reinstall picks it up), but don't fake
+    # 'kokoro' so a future extension reinstall picks it up), but don't fake
     # presence in the UI either.
     saved_engine = (sw.config.get("engine") or "piper").lower()
     initial_engine = saved_engine if saved_engine in available_engines else available_engines[0]
@@ -232,7 +232,7 @@ def build_about_card(sw: SettingsWindow, body: ttk.Frame) -> None:
     ).pack(anchor="w", pady=(8, 0))
 
     # Clickable links — Free/MIT users land on the public GitHub repo,
-    # the Microsoft Store paid users still see them so they have a way
+    # the Microsoft Store extension users still see them so they have a way
     # to read the licence and terms.
     link_row = ttk.Frame(card, style="Card.TFrame")
     link_row.pack(anchor="w", pady=(10, 0))
