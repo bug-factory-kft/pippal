@@ -1,8 +1,7 @@
 # Contributing to PipPal
 
 Thanks for taking a look. The codebase is small and intentionally
-boring — the goal is for a new contributor to be productive in
-about an hour.
+boring — a new contributor should be productive in about an hour.
 
 ## Quick start
 
@@ -11,47 +10,65 @@ git clone https://github.com/tigyijanos/pippal.git
 cd pippal
 .\setup.ps1                       # one-shot: piper + default voice
 python -m pip install -e ".[dev]" # editable install + dev deps
-python -m pytest -q               # 152 tests should pass
+python -m pytest -q               # 142 tests should pass
 ruff check pippal tests
 ```
 
-To run the app from a working tree:
+Run the app from a working tree:
 
 ```powershell
 pythonw reader_app.py     # how the autostart launches it
 # or
 python -m pippal          # canonical CLI form
+
+# Force a Free-only run even if pippal_pro is on the path:
+pythonw reader_app_free.py
 ```
 
 ## Layout
 
 ```
 pippal/
-├── app.py             # main() — wires everything together
-├── engine.py          # TTSEngine — orchestration and playback
-├── engines/           # PiperBackend, KokoroBackend (one file per class)
-├── ui/                # Tk widgets (one file per class)
-├── command_server.py  # localhost HTTP for the right-click client
-├── tray.py            # tray icon image factory
-├── config.py / history.py   # JSON persistence
-├── voices.py / moods.py     # catalogues + helpers
-└── text_utils.py / wav_utils.py / ollama_client.py / context_menu.py
+├── plugins.py          # registry — engines, hotkeys, cards, tray, defaults
+├── _register_free.py   # Free distribution self-registers everything
+├── app.py              # main() — composes engine, overlay, tray, hotkeys
+├── engine.py           # TTSEngine — orchestration and playback dispatch
+├── engines/            # PiperBackend + the TTSBackend ABC
+├── ui/                 # Tk widgets (one file per class), dark theme
+├── command_server.py   # localhost HTTP for the right-click client
+├── tray.py             # tray icon image factory
+├── config.py           # layered defaults + user overrides
+├── history.py          # JSON persistence for the Recent submenu
+├── voices.py           # Piper voice catalogue + helpers
+├── ollama_client.py    # tiny stdlib HTTP client (used by pippal_pro)
+└── text_utils.py / wav_utils.py / context_menu.py / paths.py / timing.py
 tests/                  # pytest, pure-logic only (UI is not unit-tested)
 ```
 
 The rule of thumb: **one class per file**, behind one clear
-responsibility. If a file gets past ~500 lines or mixes two
-concerns, split it.
+responsibility. If a file gets past ~500 lines or mixes two concerns,
+split it.
+
+`pippal_pro/` (Pro extensions — Kokoro engine, AI actions, mood
+presets, audio export) lives in a separate **private** repo. The
+public `pippal` package never imports it; the plugin host wires
+things up at runtime via registry lookups.
 
 ## Tests
 
-`pytest` only covers the pure-logic modules (text utils, WAV utils,
-voices, moods, history, config, Ollama client, engine state, tray
-theme palette). The UI is intentionally not unit-tested — Tk roots
-are brittle in headless CI. UI changes get tested by running the
-app.
+```powershell
+python -m pytest -q
+```
 
-Add a test for any new pure-logic helper.
+Pytest only covers pure-logic modules (text utils, WAV utils, voices,
+history, config, Ollama client, engine state, plugin host contract).
+The UI is intentionally not unit-tested — Tk roots are brittle in
+headless CI. UI changes get tested by running the app.
+
+Add a test for any new pure-logic helper. The plugin-host contract
+tests (`tests/test_plugin_host.py`) pin the registry shape that
+third-party plugins code against — extend them when you change the
+public registry API.
 
 ## Lint and type-check
 
@@ -67,58 +84,108 @@ the third-party stubs and intentionally left.
 
 - Subject ≤ 70 chars, imperative.
 - Body: what changed and **why**, not how.
-- One concern per commit. If the diff covers two unrelated
-  refactors, split them.
+- One concern per commit. If the diff covers two unrelated refactors,
+  split them.
 - Don't push to `main` unless CI is green.
 
 ## Architecture notes
 
 - The engine talks to UI via duck-typed `_OverlayProto` /
   `_RootProto` so it never imports Tk.
-- Backends implement `TTSBackend` ABC; `make_backend(config)` is the
-  single entry point. Adding a backend = one file under
-  `pippal/engines/` plus an entry in `factory.py`.
+- Backends implement `TTSBackend` ABC. The factory looks up the
+  requested engine by name in `pippal.plugins.engines()`; falls back
+  to whatever's registered for `"piper"` (which the Free package
+  always registers).
 - All Tk widget construction is single-class-per-file under
   `pippal/ui/`. The dark palette and `make_card` helper live in
   `ui/theme.py`.
-
-## Adding a new hotkey-driven AI action (9th and beyond)
-
-There are three places to touch — single source of truth lives in
-`pippal/config.py`:
-
-1. **`pippal/config.py`** — add a row to `HOTKEY_ACTIONS` (action_id,
-   hotkey-config-key, settings-row-label) and a default hotkey to
-   `DEFAULT_CONFIG`.
-2. **`pippal/ollama_client.py`** — add a `PROMPT_<action>` string and
-   a `num_predict` row in `AI_NUM_PREDICT`.
-3. **`pippal/engine.py`** — add a one-line `speak_<action>_async`
-   method that delegates to `ai_runner.run_ai_action(self, "<action>")`,
-   and `pippal/app.py` — wire it into `action_handlers`.
-
-`Settings` will pick the new row up automatically (it iterates
-`HOTKEY_ACTIONS`). The tray menu reads from `action_handlers`. Tests
-in `tests/test_ollama_client.py` enforce that `AI_NUM_PREDICT`
-contains the action id.
+- Config is **layered**: `core_defaults + plugin_defaults +
+  user_overrides`. Only user overrides land in `config.json`, so
+  uninstalling a plugin doesn't strand its defaults on disk.
+  Unknown keys (a Pro setting saved while Pro was installed, then Pro
+  uninstalled) are preserved verbatim — codex' "don't destroy user
+  state when a plugin is absent" principle.
 
 ## Adding a new TTS backend
 
-1. New file `pippal/engines/<name>.py` with a `class XBackend(TTSBackend)`.
-2. One row in `pippal/engines/factory.py:make_backend`.
-3. One mood preset (or more) in `pippal/moods.py` if it has voices
-   worth exposing in the tray.
-4. A short test in `tests/test_engines.py` mocking `is_available`.
+A whole new engine ships as one file plus one registration. Backends
+written for the Free repo should be MIT-compatible and shipped in
+`pippal/engines/`; proprietary engines live in their own package and
+register themselves on import.
 
-Don't forget: backends must accept a `config: dict[str, Any]` and read
-their parameters from there. Engine passes a fresh dict for translate
-voice override, so backends must not mutate `self.config`.
+```python
+# pippal/engines/example.py  (or any plugin package's __init__)
+from pippal.engines.base import TTSBackend
+
+class ExampleBackend(TTSBackend):
+    name = "example"
+
+    def is_available(self) -> bool:
+        return True
+
+    def synthesize(self, text: str, out_path) -> bool:
+        # ... write a WAV at out_path ...
+        return True
+```
+
+Then register it. The Free package does this in
+`pippal/_register_free.py`; a third-party plugin does it in its own
+`__init__.py`:
+
+```python
+from pippal import plugins
+plugins.register_engine("example", ExampleBackend)
+```
+
+The factory will dispatch by name automatically; the Settings →
+Voice card will list the new engine in the dropdown.
+
+For a quick test:
+
+```python
+# tests/test_engines.py — only if the engine ships in this repo
+from pippal.engines import make_backend
+def test_example():
+    backend = make_backend({"engine": "example"})
+    assert backend.name == "example"
+```
+
+## Adding a new hotkey-driven action
+
+Use the registry. No file needs to know your action by name except
+the one that registers it.
+
+```python
+from pippal import plugins
+
+def my_action_handler(engine, action_id):
+    # ... do something with engine.config etc. ...
+    pass
+
+plugins.register_hotkey_action(
+    "my-action",                  # action_id
+    "hotkey_my_action",           # config key persisted in config.json
+    "My Action",                  # label shown in the Hotkeys settings row
+    "windows+shift+m",            # default combo (also seeds defaults registry)
+)
+plugins.register_ai_action("my-action", my_action_handler)
+```
+
+The Settings → Hotkeys card iterates `plugins.hotkey_actions()`, the
+app's hotkey binder iterates the same list and looks the handler up
+in `plugins.ai_actions()`. No edits required to `app.py`,
+`config.py`, or `settings_cards.py`.
 
 ## What we won't take
 
-- Adding a new dependency without checking how often it's needed
-  and whether stdlib will do (we use `urllib.request` not
-  `httpx`, `winsound` not `sounddevice`, `wave` for WAV math).
-- A pretty refactor with no test coverage. Refactor + tests in the
-  same PR.
-- Auto-update / telemetry / cloud sync. PipPal is offline-first by
-  design.
+- **New dependencies** without checking how often they'd actually be
+  used and whether stdlib will do. We use `urllib.request` not
+  `httpx`, `winsound` not `sounddevice`, `wave` for WAV math.
+- **A pretty refactor with no test coverage.** Refactor + tests in
+  the same PR.
+- **Auto-update / telemetry / cloud sync.** PipPal is offline-first
+  by design.
+- **Pro-feature ports** (Kokoro, AI, mood presets, audio export).
+  Those are proprietary and ship in `pippal_pro`. If you'd like to
+  contribute a similar feature, build it as a separate plugin package
+  using the API documented above.

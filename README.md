@@ -8,37 +8,58 @@
 
 ---
 
-A tray-resident Windows app that reads any selected text aloud with
-a local neural TTS. Press `Ctrl+Shift+X` in **any** program (browser,
-PDF reader, Word, terminal — anywhere) and a clean floating panel shows
+A tray-resident Windows app that reads any selected text aloud with a
+local neural TTS. Press a hotkey in **any** program (browser, PDF
+reader, Word, terminal — anywhere) and a clean floating panel shows
 the sentence with a karaoke-style highlight that follows the voice.
 
-No cloud. No API keys. No telemetry. The text never leaves your machine.
+**No cloud. No API keys. No telemetry.** The text never leaves your
+machine.
 
 ---
 
 ## Features
 
-- 🔊 Reads selected text from any application via a global hotkey.
-- 🎙 Local neural TTS via [Piper](https://github.com/rhasspy/piper)
-  (`en_US-ryan-high` by default; a built-in Voice Manager downloads
-  more voices from the Piper voices catalogue).
+- 🔊 Reads any selected text via a global hotkey, layout-independent.
+- 🎙 Local neural TTS via [Piper](https://github.com/rhasspy/piper).
+  60+ curated voices across 8 languages installable from the built-in
+  Voice Manager.
 - 📺 Floating reader panel: the sentence sits still, only a thin mint
   underline slides under the spoken word; surrounding words gently fade
   in and out as the cursor passes.
-- ⚙ Settings window with voice, speed, variation, hotkeys, and reader-
-  panel options. Dark, card-based design.
-- 🚀 Background process. Autostarts on login. Tiny tray icon.
+- ⚙ Dark, card-based Settings — voice, speed, variation, hotkeys,
+  reader-panel options, Windows context-menu integration.
+- 🚀 Tray icon, autostart on login, single tiny process.
+- 🔌 **Plugin host** — `pippal.plugins` lets a separate package register
+  engines, settings cards, hotkey actions, tray items and config
+  defaults without touching the core. The paid build adds Kokoro, AI
+  actions and mood presets through this same API.
 
-## Installation (Windows)
+## Free build vs. paid build
 
-Requires Python 3.11+ on `PATH` (or `pythonw` from Python's install).
+| | Free (this repo) | Paid (Microsoft Store) |
+|---|---|---|
+| Source | MIT, [public](https://github.com/tigyijanos/pippal) | Bundles [`pippal_pro`](#what-the-paid-build-adds) |
+| Engine | Piper | Piper + Kokoro |
+| Hotkeys | Read / Queue / Pause / Stop | + Summary / Explain / Translate / Define |
+| AI | — | Local Ollama (offline LLM) |
+| Tray menu | Recent / Settings / Quit | + Mood presets |
+| Settings cards | Voice / Speech / Hotkeys / Panel / Integration / About | + AI / Ollama |
+| Audio export | — | Save selection as WAV |
+
+The paid build is the same binary plus one extra Python package — see
+[the plugin host architecture](#how-the-plugin-host-works) below.
+
+## Install (Windows, build from source)
+
+Requires Python 3.11+ on `PATH` (or `pythonw` from the standard
+install).
 
 ```powershell
-git clone https://github.com/<you>/pippal.git
+git clone https://github.com/tigyijanos/pippal.git
 cd pippal
 .\setup.ps1                       # downloads Piper + default voice + pip deps
-pythonw reader_app.py             # run once to confirm; tray icon appears
+pythonw reader_app.py             # tray icon appears
 ```
 
 To start automatically on login, copy `start_server.vbs` to your
@@ -48,48 +69,87 @@ Startup folder:
 copy start_server.vbs "$env:APPDATA\Microsoft\Windows\Start Menu\Programs\Startup\PipPal.vbs"
 ```
 
+`reader_app.py` works whether or not `pippal_pro` is installed — without
+it you get the Free feature set; with it (paid users) Pro features
+appear.
+
 ## Usage
 
 | Action | Default hotkey |
 |---|---|
-| Read the currently selected text | `Ctrl+Shift+X` |
-| Stop reading | `Ctrl+Shift+Z` |
+| Read the currently selected text | `Win+Shift+R` |
+| Queue selection (append while reading) | `Win+Shift+Q` |
+| Pause / Resume | `Win+Shift+P` |
+| Stop reading | `Win+Shift+B` |
 
-Right-click the tray icon for **Settings…** (voice, speed, hotkeys,
-panel options, voice manager).
+All combos are reassignable in Settings → Hotkeys. They use the
+Windows-key prefix on purpose: browser shortcuts (Ctrl+Shift+T,
+Ctrl+Shift+Q, etc.) and AltGr accented characters never collide with
+Win-key combos.
 
-## How it works
+Right-click the tray icon for **Settings…**, **Recent** (replay the
+last 10 readings), and **Quit**.
+
+## How the plugin host works
+
+`pippal/plugins.py` exposes registries for engines, hotkey actions,
+settings cards, tray items, AI handlers and config defaults. The Free
+package self-registers Piper + four selection-driven hotkeys + six
+settings cards in `pippal/_register_free.py`. A sibling proprietary
+package (`pippal_pro`, distributed only with the paid build) adds:
+
+- Kokoro engine
+- Four AI actions (Summary / Explain / Translate / Define) over local
+  Ollama
+- Mood preset tray submenu
+- AI / Ollama settings card
+- Audio export
+
+Discovery is presence-based: `pippal/__init__.py` does
+`importlib.util.find_spec("pippal_pro")` then imports it if found.
+There is no licence/entitlement check in the source — Microsoft Store
+delivers a signed MSIX bundling both packages to paid users.
+
+A third-party plugin (e.g. `pippal-elevenlabs`, `pippal-edge-tts`)
+could ship today by registering its engine + voice provider through
+the same API. The contract is pinned by `tests/test_plugin_host.py`.
+
+## How a read happens
 
 1. Hotkey fires → app sends `Ctrl+C` to the focused app to copy the
    selection, reads the clipboard, restores the previous clipboard.
+   Modifier keys for the configured combo are released first so a
+   held-down shortcut doesn't garble the copy.
 2. Text is split into sentences. The first sentence is synthesised
    immediately; subsequent ones run in parallel with playback.
 3. Each chunk's WAV is played via `winsound`. Word timings inside the
-   chunk are estimated from the audio duration so the karaoke
-   underline tracks the voice (Tier 1 of [ROADMAP.md](ROADMAP.md) will
-   replace this with real per-word timestamps).
-4. The reader panel is a frameless tk Toplevel that uses a transparent
+   chunk are estimated from the audio duration plus a syllable-weighted
+   model with punctuation pause bonuses.
+4. The reader panel is a frameless `tk.Toplevel` that uses a transparent
    colour key for soft rounded corners.
-
-See [ROADMAP.md](ROADMAP.md) for what's coming.
 
 ## Stack
 
-- Python (single-file app — `reader_app.py`)
-- `pystray` + Pillow — tray icon
-- `keyboard` — global hotkeys
-- `pyperclip` — clipboard
-- `tkinter` — reader panel and settings UI
-- `winsound` — playback (Windows-only stdlib)
-- [Piper](https://github.com/rhasspy/piper) — TTS engine
+- **Python** stdlib for everything that isn't UI or audio:
+  `urllib.request`, `wave`, `winsound`, `subprocess`, `threading`,
+  `importlib`. No `httpx`, no `sounddevice`.
+- **`pystray` + `Pillow`** — tray icon
+- **`keyboard`** — global hotkeys with `suppress=True`
+- **`pyperclip`** — clipboard
+- **`tkinter`** — reader panel and settings UI (dark, card-based ttk theme)
+- [**Piper**](https://github.com/rhasspy/piper) — TTS engine, called as a subprocess
 
 ## Status
 
-Early. Working day-to-day. See ROADMAP for known gaps and planned work.
+**v0.2.0 — public release.** 142 tests, ruff clean. End-to-end smoke
+test of the live app on Windows 11: green. See
+[CODEREVIEW.md](CODEREVIEW.md) for the multi-reviewer audit (codex CLI
++ independent Claude agent + ruff + mypy) that closed every HIGH and
+MEDIUM finding before this release.
 
 ## Licence
 
 PipPal source is **MIT-licensed** — see [LICENSE](LICENSE).
 Third-party dependencies and downloaded run-time artefacts (Piper,
-voice models, Kokoro) are listed with their respective licences in
+voice models) are listed with their respective licences in
 [THIRD_PARTY.md](THIRD_PARTY.md).
