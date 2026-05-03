@@ -55,6 +55,14 @@ class SettingsWindow:
         self.on_engine_change = on_engine_change
         self.win: tk.Toplevel | None = None
         self.vars: dict[str, tk.Variable] = {}
+        # Remember last window position so the user reopens it where
+        # they left it. None on first open → screen-centre fallback.
+        self._last_position: tuple[int, int] | None = None
+        # PhotoImage for the title-bar icon. Has to outlive the window
+        # so Tk doesn't garbage-collect the bitmap mid-render.
+        self._title_icon_photo: Any = None
+        # Wheel handler reference so the post-build pass can reuse it.
+        self._wheel_handler: Callable[[tk.Event], str] | None = None
 
     # ------------------------------------------------------------------
     # Open / close
@@ -69,10 +77,27 @@ class SettingsWindow:
         w = tk.Toplevel(self.root)
         self.win = w
         w.title(self.config.get("brand_name", "PipPal"))
-        w.geometry("600x700")
+        # Compute initial geometry: last-known position, otherwise
+        # centre on the screen the root window is on.
+        win_w, win_h = 600, 700
+        if self._last_position is not None:
+            x, y = self._last_position
+        else:
+            sw = w.winfo_screenwidth()
+            sh = w.winfo_screenheight()
+            x = max(0, (sw - win_w) // 2)
+            y = max(0, (sh - win_h) // 2)
+        w.geometry(f"{win_w}x{win_h}+{x}+{y}")
         w.minsize(560, 600)
-
+        # Native Windows title bar stays — `apply_dark_theme` asks DWM
+        # to render it in dark mode + paint our caption colour on
+        # Win 11 22H2+. Older Windows shows the default light strip;
+        # acceptable trade-off for keeping the title bar's drag/snap/
+        # taskbar/Alt+Tab/system-menu behaviour all working natively.
         apply_dark_theme(w)
+        # Esc still closes — convenient even with a native title bar.
+        w.bind("<Escape>", lambda _e: self._close())
+
         self._build_header(w)
         body = self._build_scrollable_body(w)
         # Cards are registered into the plugin host (pippal.plugins) by
@@ -83,12 +108,21 @@ class SettingsWindow:
         # tie-breaker).
         for builder in plugins.settings_cards():
             builder(self, body)
+        # All cards are now in. Walk the tree once and bind
+        # `<MouseWheel>` on each widget so the user can scroll from
+        # any spot in the form, not just on the scrollbar.
+        self._bind_wheel_recursive(body)
         self._build_footer(w)
 
         w.protocol("WM_DELETE_WINDOW", self._close)
 
     def _close(self) -> None:
         if self.win is not None:
+            try:
+                # Snapshot position so the next open lands here.
+                self._last_position = (self.win.winfo_x(), self.win.winfo_y())
+            except Exception:
+                pass
             try:
                 self.win.destroy()
             except Exception:
@@ -103,13 +137,36 @@ class SettingsWindow:
         brand = self.config.get("brand_name", "PipPal")
         header = ttk.Frame(w, style="Header.TFrame", padding=(24, 18, 24, 14))
         header.pack(fill="x")
+
         title_row = ttk.Frame(header, style="Header.TFrame")
-        title_row.pack(fill="x")
-        dot = tk.Canvas(title_row, width=14, height=14, bg=UI["bg"], highlightthickness=0)
-        dot.create_oval(2, 2, 12, 12, fill=UI["accent"], outline="")
-        dot.pack(side="left", padx=(0, 10))
+        title_row.pack(side="left", fill="x", expand=True)
+
+        # PipPal logo in the custom title bar — same asset as the
+        # tray, downscaled to ~22 px for the header. We hold the
+        # PhotoImage on `self` so Tk doesn't GC it under the window.
+        try:
+            from PIL import Image, ImageTk
+
+            from ..tray import _load_and_fit_icon
+            _lanczos = getattr(Image, "Resampling", Image).LANCZOS
+            icon_64 = _load_and_fit_icon()
+            icon_22 = icon_64.resize((22, 22), _lanczos)
+            self._title_icon_photo = ImageTk.PhotoImage(icon_22)
+            tk.Label(
+                title_row, image=self._title_icon_photo,
+                bg=UI["bg"], borderwidth=0,
+            ).pack(side="left", padx=(0, 10))
+        except Exception:
+            # Fallback: the previous accent-coloured dot, in case the
+            # asset / Pillow ImageTk is unavailable for any reason.
+            dot = tk.Canvas(title_row, width=14, height=14,
+                            bg=UI["bg"], highlightthickness=0)
+            dot.create_oval(2, 2, 12, 12, fill=UI["accent"], outline="")
+            dot.pack(side="left", padx=(0, 10))
         ttk.Label(title_row, text=brand, style="Title.TLabel").pack(side="left")
-        ttk.Label(header, text="Settings", style="Sub.TLabel").pack(anchor="w", pady=(2, 0))
+        ttk.Label(
+            header, text="Settings", style="Sub.TLabel",
+        ).pack(anchor="w", pady=(2, 0))
 
     def _build_scrollable_body(self, w: tk.Toplevel) -> ttk.Frame:
         body_outer = ttk.Frame(w, style="TFrame")
@@ -130,12 +187,36 @@ class SettingsWindow:
         canvas.bind("<Configure>", _resize)
         body.bind("<Configure>",
                   lambda _e: canvas.configure(scrollregion=canvas.bbox("all")))
-        # Bind to the canvas itself, NOT bind_all — `bind_all` registers
-        # a global handler that survives the window and hijacks scroll
-        # for the rest of the app.
-        canvas.bind("<MouseWheel>",
-                    lambda e: canvas.yview_scroll(int(-e.delta / 120), "units"))
+
+        # Mouse-wheel scrolling everywhere inside the body, not just
+        # over the canvas. Bind on the *window* with `bind` (not
+        # `bind_all` — that hijacks scroll across the whole app).
+        # `<MouseWheel>` doesn't propagate up by default, so we also
+        # walk every child and re-bind. Children added later (the
+        # cards built by plugin builders) get bound by a tail call
+        # in `open()` once they're all in.
+        def _on_wheel(e: tk.Event) -> str:
+            canvas.yview_scroll(int(-e.delta / 120), "units")
+            return "break"
+
+        self._wheel_handler = _on_wheel  # cached for plugin-card pass
+        w.bind("<MouseWheel>", _on_wheel)
+        canvas.bind("<MouseWheel>", _on_wheel)
+        body.bind("<MouseWheel>", _on_wheel)
         return body
+
+    def _bind_wheel_recursive(self, widget: tk.Misc) -> None:
+        """Re-bind `<MouseWheel>` on every descendant so the body
+        scrolls regardless of which widget the cursor is over.
+        Called once after the plugin settings cards are built."""
+        if self._wheel_handler is None:
+            return
+        for child in widget.winfo_children():
+            try:
+                child.bind("<MouseWheel>", self._wheel_handler)
+            except Exception:
+                pass
+            self._bind_wheel_recursive(child)
 
     def _build_footer(self, w: tk.Toplevel) -> None:
         footer = ttk.Frame(w, style="Header.TFrame", padding=(24, 12, 24, 16))

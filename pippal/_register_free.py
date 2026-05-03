@@ -47,6 +47,9 @@ def _settings_tray_builder(ctx: Any) -> list:
         pystray.MenuItem(
             "Settings…",
             lambda _i, _it: ctx.root.after(0, ctx.settings.open),
+            # Left-click (single-click) on the tray icon fires the
+            # default item — Settings is the most useful target.
+            default=True,
         ),
     ]
 

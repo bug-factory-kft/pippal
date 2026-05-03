@@ -200,12 +200,22 @@ def paint_header(o: _OverlayLike) -> None:
         dot, r = "#5a5e74", 3.5
 
     y = 20
-    c.create_oval(o.PADDING_X - r, y - r, o.PADDING_X + r, y + r,
+
+    # Brand logo on the far left (when available). The state dot and
+    # text shift right to make room. Falls back to the dot-only
+    # layout if the asset failed to load.
+    logo_photo = getattr(o, "logo_photo", None)
+    if logo_photo is not None:
+        c.create_image(o.PADDING_X, y, anchor="w", image=logo_photo)
+        dot_x = o.PADDING_X + 26  # 18 px logo + 8 px gap
+    else:
+        dot_x = o.PADDING_X
+    c.create_oval(dot_x - r, y - r, dot_x + r, y + r,
                   fill=dot, outline="")
 
     brand = o.config.get("brand_name", "PipPal")
     label = f"{brand}  ·  {o.action_label}" if o.action_label else brand
-    c.create_text(o.PADDING_X + 12, y, anchor="w", text=label,
+    c.create_text(dot_x + 12, y, anchor="w", text=label,
                   fill="#7d8398", font=o.font_status)
 
     bx = o.WIDTH - 25

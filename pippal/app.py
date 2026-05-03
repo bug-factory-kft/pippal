@@ -25,6 +25,48 @@ from .timing import TRAY_POLL_MS
 from .tray import make_tray_icon
 from .ui import Overlay, SettingsWindow
 
+# Keep a hard reference to the Tk PhotoImage so the GC doesn't collect
+# it out from under the title bars. tk.PhotoImage objects have to
+# outlive the window that uses them.
+_ICON_PHOTO_REF: Any = None
+
+
+def _set_app_user_model_id() -> None:
+    """Tell Windows to group our windows under our own taskbar entry,
+    not under pythonw.exe. Without this, the Settings window's task-
+    bar slot shows the generic Python icon instead of the PipPal
+    one. Must run BEFORE any Tk window is created — Windows reads
+    the AppUserModelID at window creation time."""
+    try:
+        import ctypes
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(
+            "tigyijanos.PipPal.0"
+        )
+    except Exception as e:
+        print(f"[icon] could not set AppUserModelID: {e}", file=sys.stderr)
+
+
+def _set_window_icon(root: tk.Tk) -> None:
+    """Set the title-bar icon for the Tk root (and, with default=True,
+    every Toplevel that follows). PipPal uses the same PNG asset that
+    the tray icon does — bbox-cropped and padded to a square so the
+    title bar shows the character filling the cell, not floating in
+    transparent margins."""
+    global _ICON_PHOTO_REF
+    try:
+        from .paths import ASSET_ICON_PATH
+        from .tray import _load_and_fit_icon
+        if not ASSET_ICON_PATH.exists():
+            return
+        # 64×64 already cropped + squared by the tray helper. Reuse so
+        # the title bar matches the system tray exactly.
+        from PIL import ImageTk  # type: ignore[import-untyped]
+        photo = ImageTk.PhotoImage(_load_and_fit_icon())
+        _ICON_PHOTO_REF = photo  # keep alive
+        root.iconphoto(True, photo)
+    except Exception as e:
+        print(f"[icon] could not set Tk window icon: {e}", file=sys.stderr)
+
 
 def _build_history_submenu(engine: TTSEngine,
                             on_clear: Callable[[Any, Any], None]) -> Callable[[], list[pystray.MenuItem]]:
@@ -70,8 +112,10 @@ def main() -> None:
         )
         sys.exit(1)
 
+    _set_app_user_model_id()  # must run BEFORE the first Tk window
     root = tk.Tk()
     root.withdraw()
+    _set_window_icon(root)
 
     # Overlay needs the engine for its player buttons; engine needs the
     # overlay to drive the panel. We hold an overlay reference inside a

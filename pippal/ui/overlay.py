@@ -96,6 +96,23 @@ class Overlay:
         self.font_status = tkfont.Font(family="Segoe UI", size=10)
         self.font_close = tkfont.Font(family="Segoe UI", size=12)
 
+        # Brand logo for the panel header — small (18×18) PIL → Tk
+        # PhotoImage. We hold the reference on the Overlay so Tk
+        # doesn't garbage-collect the bitmap while the canvas still
+        # references it. None on platforms / installs where the load
+        # fails; paint_header falls back to the state-dot only.
+        self.logo_photo: Any = None
+        try:
+            from PIL import Image, ImageTk
+
+            from ..tray import _load_and_fit_icon
+            _lanczos = getattr(Image, "Resampling", Image).LANCZOS
+            self.logo_photo = ImageTk.PhotoImage(
+                _load_and_fit_icon().resize((18, 18), _lanczos),
+            )
+        except Exception:
+            pass
+
         self.state: str = "idle"   # idle / thinking / reading / done
         self.message: str = ""
         self.phase: int = 0

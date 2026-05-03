@@ -28,11 +28,7 @@ def make_tray_icon(speaking: bool) -> Image.Image:
 
     if ASSET_ICON_PATH.exists():
         try:
-            base = (
-                Image.open(ASSET_ICON_PATH)
-                .convert("RGBA")
-                .resize((64, 64), _LANCZOS)
-            )
+            base = _load_and_fit_icon()
             if speaking:
                 d = ImageDraw.Draw(base)
                 d.ellipse(
@@ -49,6 +45,31 @@ def make_tray_icon(speaking: bool) -> Image.Image:
     img = _draw_fallback_icon(speaking)
     _icon_cache[cache_key] = img
     return img
+
+
+_ICON_OVERSCALE = 1.20  # >1 = character fills more of the 64×64 cell
+
+
+def _load_and_fit_icon() -> Image.Image:
+    """Crop the asset to its non-transparent content (so generous
+    print-margins don't shrink the visible character), scale so the
+    longer dimension is `64 * _ICON_OVERSCALE`, and paste centred
+    onto a 64×64 transparent canvas. The overscale lets the character
+    occupy more of the cell; only the empty alpha around the bbox
+    gets clipped."""
+    img = Image.open(ASSET_ICON_PATH).convert("RGBA")
+    bbox = img.getbbox()
+    if bbox is not None:
+        img = img.crop(bbox)
+    w, h = img.size
+    target_long = int(64 * _ICON_OVERSCALE)
+    scale = target_long / max(w, h)
+    new_w = max(1, round(w * scale))
+    new_h = max(1, round(h * scale))
+    img = img.resize((new_w, new_h), _LANCZOS)
+    canvas = Image.new("RGBA", (64, 64), (0, 0, 0, 0))
+    canvas.paste(img, ((64 - new_w) // 2, (64 - new_h) // 2), img)
+    return canvas
 
 
 def _draw_fallback_icon(speaking: bool) -> Image.Image:

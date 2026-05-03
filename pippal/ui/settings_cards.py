@@ -211,7 +211,10 @@ def build_integration_card(sw: SettingsWindow, body: ttk.Frame) -> None:
 
 
 def build_about_card(sw: SettingsWindow, body: ttk.Frame) -> None:
+    import webbrowser
+
     from .. import __version__
+    from .theme import UI
     brand = sw.config.get("brand_name", "PipPal")
     outer, card = make_card(body, "About")
     outer.pack(fill="x", pady=(0, 16))
@@ -227,3 +230,27 @@ def build_about_card(sw: SettingsWindow, body: ttk.Frame) -> None:
         card, text="© 2026 tigyijanos  ·  Offline-first by design.",
         style="CardHint.TLabel",
     ).pack(anchor="w", pady=(8, 0))
+
+    # Clickable links — Free/MIT users land on the public GitHub repo,
+    # the Microsoft Store paid users still see them so they have a way
+    # to read the licence and terms.
+    link_row = ttk.Frame(card, style="Card.TFrame")
+    link_row.pack(anchor="w", pady=(10, 0))
+
+    def _link(parent: ttk.Frame, text: str, url: str) -> None:
+        lbl = tk.Label(
+            parent, text=text, bg=UI["bg_card"], fg=UI["accent"],
+            cursor="hand2", font=("Segoe UI", 9, "underline"),
+            borderwidth=0, padx=0, pady=0,
+        )
+        lbl.pack(side="left", padx=(0, 16))
+        lbl.bind("<Button-1>", lambda _e: webbrowser.open(url))
+
+    _link(link_row, "GitHub",
+          "https://github.com/tigyijanos/pippal")
+    _link(link_row, "Licence (MIT)",
+          "https://github.com/tigyijanos/pippal/blob/main/LICENSE")
+    _link(link_row, "Privacy",
+          "https://github.com/tigyijanos/pippal/blob/main/PRIVACY.md")
+    _link(link_row, "Terms",
+          "https://github.com/tigyijanos/pippal/blob/main/TERMS.md")
