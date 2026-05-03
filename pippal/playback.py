@@ -1,0 +1,350 @@
+"""Sentence-by-sentence playback loop.
+
+Drives one chunk at a time: synthesise, play, watch for seek/pause/
+cancel, advance. Uses `winsound` for audio and reports state via the
+overlay attached to the engine.
+
+Lives outside `pippal.engine` so the engine module stays focused on
+public-API + state ownership; the loop machinery is verbose enough to
+deserve its own file."""
+
+from __future__ import annotations
+
+import threading
+import time
+import winsound
+from dataclasses import dataclass, field
+from enum import Enum
+from pathlib import Path
+from typing import TYPE_CHECKING
+
+from .config import DEFAULT_CONFIG
+from .engines.base import TTSBackend
+from .paths import TEMP_DIR
+from .text_utils import split_sentences
+from .timing import (
+    CHUNK_DEADLINE_PAD_S,
+    PAUSE_POLL_S,
+    PLAYBACK_POLL_S,
+    PREFETCH_DRAIN_S,
+)
+from .wav_utils import safe_unlink, wav_duration
+
+if TYPE_CHECKING:  # pragma: no cover
+    from .engine import TTSEngine
+
+
+class WaitResult(Enum):
+    """Outcome of waiting for one chunk's playback."""
+    COMPLETED = "completed"   # natural end of chunk
+    SEEKED = "seeked"         # user requested prev/next/replay
+    CANCELLED = "cancelled"   # stop() bumped the token
+
+
+@dataclass(slots=True)
+class PlaybackSession:
+    """One run of `play_one` — owns the per-call state so the playback
+    loop can pass it around instead of dragging seven parameters."""
+    chunks: list[str]
+    chunk_paths: list[Path]
+    backend: TTSBackend | None = None
+    prefetch_threads: dict[int, threading.Thread] = field(default_factory=dict)
+
+
+# ---------------------------------------------------------------------------
+# Top-level flows
+# ---------------------------------------------------------------------------
+
+def synthesize_and_play(
+    engine: TTSEngine,
+    text: str,
+    my_token: int,
+    backend: TTSBackend | None = None,
+) -> None:
+    """Play `text`, then drain `engine._queue`. Tokens guard cancellation."""
+    play_one(engine, text, my_token, backend=backend)
+    while True:
+        with engine.lock:
+            if my_token != engine.token:
+                return
+            if not engine._queue:
+                engine.is_speaking = False
+                break
+            next_text = engine._queue.pop(0)
+        engine._remember(next_text)
+        play_one(engine, next_text, my_token, backend=backend)
+    ov = engine._overlay()
+    if ov is not None:
+        ov.set_state("done")
+
+
+def play_one(
+    engine: TTSEngine,
+    text: str,
+    my_token: int,
+    backend: TTSBackend | None = None,
+) -> None:
+    """Drive the per-text playback loop. Returns when the text has
+    finished playing, the user cancelled, or synthesis failed."""
+    chunks = split_sentences(text)
+    if not chunks:
+        return
+
+    # Pin a single backend for the whole text. Without this, a mid-text
+    # mood change (apply_mood -> reset_backend) would cause the next
+    # chunk to use a fresh backend with a new voice, swapping the
+    # speaker mid-paragraph. Translate already passes its own one-off
+    # backend, so respect that.
+    if backend is None:
+        backend = engine._get_backend()
+
+    session = PlaybackSession(
+        chunks=chunks,
+        chunk_paths=[TEMP_DIR / f"out_{my_token}_{i}.wav"
+                      for i in range(len(chunks))],
+        backend=backend,
+    )
+
+    if not _prepare_first_chunk(engine, session, my_token):
+        return
+
+    idx = 0
+    while idx < len(session.chunks):
+        if engine._is_cancelled(my_token):
+            _cancel_exit(session)
+            return
+
+        with engine.lock:
+            engine._chunk_idx = idx
+            engine._skip_to = None
+
+        if not _ensure_chunk_ready(engine, session, idx):
+            idx += 1
+            continue
+        if engine._is_cancelled(my_token):
+            _cancel_exit(session)
+            return
+
+        _kick_prefetch(engine, session, idx + 1)
+        next_idx = _play_chunk(engine, session, idx, my_token)
+        if next_idx is None:
+            return  # cancelled — _play_chunk already cleaned up
+        idx = next_idx
+
+    with engine.lock:
+        if my_token == engine.token:
+            engine._chunks = []
+            engine._chunk_paths = []
+    _cancel_exit(session)
+
+
+# ---------------------------------------------------------------------------
+# Per-chunk helpers
+# ---------------------------------------------------------------------------
+
+def _prepare_first_chunk(
+    engine: TTSEngine,
+    session: PlaybackSession,
+    my_token: int,
+) -> bool:
+    """Synth the first chunk synchronously so playback starts fast.
+    Publishes session state under engine.lock for the mini-player."""
+    if not engine._synthesize(session.chunks[0], session.chunk_paths[0],
+                              backend=session.backend):
+        ov = engine._overlay()
+        if ov is not None:
+            ov.show_message("Synthesis failed")
+        return False
+    if engine._is_cancelled(my_token):
+        safe_unlink(session.chunk_paths[0])
+        return False
+    with engine.lock:
+        engine._chunks = session.chunks
+        engine._chunk_paths = session.chunk_paths
+        engine._chunk_idx = 0
+        engine._skip_to = None
+    return True
+
+
+def _ensure_chunk_ready(
+    engine: TTSEngine,
+    session: PlaybackSession,
+    idx: int,
+) -> bool:
+    """Block until session.chunk_paths[idx] is a usable WAV. Waits on
+    any in-flight prefetch first to avoid two writers racing on the
+    same file. Returns False if synth failed or a prefetch is still
+    alive after the timeout (refusing to race on the same path)."""
+    wav_path = session.chunk_paths[idx]
+    existing = session.prefetch_threads.get(idx)
+    if existing is not None and existing.is_alive():
+        existing.join(timeout=20)
+        if existing.is_alive():
+            # Prefetch is still writing. Don't start a second writer on
+            # the same wav_path — a hung synth here means the user gets
+            # a "skipped" chunk, which is better than a corrupt one.
+            # Leave the handle in the dict so a later seek-back to this
+            # idx will re-join the same writer instead of orphaning it.
+            return False
+    # Join finished (or there was no prefetch) — drop the dead handle.
+    session.prefetch_threads.pop(idx, None)
+    if not wav_path.exists() or wav_path.stat().st_size == 0:
+        if not engine._synthesize(session.chunks[idx], wav_path,
+                                   backend=session.backend):
+            safe_unlink(wav_path)
+            return False
+    return True
+
+
+def _kick_prefetch(
+    engine: TTSEngine,
+    session: PlaybackSession,
+    target_idx: int,
+) -> None:
+    """Start synthesising chunk `target_idx` in the background if nobody
+    else already is."""
+    if target_idx >= len(session.chunks):
+        return
+    p = session.chunk_paths[target_idx]
+    if p.exists() and p.stat().st_size > 0:
+        return
+    existing = session.prefetch_threads.get(target_idx)
+    if existing is not None and existing.is_alive():
+        return
+    t = threading.Thread(
+        target=engine._synthesize,
+        args=(session.chunks[target_idx], p, session.backend),
+        daemon=True,
+    )
+    t.start()
+    session.prefetch_threads[target_idx] = t
+
+
+def _play_chunk(
+    engine: TTSEngine,
+    session: PlaybackSession,
+    idx: int,
+    my_token: int,
+) -> int | None:
+    """Play `session.chunks[idx]` and wait for completion. Returns the
+    next idx to play, or None if cancelled."""
+    chunks = session.chunks
+    wav_path = session.chunk_paths[idx]
+    dur = wav_duration(wav_path)
+    try:
+        winsound.PlaySound(
+            str(wav_path),
+            winsound.SND_FILENAME | winsound.SND_ASYNC,
+        )
+    except Exception:
+        safe_unlink(wav_path)
+        return idx + 1
+
+    ov = engine._overlay()
+    if ov is not None:
+        if idx == 0:
+            ov.set_state("reading")
+        offset = _karaoke_offset_s(engine)
+        ov.start_chunk(chunks[idx], dur, idx, len(chunks), offset_s=offset)
+
+    result = _wait_for_chunk_end(
+        engine, my_token, dur, wav_path, chunks, idx,
+    )
+    if result is WaitResult.CANCELLED:
+        _cancel_exit(session)
+        return None
+    if result is WaitResult.SEEKED:
+        try:
+            winsound.PlaySound(None, winsound.SND_PURGE)
+        except Exception:
+            pass
+        with engine.lock:
+            target = engine._skip_to
+            engine._skip_to = None
+        if target is not None:
+            return max(0, min(len(chunks) - 1, target))
+
+    safe_unlink(wav_path)
+    return idx + 1
+
+
+def _wait_for_chunk_end(
+    engine: TTSEngine,
+    my_token: int,
+    dur: float,
+    wav_path: Path,
+    chunks: list[str],
+    idx: int,
+) -> WaitResult:
+    """Block until the chunk finishes, the user seeks, or playback is
+    cancelled. Cleanup of files and prefetch threads happens at the
+    `_play_chunk` cancel branch via `_cancel_exit`."""
+    deadline = time.time() + dur + CHUNK_DEADLINE_PAD_S
+    ov = engine._overlay()
+    while time.time() < deadline:
+        if engine._is_cancelled(my_token):
+            try:
+                winsound.PlaySound(None, winsound.SND_PURGE)
+            except Exception:
+                pass
+            return WaitResult.CANCELLED
+        with engine.lock:
+            if engine._skip_to is not None:
+                return WaitResult.SEEKED
+            paused = engine._is_paused
+        if paused:
+            # Hold; pause_toggle silenced audio and froze the overlay.
+            while True:
+                if engine._is_cancelled(my_token):
+                    return WaitResult.CANCELLED
+                with engine.lock:
+                    if not engine._is_paused or engine._skip_to is not None:
+                        break
+                time.sleep(PAUSE_POLL_S)
+            # If the user pressed prev/next while paused, hand the seek
+            # back WITHOUT restarting playback.
+            with engine.lock:
+                if engine._skip_to is not None:
+                    return WaitResult.SEEKED
+            # Resumed: replay current chunk from the start.
+            try:
+                winsound.PlaySound(
+                    str(wav_path),
+                    winsound.SND_FILENAME | winsound.SND_ASYNC,
+                )
+            except Exception:
+                return WaitResult.COMPLETED
+            if ov is not None:
+                offset = _karaoke_offset_s(engine)
+                ov.start_chunk(chunks[idx], dur, idx, len(chunks),
+                               offset_s=offset)
+            deadline = time.time() + dur + CHUNK_DEADLINE_PAD_S
+            continue
+        time.sleep(PLAYBACK_POLL_S)
+    return WaitResult.COMPLETED
+
+
+def _karaoke_offset_s(engine: TTSEngine) -> float:
+    """How far the karaoke timer is shifted into the future to compensate
+    for winsound startup latency."""
+    return float(
+        engine.config.get("karaoke_offset_ms",
+                          DEFAULT_CONFIG["karaoke_offset_ms"]),
+    ) / 1000.0
+
+
+def _cleanup_chunk_paths(paths: list[Path]) -> None:
+    for p in paths:
+        safe_unlink(p)
+
+
+def _cancel_exit(session: PlaybackSession) -> None:
+    """Drain any in-flight prefetch threads (best-effort, short timeout)
+    before unlinking chunk files. Without the drain, a running prefetch
+    could write a wav to TEMP_DIR after we've already cleaned up,
+    leaving an orphan until the next process restart."""
+    for t in list(session.prefetch_threads.values()):
+        if t.is_alive():
+            t.join(timeout=PREFETCH_DRAIN_S)
+    session.prefetch_threads.clear()
+    _cleanup_chunk_paths(session.chunk_paths)

@@ -1,0 +1,71 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pippal"
+version = "0.2.0"
+description = "Your little offline reading buddy — Windows tray TTS reader"
+readme = "README.md"
+requires-python = ">=3.11"
+authors = [{ name = "tigyijanos" }]
+license = { text = "MIT" }
+license-files = ["LICENSE"]
+dependencies = [
+    "keyboard",
+    "pyperclip",
+    "pystray",
+    "Pillow",
+]
+
+[project.optional-dependencies]
+kokoro = ["kokoro-onnx", "soundfile"]
+dev = ["pytest>=7", "ruff>=0.5", "mypy>=1.8"]
+
+[project.scripts]
+pippal = "pippal.app:main"
+pippal-open = "pippal_open:main"
+
+[project.urls]
+Homepage = "https://github.com/tigyijanos/pippal"
+
+[tool.setuptools]
+packages = ["pippal", "pippal.engines", "pippal.ui"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = [
+    "E",     # pycodestyle errors
+    "F",     # pyflakes
+    "W",     # pycodestyle warnings
+    "I",     # isort
+    "B",     # flake8-bugbear
+    "UP",    # pyupgrade
+    "RUF",   # ruff-specific
+]
+ignore = [
+    "E501",   # line length — soft cap; let formatter decide
+    "E701",   # only flag inline statements when they hide a bug
+    "B008",   # function-call in default argument (we use this for `path: Path = CONFIG_PATH` paths)
+    "B905",   # zip without strict — Python 3.10+ default is fine here
+    "RUF001", # ambiguous unicode in strings (×, –, — are intentional)
+    "RUF002", # ambiguous unicode in docstrings (×, ·, etc.)
+    "RUF003", # ambiguous unicode in comments
+]
+
+[tool.mypy]
+python_version = "3.11"
+ignore_missing_imports = true
+no_strict_optional = true
+warn_unused_ignores = true
+warn_redundant_casts = true
+files = ["pippal"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+addopts = "-ra --strict-markers"
+filterwarnings = ["ignore::DeprecationWarning"]

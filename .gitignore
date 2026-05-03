@@ -1,0 +1,24 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# Local user state
+config.json
+history.json
+temp/
+*.log
+
+# Downloaded artifacts (fetched by setup.ps1 / Kokoro installer)
+piper/
+voices/
+kokoro/
+
+# Editor / IDE
+.vscode/
+.idea/
+*.swp
+
+# OS
+Thumbs.db
+.DS_Store
