@@ -4,8 +4,18 @@ from __future__ import annotations
 
 from pathlib import Path
 
-# Repo root (parent of the `pippal/` package).
-ROOT: Path = Path(__file__).resolve().parent.parent
+# Project root.
+#
+# `__file__` is `…/src/pippal/paths.py`, so three .parent hops:
+#   .parent       → src/pippal/
+#   .parent.parent → src/
+#   .parent.parent.parent → project root (where reader_app.py lives)
+#
+# This works for the dev workflow (the user runs `pythonw reader_app.py`
+# from the repo root). A future pip-installed packaging mode would
+# need a different layout — likely `%APPDATA%/PipPal/` for runtime
+# state and an app-install directory for the bundled engine binary.
+ROOT: Path = Path(__file__).resolve().parent.parent.parent
 
 # TTS engines
 PIPER_DIR: Path = ROOT / "piper"
