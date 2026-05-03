@@ -30,7 +30,10 @@ pippal-open = "pippal_open:main"
 Homepage = "https://github.com/tigyijanos/pippal"
 
 [tool.setuptools]
-packages = ["pippal", "pippal.engines", "pippal.ui"]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
 
 [tool.ruff]
 line-length = 100
@@ -62,7 +65,7 @@ ignore_missing_imports = true
 no_strict_optional = true
 warn_unused_ignores = true
 warn_redundant_casts = true
-files = ["pippal"]
+files = ["src/pippal"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

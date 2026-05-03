@@ -28,7 +28,7 @@ pythonw reader_app_free.py
 ## Layout
 
 ```
-pippal/
+src/pippal/
 ├── plugins.py          # registry — engines, hotkeys, cards, tray, defaults
 ├── _register_free.py   # Free distribution self-registers everything
 ├── app.py              # main() — composes engine, overlay, tray, hotkeys
@@ -97,7 +97,7 @@ the third-party stubs and intentionally left.
   to whatever's registered for `"piper"` (which the Free package
   always registers).
 - All Tk widget construction is single-class-per-file under
-  `pippal/ui/`. The dark palette and `make_card` helper live in
+  `src/pippal/ui/`. The dark palette and `make_card` helper live in
   `ui/theme.py`.
 - Config is **layered**: `core_defaults + plugin_defaults +
   user_overrides`. Only user overrides land in `config.json`, so
@@ -110,7 +110,7 @@ the third-party stubs and intentionally left.
 
 A whole new engine ships as one file plus one registration. Backends
 written for the Free repo should be MIT-compatible and shipped in
-`pippal/engines/`; proprietary engines live in their own package and
+`src/pippal/engines/`; proprietary engines live in their own package and
 register themselves on import.
 
 ```python
@@ -129,7 +129,7 @@ class ExampleBackend(TTSBackend):
 ```
 
 Then register it. The Free package does this in
-`pippal/_register_free.py`; a third-party plugin does it in its own
+`src/pippal/_register_free.py`; a third-party plugin does it in its own
 `__init__.py`:
 
 ```python

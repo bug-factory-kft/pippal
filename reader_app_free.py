@@ -15,7 +15,15 @@ normally).
 from __future__ import annotations
 
 import importlib.util
+import os
 import sys
+
+# Add ./src to the import path so the `from pippal import main` below
+# works without `pip install -e .` in a fresh `git clone`.
+_HERE = os.path.dirname(os.path.abspath(__file__))
+_SRC = os.path.join(_HERE, "src")
+if os.path.isdir(_SRC) and _SRC not in sys.path:
+    sys.path.insert(0, _SRC)
 
 
 def _install_pippal_pro_block() -> None:
