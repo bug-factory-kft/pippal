@@ -7,7 +7,7 @@
 <p align="center"><i>Your little offline reading buddy.</i></p>
 
 <p align="center">
-  <video src="https://github.com/tigyijanos/pippal/raw/main/docs/pippal_intro.mp4"
+  <video src="https://github.com/tigyijanos/pippal/releases/download/v0.2.0-assets/pippal_intro.mp4"
          width="480" autoplay loop muted playsinline></video>
 </p>
 
