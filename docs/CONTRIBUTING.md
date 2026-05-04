@@ -1,4 +1,8 @@
-<p align="center"><img src="pippal_contribute.png" alt="PipPal contribute" width="280"></p>
+<!-- Absolute URL because GitHub's "Community" tab (?tab=contributing-ov-file)
+     resolves relative image paths against the repo root rather than the
+     file's actual directory, hiding the image there. The blob view of
+     docs/CONTRIBUTING.md handles a relative path fine on its own. -->
+<p align="center"><img src="https://raw.githubusercontent.com/bug-factory-kft/pippal/main/docs/pippal_contribute.png" alt="PipPal contribute" width="280"></p>
 
 # Contributing to PipPal
 
