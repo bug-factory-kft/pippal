@@ -33,7 +33,7 @@ PipPal makes outbound network requests in only three situations:
 2. **Right-click integration helper** — sends a localhost-only
    HTTP request (`127.0.0.1:51677`) from `pippal_open.py` to the
    running PipPal instance. Never leaves your machine.
-3. *(Pro / paid build only)* **Local Ollama** — AI actions like
+3. *(Microsoft Store edition only)* **Local Ollama** — AI actions like
    Summary / Translate are dispatched to a locally-running Ollama
    daemon at `http://localhost:11434`. Local-only.
 
