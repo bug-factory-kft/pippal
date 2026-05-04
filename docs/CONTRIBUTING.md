@@ -26,9 +26,6 @@ Run the app from a working tree:
 pythonw reader_app.py     # how the autostart launches it
 # or
 python -m pippal          # canonical CLI form
-
-# Force a Free-only run even if pippal_pro is on the path:
-pythonw reader_app_free.py
 ```
 
 ## Layout
@@ -36,7 +33,7 @@ pythonw reader_app_free.py
 ```
 src/pippal/
 ├── plugins.py          # registry — engines, hotkeys, cards, tray, defaults
-├── _register_free.py   # Free distribution self-registers everything
+├── _register.py        # core self-registers piper / hotkeys / cards
 ├── app.py              # main() — composes engine, overlay, tray, hotkeys
 ├── engine.py           # TTSEngine — orchestration and playback dispatch
 ├── engines/            # PiperBackend + the TTSBackend ABC
@@ -134,8 +131,8 @@ class ExampleBackend(TTSBackend):
         return True
 ```
 
-Then register it. The Free package does this in
-`src/pippal/_register_free.py`; a third-party plugin does it in its own
+Then register it. The built-in package does this in
+`src/pippal/_register.py`; a third-party plugin does it in its own
 `__init__.py`:
 
 ```python

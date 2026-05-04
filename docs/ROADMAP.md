@@ -24,7 +24,8 @@ roadmap.
 - TTS engine: **Piper** (`piper.exe` + `.onnx` voice models),
   registered through the plugin host.
 - Global hotkeys (Win+Shift letter scheme, layout-independent,
-  `suppress=True`):
+  low-level hook with strict per-combo suppression so unrelated
+  shortcuts like Win+Shift+S aren't accidentally eaten):
   - Read selection
   - Queue selection (append while reading)
   - Pause / Resume

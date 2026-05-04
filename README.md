@@ -113,7 +113,7 @@ last 10 readings), and **Quit**.
 `src/pippal/plugins.py` exposes registries for engines, hotkey
 actions, settings cards, tray items, AI handlers and config defaults.
 The Community package self-registers Piper + four selection-driven
-hotkeys + six settings cards in `src/pippal/_register_free.py`. A
+hotkeys + six settings cards in `src/pippal/_register.py`. A
 sibling proprietary package (`pippal_pro`, distributed with the
 Microsoft Store edition) adds:
 
@@ -153,7 +153,8 @@ the same API. The contract is pinned by `tests/test_plugin_host.py`.
   `urllib.request`, `wave`, `winsound`, `subprocess`, `threading`,
   `importlib`. No `httpx`, no `sounddevice`.
 - **`pystray` + `Pillow`** — tray icon
-- **`keyboard`** — global hotkeys with `suppress=True`
+- **`keyboard`** — global hotkeys via a low-level hook with strict
+  per-combo suppression (only swallows the exact registered combo)
 - **`pyperclip`** — clipboard
 - **`tkinter`** — reader panel and settings UI (dark, card-based ttk theme)
 - [**Piper**](https://github.com/rhasspy/piper) — TTS engine, called as a subprocess
