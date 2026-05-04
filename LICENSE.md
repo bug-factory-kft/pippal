@@ -1,6 +1,8 @@
-MIT License
+<p align="center"><img src="docs/pippal_license.png" alt="PipPal license" width="280"></p>
 
-Copyright (c) 2026 tigyijanos
+# MIT License
+
+Copyright (c) 2026 Bug Factory Kft. — <https://pippal.bugfactory.hu>
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal

@@ -1,3 +1,5 @@
+<p align="center"><img src="pippal_contribute.png" alt="PipPal contribute" width="280"></p>
+
 # Contributing to PipPal
 
 Thanks for taking a look. The codebase is small and intentionally
@@ -6,7 +8,7 @@ boring — a new contributor should be productive in about an hour.
 ## Quick start
 
 ```powershell
-git clone https://github.com/tigyijanos/pippal.git
+git clone https://github.com/bug-factory-kft/pippal.git
 cd pippal
 .\setup.ps1                       # one-shot: piper + default voice
 python -m pip install -e ".[dev]" # editable install + dev deps

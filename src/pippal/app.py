@@ -40,7 +40,7 @@ def _set_app_user_model_id() -> None:
     try:
         import ctypes
         ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(
-            "tigyijanos.PipPal.0"
+            "BugFactory.PipPal.0"
         )
     except Exception as e:
         print(f"[icon] could not set AppUserModelID: {e}", file=sys.stderr)
