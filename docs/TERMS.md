@@ -7,7 +7,8 @@ Store listing.
 ## Licence
 
 PipPal source is licensed under the MIT licence — see
-[LICENSE](LICENSE). In short:
+[LICENSE.md](../LICENSE.md). Copyright is held by **Bug Factory Kft.**
+(<https://pippal.bugfactory.hu>). In short:
 
 - You may use, copy, modify, merge, publish, distribute, sublicense,
   and/or sell copies of the Software.
@@ -38,15 +39,14 @@ PipPal source is licensed under the MIT licence — see
 
 ## Trademarks
 
-"PipPal" and its mascot are unregistered marks of the project
-maintainer. You're welcome to fork the source code; please don't
-ship a fork using the "PipPal" name as if it were the official
-project. A clearly-different name keeps users from getting
-confused.
+"PipPal" and its mascot are unregistered marks of **Bug Factory Kft.**
+You're welcome to fork the source code; please don't ship a fork
+using the "PipPal" name as if it were the official project. A
+clearly-different name keeps users from getting confused.
 
 ## Liability
 
-The MIT licence text in [LICENSE](LICENSE) is the operative
+The MIT licence text in [LICENSE.md](../LICENSE.md) is the operative
 disclaimer. To restate the spirit: PipPal is provided as-is with no
 warranty, and the authors aren't liable for damages arising from its
 use. If it crashes, gets a sentence wrong, or hurts your feelings,
@@ -55,7 +55,7 @@ you've got what you paid for ($0).
 ## Reporting issues
 
 Open an issue at
-[github.com/tigyijanos/pippal/issues](https://github.com/tigyijanos/pippal/issues).
+[github.com/bug-factory-kft/pippal/issues](https://github.com/bug-factory-kft/pippal/issues).
 Security concerns: please report privately first to the maintainer
 before opening a public issue.
 

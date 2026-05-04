@@ -7,7 +7,11 @@
 <p align="center"><i>Your little offline reading buddy.</i></p>
 
 <p align="center">
-  <video src="https://github.com/tigyijanos/pippal/releases/download/v0.2.0-assets/pippal_intro.mp4"
+  Published by <a href="https://pippal.bugfactory.hu"><b>Bug Factory Kft.</b></a>
+</p>
+
+<p align="center">
+  <video src="https://github.com/bug-factory-kft/pippal/releases/download/v0.2.0-assets/pippal_intro.mp4"
          width="480" autoplay loop muted playsinline></video>
 </p>
 
@@ -50,7 +54,7 @@ on top through a separate proprietary plugin.
 
 | | Community (this repo) | Microsoft Store edition |
 |---|---|---|
-| Source | MIT, [public](https://github.com/tigyijanos/pippal) | Community + the proprietary `pippal_pro` plugin |
+| Source | MIT, [public](https://github.com/bug-factory-kft/pippal) | Community + the proprietary `pippal_pro` plugin |
 | Engine | Piper | Piper + Kokoro |
 | Hotkeys | Read / Queue / Pause / Stop | + Summary / Explain / Translate / Define |
 | AI | — | Local Ollama (offline LLM) |
@@ -70,7 +74,7 @@ Requires Python 3.11+ on `PATH` (or `pythonw` from the standard
 install).
 
 ```powershell
-git clone https://github.com/tigyijanos/pippal.git
+git clone https://github.com/bug-factory-kft/pippal.git
 cd pippal
 .\setup.ps1                       # downloads Piper + default voice + pip deps
 pythonw reader_app.py             # tray icon appears
@@ -164,7 +168,7 @@ every HIGH and MEDIUM finding before this release.
 
 ## Licence
 
-PipPal source is **MIT-licensed** — see [LICENSE](LICENSE).
+PipPal source is **MIT-licensed** — see [LICENSE.md](LICENSE.md).
 Third-party dependencies and downloaded run-time artefacts (Piper,
 voice models) are listed with their respective licences in
 [docs/THIRD_PARTY.md](docs/THIRD_PARTY.md).

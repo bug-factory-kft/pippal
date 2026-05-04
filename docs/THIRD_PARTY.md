@@ -1,6 +1,6 @@
 # Third-Party Notices
 
-PipPal itself is MIT-licensed (see [LICENSE](LICENSE)). It depends on a
+PipPal itself is MIT-licensed (see [LICENSE.md](../LICENSE.md)). It depends on a
 small number of third-party packages and, at run-time, expects the user
 to download two upstream artefacts (the Piper engine and a voice). This
 file lists what is involved and under what terms.

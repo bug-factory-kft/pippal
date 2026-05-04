@@ -49,7 +49,7 @@ PipPal never contacts a server controlled by us.
   None contact remote servers on PipPal's behalf.
 
 If you have concerns about any of these, the source code is fully
-auditable: [github.com/tigyijanos/pippal](https://github.com/tigyijanos/pippal).
+auditable: [github.com/bug-factory-kft/pippal](https://github.com/bug-factory-kft/pippal).
 
 ## Children
 

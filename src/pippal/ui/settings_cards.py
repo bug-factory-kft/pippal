@@ -227,13 +227,14 @@ def build_about_card(sw: SettingsWindow, body: ttk.Frame) -> None:
         style="CardHint.TLabel",
     ).pack(anchor="w", pady=(2, 0))
     ttk.Label(
-        card, text="© 2026 tigyijanos  ·  Offline-first by design.",
+        card, text="© 2026 Bug Factory Kft.  ·  Offline-first by design.",
         style="CardHint.TLabel",
     ).pack(anchor="w", pady=(8, 0))
 
-    # Clickable links — Free/MIT users land on the public GitHub repo,
-    # the Microsoft Store extension users still see them so they have a way
-    # to read the licence and terms.
+    # Clickable links — public site first (Bug Factory's user-facing
+    # landing page), then GitHub for source / licence / privacy /
+    # terms. Microsoft Store paid users still see them so they have
+    # a way to read the licence and terms even without the repo.
     link_row = ttk.Frame(card, style="Card.TFrame")
     link_row.pack(anchor="w", pady=(10, 0))
 
@@ -246,11 +247,13 @@ def build_about_card(sw: SettingsWindow, body: ttk.Frame) -> None:
         lbl.pack(side="left", padx=(0, 16))
         lbl.bind("<Button-1>", lambda _e: webbrowser.open(url))
 
+    _link(link_row, "Website",
+          "https://pippal.bugfactory.hu")
     _link(link_row, "GitHub",
-          "https://github.com/tigyijanos/pippal")
+          "https://github.com/bug-factory-kft/pippal")
     _link(link_row, "Licence (MIT)",
-          "https://github.com/tigyijanos/pippal/blob/main/LICENSE")
+          "https://github.com/bug-factory-kft/pippal/blob/main/LICENSE.md")
     _link(link_row, "Privacy",
-          "https://github.com/tigyijanos/pippal/blob/main/docs/PRIVACY.md")
+          "https://github.com/bug-factory-kft/pippal/blob/main/docs/PRIVACY.md")
     _link(link_row, "Terms",
-          "https://github.com/tigyijanos/pippal/blob/main/docs/TERMS.md")
+          "https://github.com/bug-factory-kft/pippal/blob/main/docs/TERMS.md")
