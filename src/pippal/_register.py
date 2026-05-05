@@ -61,6 +61,17 @@ def _quit_tray_builder(ctx: Any) -> list:
     ]
 
 
+def _piper_voice_persist(sw: Any, engine_name: str, candidate: dict[str, Any]) -> None:
+    """Persist hook: when the user picked Piper in the engine combo,
+    write whatever the voice-display var holds into ``candidate["voice"]``.
+    The voice-display value for Piper is the on-disk filename
+    (e.g. ``en_US-amy-medium.onnx``) the combo populated."""
+    if engine_name != "piper":
+        return
+    sel = str(sw.vars["voice_display"].get())
+    candidate["voice"] = sel
+
+
 def _register() -> None:
     # ----- Engine -----
     plugins.register_engine("piper", PiperBackend)
@@ -70,6 +81,13 @@ def _register() -> None:
     # Extension packages can extend this via plugins.register_voices().
     from .voices import KNOWN_VOICES
     plugins.register_voices(KNOWN_VOICES)
+
+    # ----- Persist hook for Piper -----
+    # Settings → Save iterates registered hooks; ours writes the
+    # voice combo selection into config["voice"] when the engine is
+    # piper. Other engine plugins register their own hooks for their
+    # own keys.
+    plugins.register_voice_card_persist_hook(_piper_voice_persist)
 
     # ----- Settings cards -----
     # Imported lazily so this module can be imported even in test

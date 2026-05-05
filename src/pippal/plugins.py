@@ -341,6 +341,26 @@ def voice_card_engine_handlers() -> list[Callable[[Any, str], None]]:
     return list(_voice_card_engine_handlers)
 
 
+# Persist hooks for the Voice card — let each engine plugin write
+# its own per-engine config key from the form vars without the
+# public package needing to know the key names.
+_voice_card_persist_hooks: list[Callable[[Any, str, dict[str, Any]], None]] = []
+
+
+def register_voice_card_persist_hook(
+    hook: Callable[[Any, str, dict[str, Any]], None],
+) -> None:
+    """Called from Settings → Save with ``(sw, current_engine_name,
+    candidate)``. The hook may write engine-specific keys into
+    ``candidate`` (e.g. Piper writes ``voice``, Pro writes
+    ``kokoro_voice``)."""
+    _voice_card_persist_hooks.append(hook)
+
+
+def voice_card_persist_hooks() -> list[Callable[[Any, str, dict[str, Any]], None]]:
+    return list(_voice_card_persist_hooks)
+
+
 # ---------------------------------------------------------------------------
 # Discovery
 # ---------------------------------------------------------------------------
@@ -387,3 +407,4 @@ def _reset_for_tests() -> None:
     _engine_voice_options.clear()
     _voice_card_extras_builders.clear()
     _voice_card_engine_handlers.clear()
+    _voice_card_persist_hooks.clear()

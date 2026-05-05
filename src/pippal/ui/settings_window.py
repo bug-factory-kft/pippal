@@ -407,12 +407,18 @@ class SettingsWindow:
         candidate = dict(self.config)
         eng = self.vars["engine"].get().lower()
         candidate["engine"] = eng
-        sel = str(self.vars["voice_display"].get())
-        if eng == "kokoro" and "kokoro_voice" in self.vars:
-            voice_id = sel.split(" — ", 1)[0] if " — " in sel else sel
-            candidate["kokoro_voice"] = voice_id.strip()
-        else:
-            candidate["voice"] = sel
+
+        # Engine-specific persist hooks decide what gets written for
+        # the current engine. The built-in Piper hook reads
+        # ``voice_display`` into ``voice``; an extension's hook may
+        # set its own per-engine key (Pro writes ``kokoro_voice``).
+        for hook in plugins.voice_card_persist_hooks():
+            try:
+                hook(self, eng, candidate)
+            except Exception as exc:
+                import sys
+                print(f"[settings] persist hook error: {exc}",
+                      file=sys.stderr)
 
         # `speed` is the user-facing inverse of length_scale.
         speed = max(0.4, float(self.vars["speed"].get()))
@@ -422,7 +428,7 @@ class SettingsWindow:
         # added become candidate keys automatically, so an extension
         # package's settings get saved without the core knowing the
         # key names.
-        skip = {"engine", "voice", "voice_display", "kokoro_voice", "speed"}
+        skip = {"engine", "voice", "voice_display", "speed"}
         for key, var in list(self.vars.items()):
             if key in skip:
                 continue
@@ -450,23 +456,15 @@ class SettingsWindow:
         hotkeys_changed = any(
             self.config.get(k, "") != candidate.get(k, "") for k in _hotkey_keys
         )
-        engine_changed = self.config.get("engine") != candidate["engine"]
-        # Voice changes also need a backend rebuild: the backend takes
-        # a shallow copy of config at construction (engines/base.py)
-        # so a live config["voice"] update does NOT reach the cached
-        # instance. Without this branch, switching Piper voice via
-        # Apply silently kept reading with the previous model.
-        voice_changed = (
-            self.config.get("voice") != candidate.get("voice")
-            or self.config.get("kokoro_voice") != candidate.get("kokoro_voice")
-        )
 
         # Commit to live config.
         self.config.clear()
         self.config.update(candidate)
-        # Keep legacy "voice" var in sync so reopening Settings still works.
-        if eng == "piper":
-            self.vars["voice"].set(sel)
+        # Keep legacy "voice" var in sync so reopening Settings still
+        # works on Piper. Other engines manage their own var content
+        # via the plugin host hooks above.
+        if eng == "piper" and "voice" in candidate:
+            self.vars["voice"].set(str(candidate["voice"]))
 
         if hotkeys_changed:
             try:
@@ -490,7 +488,15 @@ class SettingsWindow:
                     parent=self.win,
                 )
 
-        if (engine_changed or voice_changed) and callable(self.on_engine_change):
+        # Always tell the engine to drop its cached backend after a
+        # successful Apply. The backend snapshot-copies its config at
+        # construction (engines/base.py), so any live config update —
+        # voice change, length_scale, anything per-backend — needs a
+        # rebuild on the next synth. The reset itself is a tiny lock
+        # +  three attribute assigns, so calling it unconditionally is
+        # cheaper than keeping per-engine "what counts as changed?"
+        # logic in the public package.
+        if callable(self.on_engine_change):
             try:
                 self.on_engine_change()
             except Exception:
