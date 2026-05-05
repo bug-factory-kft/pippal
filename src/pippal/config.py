@@ -20,7 +20,7 @@ from .paths import CONFIG_PATH
 # Hotkey-action metadata used to live here as a module-level tuple
 # (HOTKEY_ACTIONS) plus derived views (HOTKEY_KEYS, HOTKEY_FOR_ACTION).
 # Stage 1 of the plugin-host refactor moved that single source of truth
-# to `pippal.plugins`: the core self-registers its actions in
+# to `pippal.plugins`: the core package self-registers its actions in
 # `pippal/_register.py`, pippal_pro adds AI ones, and consumers
 # iterate `plugins.hotkey_actions()`.
 
@@ -64,14 +64,14 @@ DEFAULT_CONFIG: dict[str, Any] = {
 
 
 def _layered_defaults() -> dict[str, Any]:
-    """Effective defaults = `DEFAULT_CONFIG` (the core's canonical
-    list) overlaid with whatever any plugin registered through
-    `pippal.plugins.register_defaults`.
+    """Effective defaults = `DEFAULT_CONFIG` (the core package's
+    canonical list) overlaid with whatever any plugin (including
+    core `_register.py` and an optional `pippal_pro`) registered.
 
-    DEFAULT_CONFIG is kept as the in-source canonical reference so
-    existing tests, scripts, and reviewers can read one literal to
-    see what the core package ships. Extensions add their own keys
-    on top at runtime."""
+    DEFAULT_CONFIG is kept as the in-source canonical core reference
+    so existing tests, scripts, and reviewers can read one literal to
+    see what the core package ships. The plugin registry adds
+    Pro keys if Pro is installed."""
     from . import plugins
     merged = dict(DEFAULT_CONFIG)
     merged.update(plugins.defaults())
@@ -82,10 +82,11 @@ def load_config(path: Path = CONFIG_PATH) -> dict[str, Any]:
     """Load the effective config = layered defaults + user overrides.
 
     User overrides are whatever the file actually contains. Unknown
-    keys (e.g. a setting registered by an extension that's no longer
-    installed) are PRESERVED rather than dropped — codex' 'Unavailable
-    action' principle: don't destroy user state when a plugin
-    disappears, the next reinstall picks up where they left off."""
+    keys (e.g. a Pro setting saved while Pro was installed, then
+    Pro uninstalled) are PRESERVED rather than dropped — codex'
+    'Unavailable action' principle: don't destroy user state when a
+    plugin disappears, the next reinstall picks up where they left
+    off."""
     defaults = _layered_defaults()
     if not path.exists():
         return dict(defaults)

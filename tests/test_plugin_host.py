@@ -11,8 +11,9 @@ third-party plugin. The public `pippal` package guarantees:
 - unknown / unregistered names degrade gracefully (Piper fallback for
   engines, no-op for AI actions, skipped for hotkeys)
 
-If anyone ships a `pippal-elevenlabs` or `pippal-edge-tts` plugin
-tomorrow, these tests are the contract they're coding against."""
+The `pippal_pro` package is just one consumer of this API; if anyone
+ships a `pippal-elevenlabs` or `pippal-edge-tts` plugin tomorrow, these
+tests are the contract they're coding against."""
 
 from __future__ import annotations
 
@@ -51,6 +52,7 @@ def _isolated_registry():
         "cards":   list(plugins._settings_cards),
         "tray":    list(plugins._tray_items),
         "def":     dict(plugins._defaults),
+        "voices":  list(plugins._voices),
     }
     yield
     plugins._engines.clear()
@@ -65,6 +67,8 @@ def _isolated_registry():
     plugins._tray_items.extend(snap["tray"])
     plugins._defaults.clear()
     plugins._defaults.update(snap["def"])
+    plugins._voices.clear()
+    plugins._voices.extend(snap["voices"])
 
 
 class TestEngineRegistry:

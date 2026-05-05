@@ -1,31 +1,37 @@
 """Plugin host registries for PipPal.
 
-The core has no name-awareness of any specific extension: it never
-imports `kokoro`, `ai_runner`, etc. directly. Instead, this module
-exposes registries that any plugin package — including the `pippal`
-package itself — can fill.
+PipPal is split into a public MIT core (`pippal`) and an optional
+proprietary extension package (`pippal_pro`). The core has zero
+name-awareness of Pro features: it never imports `kokoro`, `ai_runner`,
+`moods`, etc. Instead, this module exposes registries that any plugin
+package — including the core `pippal` package itself — can fill.
 
-`pippal` self-registers Piper, the four selection-driven hotkey
-actions (read / queue / pause / stop), the built-in settings cards,
-the tray items, and the default config values. Optional extension
-packages may add more engines, AI actions, settings cards, tray
-items and defaults through the same API.
+The core distribution self-registers Piper, the four selection-driven
+hotkey actions (read / queue / pause / stop), the core settings cards,
+the core tray items, and the core config defaults. The Pro distribution,
+when installed alongside, self-registers Kokoro, the AI actions, AI
+hotkeys, AI settings card, Mood tray submenu, and Pro defaults.
 
-EXPERIMENTAL — the registry shape is not yet a stable API. Third-
-party plugins should pin to a specific PipPal minor version until
-the contract settles.
+EXPERIMENTAL — the registry shape is not yet a stable API. It will move
+toward a 1.0 contract once Pro has shipped against it for a few
+releases. Third-party plugins should pin to a specific PipPal minor
+version until then.
 
 Discovery (`pippal/__init__.py`):
 
-    if importlib.util.find_spec("pippal_extensions") is not None:
+    if importlib.util.find_spec("pippal_pro") is not None:
         try:
-            import pippal_extensions  # self-registers
+            import pippal_pro  # self-registers
         except Exception as exc:
-            print(f"[pippal] extension load failed: {exc}",
+            # Don't silently swallow: a partial Pro install is worse
+            # than no Pro install. Log and continue with built-in only.
+            print(f"[pippal] pippal_pro present but failed to load: {exc}",
                   file=sys.stderr)
 
-Discovery is presence-based: install the extension package alongside
-`pippal` and it self-registers on import.
+There is no `is_pro_user()` orthogonal license check. The presence of
+`pippal_pro` IS the gate — Microsoft Store delivers an MSIX bundling
+both packages to paid users; Public users `pip install pippal` and only
+ever see the core registry.
 """
 
 from __future__ import annotations
@@ -76,6 +82,12 @@ _hotkey_actions: list[HotkeyAction] = []
 _settings_cards: list[tuple[int, int, SettingsCardBuilder]] = []
 _tray_items: list[tuple[int, int, TrayItem]] = []
 _defaults: dict[str, Any] = {}
+# `_voices` is a list of `PiperVoice` (typed dict from pippal.voices).
+# Contributors append to it via `register_voices`. The Voice Manager
+# iterates `voices()` to build its catalogue, so the same dialog works
+# both with the small built-in subset and with the larger lists that
+# extension packages register on top.
+_voices: list[Any] = []
 
 
 # ---------------------------------------------------------------------------
@@ -87,8 +99,8 @@ def register_engine(name: str, cls: EngineCls) -> None:
 
     The engine name is what shows up in `config["engine"]` and in the
     Settings → Voice → Engine combobox. Re-registering an existing name
-    overwrites — last writer wins, which is intentional so an extension can
-    replace a built-in fallback if both are present."""
+    overwrites — last writer wins, which is intentional so Pro can
+    replace a core fallback if both are present."""
     _engines[name] = cls
 
 
@@ -212,42 +224,53 @@ def defaults() -> dict[str, Any]:
 
 
 # ---------------------------------------------------------------------------
+# Voice catalogue registry
+# ---------------------------------------------------------------------------
+
+def register_voices(catalog: list[Any]) -> None:
+    """Append voice entries to the catalogue iterated by the Voice
+    Manager. Each entry is a `PiperVoice` typed-dict (see
+    `pippal.voices.PiperVoice`). De-dupes on `id` so an extension that
+    re-registers the same voice doesn't double the row count."""
+    seen = {v["id"] for v in _voices}
+    for v in catalog:
+        if v.get("id") and v["id"] not in seen:
+            _voices.append(v)
+            seen.add(v["id"])
+
+
+def voices() -> list[Any]:
+    """Snapshot of all registered voices (built-in + extension)."""
+    return list(_voices)
+
+
+# ---------------------------------------------------------------------------
 # Discovery
 # ---------------------------------------------------------------------------
 
-# Names of optional extension packages this build looks for at
-# import time. Each must self-register on import (call into the
-# `register_*` functions from this module). Add a name here, ship a
-# package by that name, and the host picks it up automatically.
-_EXTENSION_NAMES: tuple[str, ...] = ("pippal_pro",)
+def load_pro_plugin() -> bool:
+    """Try to load `pippal_pro` if installed. Returns True on success.
 
-
-def load_extensions() -> int:
-    """Discover and load any optional extension packages installed
-    alongside `pippal`. Returns the number of extensions loaded.
-
-    Uses `find_spec` before `import_module` so an `ImportError` from
-    inside an extension (broken dependency) isn't conflated with
-    'not installed'. A partial install logs to stderr and we
-    continue; a half-loaded plugin would be worse than none.
+    Uses `find_spec` first so an `ImportError` from inside the package
+    (broken Pro dependency) doesn't get conflated with 'Pro not
+    installed'. A partial install logs to stderr and we continue with
+    the built-in package only — the user shouldn't get a half-Pro experience silently.
     """
     import importlib
     import importlib.util
 
-    loaded = 0
-    for name in _EXTENSION_NAMES:
-        if importlib.util.find_spec(name) is None:
-            continue
-        try:
-            importlib.import_module(name)
-            loaded += 1
-        except Exception as exc:
-            print(
-                f"[pippal] extension {name!r} is installed but failed "
-                f"to load: {exc}. Continuing without it.",
-                file=sys.stderr,
-            )
-    return loaded
+    if importlib.util.find_spec("pippal_pro") is None:
+        return False
+    try:
+        importlib.import_module("pippal_pro")
+        return True
+    except Exception as exc:
+        print(
+            f"[pippal] pippal_pro is installed but failed to load: {exc}. "
+            "Continuing with built-in features only.",
+            file=sys.stderr,
+        )
+        return False
 
 
 # ---------------------------------------------------------------------------
@@ -263,3 +286,4 @@ def _reset_for_tests() -> None:
     _settings_cards.clear()
     _tray_items.clear()
     _defaults.clear()
+    _voices.clear()

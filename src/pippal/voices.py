@@ -40,6 +40,61 @@ KNOWN_VOICES: list[PiperVoice] = [
 ]
 
 
+# Locale → human-readable language label, used by the Voice Manager
+# filter dropdown. Falls back to the locale code for unknown values
+# in `locale_name()` below.
+LOCALE_TO_NAME: dict[str, str] = {
+    "en_US": "English (US)",
+    "en_GB": "English (UK)",
+    "de_DE": "German",
+    "es_ES": "Spanish",
+    "es_MX": "Spanish (MX)",
+    "fr_FR": "French",
+    "it_IT": "Italian",
+    "hu_HU": "Hungarian",
+    "pl_PL": "Polish",
+    "nl_NL": "Dutch",
+    "pt_PT": "Portuguese",
+    "pt_BR": "Portuguese (BR)",
+    "cs_CZ": "Czech",
+    "ro_RO": "Romanian",
+    "sk_SK": "Slovak",
+    "hr_HR": "Croatian",
+    "tr_TR": "Turkish",
+    "el_GR": "Greek",
+    "ru_RU": "Russian",
+    "uk_UA": "Ukrainian",
+    "fi_FI": "Finnish",
+    "no_NO": "Norwegian",
+    "sv_SE": "Swedish",
+    "da_DK": "Danish",
+    "ja_JP": "Japanese",
+    "zh_CN": "Chinese",
+    "ko_KR": "Korean",
+    "ar_JO": "Arabic",
+    "fa_IR": "Persian",
+    "ka_GE": "Georgian",
+    "ca_ES": "Catalan",
+    "lv_LV": "Latvian",
+    "sl_SI": "Slovenian",
+    "is_IS": "Icelandic",
+    "cy_GB": "Welsh",
+    "vi_VN": "Vietnamese",
+    "fa_AF": "Dari",
+    "lb_LU": "Luxembourgish",
+    "mt_MT": "Maltese",
+    "kk_KZ": "Kazakh",
+    "uz_UZ": "Uzbek",
+    "sw":    "Swahili",
+}
+
+
+def locale_name(code: str) -> str:
+    """Human-readable label for a Piper locale code, falling back to
+    the code itself when unknown — better to show 'xy_AB' than nothing."""
+    return LOCALE_TO_NAME.get(code, code)
+
+
 # Map human-readable language names → Piper locale codes (priority order).
 LANG_TO_PIPER: dict[str, list[str]] = {
     "English":    ["en_US", "en_GB"],
@@ -72,21 +127,77 @@ def voice_filename(v: PiperVoice) -> str:
     return f"{v['id']}.onnx"
 
 
-# Curated Kokoro voices exposed in Settings (English-leaning subset).
+# All 54 Kokoro v1.0 voices. The id encodes language + gender:
+#   first char  = locale     (a US-en, b UK-en, e Spanish, f French,
+#                              h Hindi, i Italian, j Japanese,
+#                              p Brazilian Portuguese, z Mandarin)
+#   second char = gender     (f female, m male)
+# The list is ordered: US English → UK English → other languages
+# alphabetical, females before males inside a language.
 KOKORO_CURATED: list[tuple[str, str]] = [
-    ("af_bella",    "Bella — US female (recommended)"),
-    ("af_heart",    "Heart — US female, warm"),
-    ("af_nicole",   "Nicole — US female"),
-    ("af_sarah",    "Sarah — US female"),
-    ("af_sky",      "Sky — US female"),
-    ("am_adam",     "Adam — US male"),
-    ("am_michael",  "Michael — US male"),
-    ("am_fenrir",   "Fenrir — US male, deep"),
-    ("am_puck",     "Puck — US male"),
-    ("bf_emma",     "Emma — UK female"),
-    ("bf_isabella", "Isabella — UK female"),
-    ("bm_george",   "George — UK male"),
-    ("bm_lewis",    "Lewis — UK male"),
+    # ---- US English ----
+    ("af_bella",      "Bella — US female (recommended)"),
+    ("af_heart",      "Heart — US female, warm"),
+    ("af_nicole",     "Nicole — US female"),
+    ("af_sarah",      "Sarah — US female"),
+    ("af_sky",        "Sky — US female"),
+    ("af_alloy",      "Alloy — US female"),
+    ("af_aoede",      "Aoede — US female"),
+    ("af_jessica",    "Jessica — US female"),
+    ("af_kore",       "Kore — US female"),
+    ("af_nova",       "Nova — US female"),
+    ("af_river",      "River — US female"),
+    ("am_adam",       "Adam — US male"),
+    ("am_michael",    "Michael — US male"),
+    ("am_fenrir",     "Fenrir — US male, deep"),
+    ("am_puck",       "Puck — US male"),
+    ("am_echo",       "Echo — US male"),
+    ("am_eric",       "Eric — US male"),
+    ("am_liam",       "Liam — US male"),
+    ("am_onyx",       "Onyx — US male"),
+    ("am_santa",      "Santa — US male"),
+    # ---- UK English ----
+    ("bf_emma",       "Emma — UK female"),
+    ("bf_isabella",   "Isabella — UK female"),
+    ("bf_alice",      "Alice — UK female"),
+    ("bf_lily",       "Lily — UK female"),
+    ("bm_george",     "George — UK male"),
+    ("bm_lewis",      "Lewis — UK male"),
+    ("bm_daniel",     "Daniel — UK male"),
+    ("bm_fable",      "Fable — UK male"),
+    # ---- Spanish ----
+    ("ef_dora",       "Dora — Spanish female"),
+    ("em_alex",       "Alex — Spanish male"),
+    ("em_santa",      "Santa — Spanish male"),
+    # ---- French ----
+    ("ff_siwis",      "Siwis — French female"),
+    # ---- Hindi ----
+    ("hf_alpha",      "Alpha — Hindi female"),
+    ("hf_beta",       "Beta — Hindi female"),
+    ("hm_omega",      "Omega — Hindi male"),
+    ("hm_psi",        "Psi — Hindi male"),
+    # ---- Italian ----
+    ("if_sara",       "Sara — Italian female"),
+    ("im_nicola",     "Nicola — Italian male"),
+    # ---- Japanese ----
+    ("jf_alpha",      "Alpha — Japanese female"),
+    ("jf_gongitsune", "Gongitsune — Japanese female"),
+    ("jf_nezumi",     "Nezumi — Japanese female"),
+    ("jf_tebukuro",   "Tebukuro — Japanese female"),
+    ("jm_kumo",       "Kumo — Japanese male"),
+    # ---- Portuguese (Brazil) ----
+    ("pf_dora",       "Dora — BR Portuguese female"),
+    ("pm_alex",       "Alex — BR Portuguese male"),
+    ("pm_santa",      "Santa — BR Portuguese male"),
+    # ---- Mandarin Chinese ----
+    ("zf_xiaobei",    "Xiaobei — Mandarin female"),
+    ("zf_xiaoni",     "Xiaoni — Mandarin female"),
+    ("zf_xiaoxiao",   "Xiaoxiao — Mandarin female"),
+    ("zf_xiaoyi",     "Xiaoyi — Mandarin female"),
+    ("zm_yunjian",    "Yunjian — Mandarin male"),
+    ("zm_yunxi",      "Yunxi — Mandarin male"),
+    ("zm_yunxia",     "Yunxia — Mandarin male"),
+    ("zm_yunyang",    "Yunyang — Mandarin male"),
 ]
 
 

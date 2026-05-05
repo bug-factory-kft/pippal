@@ -30,15 +30,15 @@ def build_voice_card(sw: SettingsWindow, body: ttk.Frame) -> None:
     ttk.Label(erow, text="Engine", style="Card.TLabel",
               width=14, anchor="w").pack(side="left")
     # Engine combo lists every TTS backend that any plugin has
-    # registered. the core registers `piper`; pippal_pro adds
+    # registered. The core pippal registers `piper`; pippal_pro adds
     # `kokoro`. A future ElevenLabs or Edge TTS plugin would slot in
     # here without touching this card.
     available_engines = sorted(plugins.engines().keys()) or ["piper"]
     # If the saved engine isn't registered (e.g. user picked Kokoro
-    # with an extension that registered it, then dropped without it), surface "piper" in the form
+    # under Pro, then dropped to the public package), surface "piper" in the form
     # rather than the unregistered name. Codex' "Unavailable action"
     # principle: don't destroy the persisted value (config.json keeps
-    # 'kokoro' so a future extension reinstall picks it up), but don't fake
+    # 'kokoro' so a future Pro reinstall picks it up), but don't fake
     # presence in the UI either.
     saved_engine = (sw.config.get("engine") or "piper").lower()
     initial_engine = saved_engine if saved_engine in available_engines else available_engines[0]
@@ -50,7 +50,29 @@ def build_voice_card(sw: SettingsWindow, body: ttk.Frame) -> None:
     sw.engine_combo.bind("<<ComboboxSelected>>",
                           lambda _e: sw._on_engine_change())
 
-    vrow = ttk.Frame(card, style="Card.TFrame")
+    # Optional Kokoro language filter — packed into the card only
+    # when engine == 'kokoro' (see settings_window._on_engine_change).
+    # 54 voices in the dropdown is too many to scan otherwise; the
+    # filter trims the voice combo below to one language at a time.
+    sw.kokoro_lang_row = ttk.Frame(card, style="Card.TFrame")
+    ttk.Label(sw.kokoro_lang_row, text="Language", style="Card.TLabel",
+              width=14, anchor="w").pack(side="left")
+    sw.vars["kokoro_lang"] = tk.StringVar(value="All")
+    sw.kokoro_lang_combo = ttk.Combobox(
+        sw.kokoro_lang_row, textvariable=sw.vars["kokoro_lang"],
+        state="readonly",
+    )
+    sw.kokoro_lang_combo.pack(side="left", fill="x", expand=True)
+    sw.kokoro_lang_combo.bind(
+        "<<ComboboxSelected>>",
+        lambda _e: sw._on_engine_change(),
+    )
+
+    # Stored on `sw` so `_on_engine_change` can pack `kokoro_lang_row`
+    # *before* the voice row (i.e. right under Engine), instead of
+    # appending it at the bottom of the card.
+    sw.voice_row = ttk.Frame(card, style="Card.TFrame")
+    vrow = sw.voice_row
     vrow.pack(fill="x", pady=(10, 0))
     ttk.Label(vrow, text="Voice", style="Card.TLabel",
               width=14, anchor="w").pack(side="left")
@@ -121,11 +143,16 @@ def build_speech_card(sw: SettingsWindow, body: ttk.Frame) -> None:
 def build_hotkeys_card(sw: SettingsWindow, body: ttk.Frame) -> None:
     outer, card = make_card(body, "Hotkeys")
     outer.pack(fill="x", pady=(0, 12))
-    for i, (_action_id, key, label_text, default) in enumerate(plugins.hotkey_actions()):
+    # Label width is sized for the longest registered hotkey label so
+    # the entries line up vertically and no label gets clipped. Falls
+    # back to 18 (the previous fixed width) when there are no actions.
+    actions = list(plugins.hotkey_actions())
+    label_w = max((len(label) for _a, _k, label, _d in actions), default=18) + 2
+    for i, (_action_id, key, label_text, default) in enumerate(actions):
         row = ttk.Frame(card, style="Card.TFrame")
         row.pack(fill="x", pady=(0 if i == 0 else 8, 0))
         ttk.Label(row, text=label_text, style="Card.TLabel",
-                  width=18, anchor="w").pack(side="left")
+                  width=label_w, anchor="w").pack(side="left")
         sw.vars[key] = tk.StringVar(
             value=sw.config.get(key, default))
         ttk.Entry(row, textvariable=sw.vars[key]).pack(
@@ -233,8 +260,8 @@ def build_about_card(sw: SettingsWindow, body: ttk.Frame) -> None:
 
     # Clickable links — public site first (Bug Factory's user-facing
     # landing page), then GitHub for source / licence / privacy /
-    # terms. Microsoft Store paid users still see them so they have
-    # a way to read the licence and terms even without the repo.
+    # terms. Microsoft Store paid users still see them so they have a
+    # way to read the licence and terms even without the repo.
     link_row = ttk.Frame(card, style="Card.TFrame")
     link_row.pack(anchor="w", pady=(10, 0))
 
