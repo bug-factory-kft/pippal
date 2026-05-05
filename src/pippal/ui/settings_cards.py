@@ -86,8 +86,14 @@ def build_voice_card(sw: SettingsWindow, body: ttk.Frame) -> None:
 
     sw.vars["voice"] = tk.StringVar(
         value=sw.config.get("voice", DEFAULT_CONFIG["voice"]))
+    # `kokoro_voice` is registered as a default by pippal_pro when
+    # Pro is loaded — read from the layered defaults so the var has
+    # a sensible value in either build.
+    from ..config import _layered_defaults
     sw.vars["kokoro_voice"] = tk.StringVar(
-        value=sw.config.get("kokoro_voice", DEFAULT_CONFIG["kokoro_voice"]))
+        value=sw.config.get(
+            "kokoro_voice", _layered_defaults().get("kokoro_voice", "")
+        ))
 
     sw.engine_hint = ttk.Label(card, text="", style="CardHint.TLabel",
                                 wraplength=480, justify="left")
