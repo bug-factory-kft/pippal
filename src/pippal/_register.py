@@ -1,8 +1,8 @@
-"""Built-in self-registration.
+"""core distribution self-registration.
 
-Imported once at package import time (`pippal/__init__.py`) so that
-the plugin registries (`pippal.plugins`) come up populated with
-everything the core ships:
+Imported once at package import time (`pippal/__init__.py`) so that the
+plugin registries (`pippal.plugins`) come up populated with everything
+the core build provides:
 
 - the Piper engine
 - four selection-driven hotkey actions (read / queue / pause / stop)
@@ -12,7 +12,7 @@ everything the core ships:
 
 If you're a third-party plugin author, this file is a good worked
 example of how to fill the registries from your own package's
-`__init__.py`.
+`__init__.py` — pippal_pro does the same thing.
 """
 
 from __future__ import annotations
@@ -28,7 +28,7 @@ from .engines.piper import PiperBackend
 from .plugins import Zone
 
 # ---------------------------------------------------------------------------
-# Tray item builders for the built-in package.
+# Tray item builders for the core package.
 # ---------------------------------------------------------------------------
 # Builders are called at app-compose time with a SimpleNamespace context
 # (engine, config, overlay, settings, root, quit_action, tray_action,
@@ -61,9 +61,33 @@ def _quit_tray_builder(ctx: Any) -> list:
     ]
 
 
+def _piper_voice_persist(sw: Any, engine_name: str, candidate: dict[str, Any]) -> None:
+    """Persist hook: when the user picked Piper in the engine combo,
+    write whatever the voice-display var holds into ``candidate["voice"]``.
+    The voice-display value for Piper is the on-disk filename
+    (e.g. ``en_US-amy-medium.onnx``) the combo populated."""
+    if engine_name != "piper":
+        return
+    sel = str(sw.vars["voice_display"].get())
+    candidate["voice"] = sel
+
+
 def _register() -> None:
     # ----- Engine -----
     plugins.register_engine("piper", PiperBackend)
+
+    # ----- Voice catalogue -----
+    # Built-in 18-voice subset of the rhasspy/piper-voices catalogue.
+    # Extension packages can extend this via plugins.register_voices().
+    from .voices import KNOWN_VOICES
+    plugins.register_voices(KNOWN_VOICES)
+
+    # ----- Persist hook for Piper -----
+    # Settings → Save iterates registered hooks; ours writes the
+    # voice combo selection into config["voice"] when the engine is
+    # piper. Other engine plugins register their own hooks for their
+    # own keys.
+    plugins.register_voice_card_persist_hook(_piper_voice_persist)
 
     # ----- Settings cards -----
     # Imported lazily so this module can be imported even in test
@@ -95,14 +119,14 @@ def _register() -> None:
         "windows+shift+b",
     )
 
-    # ----- Tray items (Recent, then extensions can slot items here, then
-    # Settings + Quit). The numeric orders give extensions plenty of room to
+    # ----- Tray items (Recent, then Pro can slot Mood here, then
+    # Settings + Quit). The numeric orders give Pro plenty of room to
     # insert before Settings without colliding. -----
     plugins.register_tray_item(_recent_tray_builder,   zone=Zone.ADVANCED, order=10)
     plugins.register_tray_item(_settings_tray_builder, zone=Zone.ADVANCED, order=80)
     plugins.register_tray_item(_quit_tray_builder,     zone=Zone.ADVANCED, order=90)
 
-    # ----- Core config defaults -----
+    # ----- core config defaults -----
     free_defaults: dict[str, Any] = {
         k: v for k, v in DEFAULT_CONFIG.items()
         if not k.startswith("hotkey_")

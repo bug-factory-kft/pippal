@@ -8,11 +8,14 @@ from pippal import config
 
 class TestDefaultConfig:
     def test_has_required_keys(self):
+        # Built-in keys only — Pro-specific keys (kokoro_voice,
+        # ollama_*, ai_translate_target, AI hotkeys) are contributed
+        # by `pippal_pro` via `plugins.register_defaults`, not part of
+        # this static dict.
         for key in (
-            "engine", "voice", "kokoro_voice",
+            "engine", "voice",
             "length_scale", "noise_scale",
             "hotkey_speak", "hotkey_stop",
-            "ollama_endpoint", "ollama_model",
         ):
             assert key in config.DEFAULT_CONFIG, f"missing default for {key}"
 
@@ -24,9 +27,15 @@ class TestDefaultConfig:
 
 
 class TestLoadConfig:
+    # `load_config` returns the LAYERED defaults (DEFAULT_CONFIG plus
+    # whatever any plugin — including an optional pippal_pro — has
+    # registered). We compare against `_layered_defaults()` rather than
+    # `DEFAULT_CONFIG` so the tests stay correct in both Free-only and
+    # Pro-loaded environments.
+
     def test_returns_defaults_when_file_missing(self, tmp_path: Path):
         cfg = config.load_config(path=tmp_path / "nope.json")
-        assert cfg == config.DEFAULT_CONFIG
+        assert cfg == config._layered_defaults()
         # Result is a fresh dict, not the same object.
         assert cfg is not config.DEFAULT_CONFIG
 
@@ -42,13 +51,13 @@ class TestLoadConfig:
         p = tmp_path / "config.json"
         p.write_text("{not valid", encoding="utf-8")
         cfg = config.load_config(path=p)
-        assert cfg == config.DEFAULT_CONFIG
+        assert cfg == config._layered_defaults()
 
     def test_non_dict_payload_falls_back(self, tmp_path: Path):
         p = tmp_path / "config.json"
         p.write_text(json.dumps(["a", "b"]), encoding="utf-8")
         cfg = config.load_config(path=p)
-        assert cfg == config.DEFAULT_CONFIG
+        assert cfg == config._layered_defaults()
 
 
 class TestSaveConfig:

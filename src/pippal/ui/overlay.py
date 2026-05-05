@@ -43,11 +43,11 @@ class Overlay:
     TRANS_COLOR: str = "#010203"
 
     PADDING_X: int = 32
-    PADDING_TOP: int = 18
+    PADDING_TOP: int = 12
     PADDING_BOTTOM: int = 22
     HEADER_H: int = 24
     LINE_H: int = 30
-    BODY_TOP_GAP: int = 14
+    BODY_TOP_GAP: int = 4
     BAR_H: int = 4
     MIN_HEIGHT: int = 88
 

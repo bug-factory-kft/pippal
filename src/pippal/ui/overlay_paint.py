@@ -181,11 +181,11 @@ def paint(o: _OverlayLike) -> None:
         paint_progress(o)
     elif o.state == "thinking":
         paint_thinking_dots(o)
-    elif o.state == "done":
-        paint_center_text(
-            o, o.message or "✓",
-            "#9aa0b8" if o.message else "#6dd9b8",
-        )
+        paint_thinking_label(o)
+    elif o.state == "done" and o.message:
+        # Empty done state used to show a "✓" — that read as gimmicky,
+        # so we now just let the panel fade out silently.
+        paint_center_text(o, o.message, "#9aa0b8")
 
 
 # ---------- region painters ----------
@@ -329,6 +329,16 @@ def paint_thinking_dots(o: _OverlayLike) -> None:
         sb = 239
         col = f"#{sr:02x}{sg:02x}{sb:02x}"
         o.canvas.create_oval(bx - r, cy - r, bx + r, cy + r, fill=col, outline="")
+
+
+def paint_thinking_label(o: _OverlayLike) -> None:
+    """Small caption below the bouncing dots so the user can see what
+    the app is actually doing while it spins (synthesizing, preparing
+    an AI rewrite, etc.)."""
+    label = o.action_label or "preparing…"
+    cy = (o.PADDING_TOP + o.HEADER_H + o._height) // 2
+    o.canvas.create_text(o.WIDTH // 2, cy + 18, text=label,
+                         fill="#7d8398", font=o.font_status)
 
 
 def paint_center_text(o: _OverlayLike, text: str, color: str) -> None:

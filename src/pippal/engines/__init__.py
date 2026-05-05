@@ -1,7 +1,7 @@
-"""TTS engine implementations bundled with the built-in package.
+"""TTS engine implementations bundled with the core package.
 
-extension engines (Kokoro etc.) live in `pippal_pro.engines` and
-self-register into `pippal.plugins` on import — the core
+Pro-only engines (Kokoro etc.) live in `pippal_pro.engines` and
+self-register into `pippal.plugins` on import — the core package
 itself never imports them."""
 
 from .base import TTSBackend

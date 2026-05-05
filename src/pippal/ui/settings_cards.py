@@ -30,16 +30,17 @@ def build_voice_card(sw: SettingsWindow, body: ttk.Frame) -> None:
     ttk.Label(erow, text="Engine", style="Card.TLabel",
               width=14, anchor="w").pack(side="left")
     # Engine combo lists every TTS backend that any plugin has
-    # registered. the core registers `piper`; pippal_pro adds
-    # `kokoro`. A future ElevenLabs or Edge TTS plugin would slot in
-    # here without touching this card.
+    # registered. The core pippal registers `piper`; an extension
+    # package (e.g. pippal_pro) can register others. A future
+    # ElevenLabs or Edge TTS plugin would slot in here without
+    # touching this card.
     available_engines = sorted(plugins.engines().keys()) or ["piper"]
-    # If the saved engine isn't registered (e.g. user picked Kokoro
-    # with an extension that registered it, then dropped without it), surface "piper" in the form
-    # rather than the unregistered name. Codex' "Unavailable action"
-    # principle: don't destroy the persisted value (config.json keeps
-    # 'kokoro' so a future extension reinstall picks it up), but don't fake
-    # presence in the UI either.
+    # If the saved engine isn't registered (e.g. an extension was
+    # uninstalled), surface "piper" in the form rather than the
+    # unregistered name. Codex' "Unavailable action" principle:
+    # don't destroy the persisted value (config.json keeps it so a
+    # future reinstall picks it up), but don't fake presence in the
+    # UI either.
     saved_engine = (sw.config.get("engine") or "piper").lower()
     initial_engine = saved_engine if saved_engine in available_engines else available_engines[0]
     sw.vars["engine"] = tk.StringVar(value=initial_engine)
@@ -50,7 +51,11 @@ def build_voice_card(sw: SettingsWindow, body: ttk.Frame) -> None:
     sw.engine_combo.bind("<<ComboboxSelected>>",
                           lambda _e: sw._on_engine_change())
 
-    vrow = ttk.Frame(card, style="Card.TFrame")
+    # Voice row — engine-specific extras (e.g. Pro's Kokoro language
+    # filter) get packed *before* this row by their builder, so the
+    # form reads top-to-bottom: Engine → engine extras → Voice.
+    sw.voice_row = ttk.Frame(card, style="Card.TFrame")
+    vrow = sw.voice_row
     vrow.pack(fill="x", pady=(10, 0))
     ttk.Label(vrow, text="Voice", style="Card.TLabel",
               width=14, anchor="w").pack(side="left")
@@ -64,18 +69,23 @@ def build_voice_card(sw: SettingsWindow, body: ttk.Frame) -> None:
 
     sw.vars["voice"] = tk.StringVar(
         value=sw.config.get("voice", DEFAULT_CONFIG["voice"]))
-    sw.vars["kokoro_voice"] = tk.StringVar(
-        value=sw.config.get("kokoro_voice", DEFAULT_CONFIG["kokoro_voice"]))
 
     sw.engine_hint = ttk.Label(card, text="", style="CardHint.TLabel",
                                 wraplength=480, justify="left")
     sw.engine_hint.pack(anchor="w", pady=(8, 0))
 
-    sw.kokoro_install_btn = ttk.Button(
-        card, text="Install Kokoro engine (~340 MB)…",
-        style="Card.TButton",
-        command=sw._install_kokoro,
-    )
+    # Run any engine plugin's voice-card extras builder. Each builder
+    # attaches engine-specific widgets to `sw` (e.g. Pro's Kokoro
+    # language filter row + install button); the engine-change
+    # handlers later show / hide them based on the selected engine.
+    for builder in plugins.voice_card_extras_builders():
+        try:
+            builder(sw, card)
+        except Exception as exc:
+            import sys
+            print(f"[settings] voice card extras failed: {exc}",
+                  file=sys.stderr)
+
     sw._on_engine_change()
 
 
@@ -121,11 +131,16 @@ def build_speech_card(sw: SettingsWindow, body: ttk.Frame) -> None:
 def build_hotkeys_card(sw: SettingsWindow, body: ttk.Frame) -> None:
     outer, card = make_card(body, "Hotkeys")
     outer.pack(fill="x", pady=(0, 12))
-    for i, (_action_id, key, label_text, default) in enumerate(plugins.hotkey_actions()):
+    # Label width is sized for the longest registered hotkey label so
+    # the entries line up vertically and no label gets clipped. Falls
+    # back to 18 (the previous fixed width) when there are no actions.
+    actions = list(plugins.hotkey_actions())
+    label_w = max((len(label) for _a, _k, label, _d in actions), default=18) + 2
+    for i, (_action_id, key, label_text, default) in enumerate(actions):
         row = ttk.Frame(card, style="Card.TFrame")
         row.pack(fill="x", pady=(0 if i == 0 else 8, 0))
         ttk.Label(row, text=label_text, style="Card.TLabel",
-                  width=18, anchor="w").pack(side="left")
+                  width=label_w, anchor="w").pack(side="left")
         sw.vars[key] = tk.StringVar(
             value=sw.config.get(key, default))
         ttk.Entry(row, textvariable=sw.vars[key]).pack(
@@ -233,8 +248,8 @@ def build_about_card(sw: SettingsWindow, body: ttk.Frame) -> None:
 
     # Clickable links — public site first (Bug Factory's user-facing
     # landing page), then GitHub for source / licence / privacy /
-    # terms. Microsoft Store paid users still see them so they have
-    # a way to read the licence and terms even without the repo.
+    # terms. Microsoft Store paid users still see them so they have a
+    # way to read the licence and terms even without the repo.
     link_row = ttk.Frame(card, style="Card.TFrame")
     link_row.pack(anchor="w", pady=(10, 0))
 

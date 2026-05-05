@@ -40,6 +40,61 @@ KNOWN_VOICES: list[PiperVoice] = [
 ]
 
 
+# Locale → human-readable language label, used by the Voice Manager
+# filter dropdown. Falls back to the locale code for unknown values
+# in `locale_name()` below.
+LOCALE_TO_NAME: dict[str, str] = {
+    "en_US": "English (US)",
+    "en_GB": "English (UK)",
+    "de_DE": "German",
+    "es_ES": "Spanish",
+    "es_MX": "Spanish (MX)",
+    "fr_FR": "French",
+    "it_IT": "Italian",
+    "hu_HU": "Hungarian",
+    "pl_PL": "Polish",
+    "nl_NL": "Dutch",
+    "pt_PT": "Portuguese",
+    "pt_BR": "Portuguese (BR)",
+    "cs_CZ": "Czech",
+    "ro_RO": "Romanian",
+    "sk_SK": "Slovak",
+    "hr_HR": "Croatian",
+    "tr_TR": "Turkish",
+    "el_GR": "Greek",
+    "ru_RU": "Russian",
+    "uk_UA": "Ukrainian",
+    "fi_FI": "Finnish",
+    "no_NO": "Norwegian",
+    "sv_SE": "Swedish",
+    "da_DK": "Danish",
+    "ja_JP": "Japanese",
+    "zh_CN": "Chinese",
+    "ko_KR": "Korean",
+    "ar_JO": "Arabic",
+    "fa_IR": "Persian",
+    "ka_GE": "Georgian",
+    "ca_ES": "Catalan",
+    "lv_LV": "Latvian",
+    "sl_SI": "Slovenian",
+    "is_IS": "Icelandic",
+    "cy_GB": "Welsh",
+    "vi_VN": "Vietnamese",
+    "fa_AF": "Dari",
+    "lb_LU": "Luxembourgish",
+    "mt_MT": "Maltese",
+    "kk_KZ": "Kazakh",
+    "uz_UZ": "Uzbek",
+    "sw":    "Swahili",
+}
+
+
+def locale_name(code: str) -> str:
+    """Human-readable label for a Piper locale code, falling back to
+    the code itself when unknown — better to show 'xy_AB' than nothing."""
+    return LOCALE_TO_NAME.get(code, code)
+
+
 # Map human-readable language names → Piper locale codes (priority order).
 LANG_TO_PIPER: dict[str, list[str]] = {
     "English":    ["en_US", "en_GB"],
@@ -72,22 +127,12 @@ def voice_filename(v: PiperVoice) -> str:
     return f"{v['id']}.onnx"
 
 
-# Curated Kokoro voices exposed in Settings (English-leaning subset).
-KOKORO_CURATED: list[tuple[str, str]] = [
-    ("af_bella",    "Bella — US female (recommended)"),
-    ("af_heart",    "Heart — US female, warm"),
-    ("af_nicole",   "Nicole — US female"),
-    ("af_sarah",    "Sarah — US female"),
-    ("af_sky",      "Sky — US female"),
-    ("am_adam",     "Adam — US male"),
-    ("am_michael",  "Michael — US male"),
-    ("am_fenrir",   "Fenrir — US male, deep"),
-    ("am_puck",     "Puck — US male"),
-    ("bf_emma",     "Emma — UK female"),
-    ("bf_isabella", "Isabella — UK female"),
-    ("bm_george",   "George — UK male"),
-    ("bm_lewis",    "Lewis — UK male"),
-]
+# Kokoro voices live in pippal_pro — they don't fit the PiperVoice
+# shape (no .onnx filename, no model card) and the Kokoro engine is a
+# Pro-only extension. The Pro package registers the catalogue via
+# `plugins.register_engine_voice_options("kokoro", ...)`; the public
+# package's Settings Voice card reads from that registry rather than
+# hard-coding a list here.
 
 
 def installed_voices() -> list[str]:

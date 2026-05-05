@@ -110,24 +110,34 @@ last 10 readings), and **Quit**.
 
 ## How the plugin host works
 
-`src/pippal/plugins.py` exposes registries for engines, hotkey
-actions, settings cards, tray items, AI handlers and config defaults.
+`src/pippal/plugins.py` exposes a generic registry the core package
+self-fills with built-in features and any sibling extension package
+can extend on import. The hooks an extension can target:
+
+| Registry | What it contributes |
+|---|---|
+| `register_engine(name, cls)` | A new TTS backend |
+| `register_voices(catalog)` | Piper-style voice catalogue entries |
+| `register_engine_voice_options(engine, options, language_extractor=…)` | Voice combo content for engines whose voices don't fit the Piper shape |
+| `register_voice_card_extras_builder(builder)` | Extra widgets attached to the Settings → Voice card |
+| `register_voice_card_engine_handler(handler)` | Engine-change hook that shows / hides those widgets and may override the voice combo |
+| `register_voice_card_persist_hook(hook)` | Engine-specific config keys written on Save |
+| `register_hotkey_action(action_id, key, label, default_combo)` | A bindable global hotkey |
+| `register_ai_action(action_id, handler)` | Generic per-action handler invoked by hotkey or tray |
+| `register_settings_card(builder, zone=…, order=…)` | A whole card in the Settings window |
+| `register_tray_item(builder, zone=…, order=…)` | One or more items in the tray menu |
+| `register_defaults(d)` | Config defaults the extension owns |
+
 The Community package self-registers Piper + four selection-driven
-hotkeys + six settings cards in `src/pippal/_register.py`. A
-sibling proprietary package (`pippal_pro`, distributed with the
-Microsoft Store edition) adds:
-
-- Kokoro engine
-- Four AI actions (Summary / Explain / Translate / Define) over local
-  Ollama
-- Mood preset tray submenu
-- AI / Ollama settings card
-- Audio export
-
-Discovery is presence-based: `src/pippal/__init__.py` does
-`importlib.util.find_spec("pippal_pro")` then imports it if found.
-There is no licence/entitlement check in the source — the Microsoft
-Store ships a signed MSIX that bundles both packages.
+hotkeys + six settings cards (Voice / Speech / Hotkeys / Panel /
+Integration / About) in `src/pippal/_register.py`. The optional
+sibling `pippal_pro` package (distributed with the Microsoft Store
+edition) layers on Kokoro neural TTS, four AI actions
+(Summary / Explain / Translate / Define) over local Ollama, mood
+presets, audio export, and the AI settings card — every one of
+those goes through the same hooks above, with no name-awareness on
+the public side beyond a single `importlib.import_module("pippal_pro")`
+in the discovery path.
 
 A third-party plugin (e.g. `pippal-elevenlabs`, `pippal-edge-tts`)
 could ship today by registering its engine + voice provider through

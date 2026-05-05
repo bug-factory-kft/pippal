@@ -12,7 +12,6 @@ from collections.abc import Callable
 from types import SimpleNamespace
 from typing import Any
 
-import keyboard
 import pystray
 
 from . import plugins
@@ -149,7 +148,7 @@ def main() -> None:
     # The action → handler mapping is composed from two sources:
     #   1. Built-in selection-driven actions, supplied by the engine.
     #   2. AI actions, looked up in plugins.ai_actions(). When pippal_pro
-    #      is loaded, those are populated; in a core build they're empty
+    #      is loaded, those are populated; when no extension is loaded they're empty
     #      and the corresponding hotkeys simply skip binding.
     builtin_handlers: dict[str, Callable[[], None]] = {
         "speak": engine.speak_selection_async,
@@ -167,40 +166,54 @@ def main() -> None:
         # Legacy path: the engine still carries `speak_<action>_async`
         # methods until Stage 2 moves them to pippal_pro. Once
         # pippal.engine drops those, this branch becomes unreachable
-        # when no extension registered an AI handler.
+        # when no extension is loaded (correctly — no Pro = no AI hotkeys).
         legacy = getattr(engine, f"speak_{action_id}_async", None)
         return legacy if callable(legacy) else None
 
-    handles: dict[str, Any] = {}
+    # Low-level keyboard hook with a strict exact-match dispatcher
+    # (see pippal.hotkey). Two earlier approaches were tried and
+    # rejected:
+    #
+    #   - `keyboard.add_hotkey(combo, fn, suppress=True)` had a
+    #     partial-prefix matching quirk that ate unrelated combos
+    #     like Win+Shift+S (Snipping Tool) once we had any
+    #     Win+Shift+... hotkey registered.
+    #   - Win32 `RegisterHotKey` is first-come-first-served across
+    #     the machine: PowerToys / Teams / OneDrive routinely claim
+    #     Win+Shift+... combos at startup, leaving us with
+    #     ERROR_HOTKEY_ALREADY_REGISTERED (1409).
+    #
+    # The current LL-hook approach: we see every keystroke before
+    # Windows routes it, suppress only the *exact* combos we own,
+    # and pass everything else through unchanged.
+    from .hotkey import HotkeyManager
+    hotkey_manager = HotkeyManager()
+    hotkey_manager.start()
+    # Unhook on exit so we don't leave a Windows hook installed
+    # against a dead process.
+    import atexit
+    atexit.register(hotkey_manager.stop)
 
     def bind_hotkeys() -> list[tuple[str, str, str]]:
-        """Returns a list of (action_id, combo, error) for any binding
-        that failed, so the Settings window can warn the user instead of
-        silently saving a broken combo to disk."""
-        failures: list[tuple[str, str, str]] = []
-        for name, h in list(handles.items()):
-            try:
-                keyboard.remove_hotkey(h)
-            except Exception:
-                pass
-            handles.pop(name, None)
+        """Re-bind every configured hotkey. Returns a list of
+        `(action_id, combo, error)` for any combo we couldn't parse
+        so the Settings UI can warn the user instead of silently
+        saving a broken value."""
+        hotkey_manager.unregister_all()
         for action_id, key, _label, default_combo in plugins.hotkey_actions():
             combo = config.get(key, default_combo)
             fn = _resolve_handler(action_id)
             if not combo or fn is None:
                 continue
-            try:
-                # suppress=True so other apps (Chrome, Word, etc.)
-                # don't also see the combo. Without this, e.g.
-                # `ctrl+shift+t` would simultaneously fire PipPal's
-                # Translate AND Chrome's "reopen closed tab".
-                handles[action_id] = keyboard.add_hotkey(
-                    combo, fn, suppress=True,
-                )
-            except Exception as e:
-                print(f"[hotkey] failed to bind {action_id}={combo}: {e}",
-                      file=sys.stderr)
-                failures.append((action_id, combo, str(e)))
+            hotkey_manager.register(combo, fn)
+        failures: list[tuple[str, str, str]] = []
+        for combo, reason in hotkey_manager.failures():
+            aid = next(
+                (a for a, k, _l, _d in plugins.hotkey_actions()
+                 if config.get(k, _d) == combo),
+                "?",
+            )
+            failures.append((aid, combo, reason))
         return failures
 
     bind_hotkeys()
@@ -245,7 +258,8 @@ def main() -> None:
     def quit_action(icon: Any, _item: Any) -> None:
         engine.stop()
         try:
-            keyboard.unhook_all_hotkeys()
+            hotkey_manager.unregister_all()
+            hotkey_manager.stop()
         except Exception:
             pass
         try:
@@ -257,7 +271,7 @@ def main() -> None:
     # Tray menu is composed from registered builders. Each builder
     # gets a context object (engine, config, overlay, settings, root,
     # quit_action, tray_action, save_config) and returns an iterable
-    # of pystray items. The the core package registers Recent,
+    # of pystray items. The core pippal package registers Recent,
     # Settings and Quit; pippal_pro adds Mood. Order is controlled by
     # the registered (zone, order) tuple — see plugins.tray_items().
     tray_ctx = SimpleNamespace(
