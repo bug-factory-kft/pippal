@@ -293,6 +293,55 @@ def engine_language_extractor(engine_name: str) -> Callable[[str], str] | None:
 
 
 # ---------------------------------------------------------------------------
+# Voice card extension hooks
+# ---------------------------------------------------------------------------
+# Engines whose Settings UI needs more than the generic Engine + Voice
+# combo (e.g. Kokoro wants a Language filter row and an Install
+# button) register two callbacks here. The core Voice-card builder
+# walks the registries — it has no engine-specific code.
+
+# Builders that attach extra widgets to the Voice card. Each builder is
+# called once at card-build time with ``(sw, card)`` and is expected
+# to attach widgets to ``sw`` (e.g. ``sw.kokoro_lang_row = ...``) so
+# the engine-change handler can show / hide them later.
+_voice_card_extras_builders: list[Callable[[Any, Any], None]] = []
+
+# Handlers that run on every engine-combo change. Receive
+# ``(sw, current_engine_name)`` and are expected to show their own
+# widgets when the user picked their engine and hide them otherwise.
+# A handler may also override the voice combo content (Pro's Kokoro
+# handler does this via ``plugins.engine_voice_options``).
+_voice_card_engine_handlers: list[Callable[[Any, str], None]] = []
+
+
+def register_voice_card_extras_builder(
+    builder: Callable[[Any, Any], None],
+) -> None:
+    """Add widgets to the Settings → Voice card. ``builder(sw, card)``
+    runs once at card-build time. Use this from an engine plugin to
+    attach engine-specific controls to the card; pair with
+    ``register_voice_card_engine_handler`` for the show/hide logic."""
+    _voice_card_extras_builders.append(builder)
+
+
+def voice_card_extras_builders() -> list[Callable[[Any, Any], None]]:
+    return list(_voice_card_extras_builders)
+
+
+def register_voice_card_engine_handler(
+    handler: Callable[[Any, str], None],
+) -> None:
+    """Run on every engine-combo selection. ``handler(sw, engine_name)``
+    sees the new engine name and is expected to show / hide its own
+    widgets and (optionally) override the voice combo content."""
+    _voice_card_engine_handlers.append(handler)
+
+
+def voice_card_engine_handlers() -> list[Callable[[Any, str], None]]:
+    return list(_voice_card_engine_handlers)
+
+
+# ---------------------------------------------------------------------------
 # Discovery
 # ---------------------------------------------------------------------------
 
@@ -336,3 +385,5 @@ def _reset_for_tests() -> None:
     _defaults.clear()
     _voices.clear()
     _engine_voice_options.clear()
+    _voice_card_extras_builders.clear()
+    _voice_card_engine_handlers.clear()

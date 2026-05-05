@@ -30,16 +30,17 @@ def build_voice_card(sw: SettingsWindow, body: ttk.Frame) -> None:
     ttk.Label(erow, text="Engine", style="Card.TLabel",
               width=14, anchor="w").pack(side="left")
     # Engine combo lists every TTS backend that any plugin has
-    # registered. The core pippal registers `piper`; pippal_pro adds
-    # `kokoro`. A future ElevenLabs or Edge TTS plugin would slot in
-    # here without touching this card.
+    # registered. The core pippal registers `piper`; an extension
+    # package (e.g. pippal_pro) can register others. A future
+    # ElevenLabs or Edge TTS plugin would slot in here without
+    # touching this card.
     available_engines = sorted(plugins.engines().keys()) or ["piper"]
-    # If the saved engine isn't registered (e.g. user picked Kokoro
-    # under Pro, then dropped to the public package), surface "piper" in the form
-    # rather than the unregistered name. Codex' "Unavailable action"
-    # principle: don't destroy the persisted value (config.json keeps
-    # 'kokoro' so a future Pro reinstall picks it up), but don't fake
-    # presence in the UI either.
+    # If the saved engine isn't registered (e.g. an extension was
+    # uninstalled), surface "piper" in the form rather than the
+    # unregistered name. Codex' "Unavailable action" principle:
+    # don't destroy the persisted value (config.json keeps it so a
+    # future reinstall picks it up), but don't fake presence in the
+    # UI either.
     saved_engine = (sw.config.get("engine") or "piper").lower()
     initial_engine = saved_engine if saved_engine in available_engines else available_engines[0]
     sw.vars["engine"] = tk.StringVar(value=initial_engine)
@@ -50,27 +51,9 @@ def build_voice_card(sw: SettingsWindow, body: ttk.Frame) -> None:
     sw.engine_combo.bind("<<ComboboxSelected>>",
                           lambda _e: sw._on_engine_change())
 
-    # Optional Kokoro language filter — packed into the card only
-    # when engine == 'kokoro' (see settings_window._on_engine_change).
-    # 54 voices in the dropdown is too many to scan otherwise; the
-    # filter trims the voice combo below to one language at a time.
-    sw.kokoro_lang_row = ttk.Frame(card, style="Card.TFrame")
-    ttk.Label(sw.kokoro_lang_row, text="Language", style="Card.TLabel",
-              width=14, anchor="w").pack(side="left")
-    sw.vars["kokoro_lang"] = tk.StringVar(value="All")
-    sw.kokoro_lang_combo = ttk.Combobox(
-        sw.kokoro_lang_row, textvariable=sw.vars["kokoro_lang"],
-        state="readonly",
-    )
-    sw.kokoro_lang_combo.pack(side="left", fill="x", expand=True)
-    sw.kokoro_lang_combo.bind(
-        "<<ComboboxSelected>>",
-        lambda _e: sw._on_engine_change(),
-    )
-
-    # Stored on `sw` so `_on_engine_change` can pack `kokoro_lang_row`
-    # *before* the voice row (i.e. right under Engine), instead of
-    # appending it at the bottom of the card.
+    # Voice row — engine-specific extras (e.g. Pro's Kokoro language
+    # filter) get packed *before* this row by their builder, so the
+    # form reads top-to-bottom: Engine → engine extras → Voice.
     sw.voice_row = ttk.Frame(card, style="Card.TFrame")
     vrow = sw.voice_row
     vrow.pack(fill="x", pady=(10, 0))
@@ -86,24 +69,23 @@ def build_voice_card(sw: SettingsWindow, body: ttk.Frame) -> None:
 
     sw.vars["voice"] = tk.StringVar(
         value=sw.config.get("voice", DEFAULT_CONFIG["voice"]))
-    # `kokoro_voice` is registered as a default by pippal_pro when
-    # Pro is loaded — read from the layered defaults so the var has
-    # a sensible value in either build.
-    from ..config import _layered_defaults
-    sw.vars["kokoro_voice"] = tk.StringVar(
-        value=sw.config.get(
-            "kokoro_voice", _layered_defaults().get("kokoro_voice", "")
-        ))
 
     sw.engine_hint = ttk.Label(card, text="", style="CardHint.TLabel",
                                 wraplength=480, justify="left")
     sw.engine_hint.pack(anchor="w", pady=(8, 0))
 
-    sw.kokoro_install_btn = ttk.Button(
-        card, text="Install Kokoro engine (~340 MB)…",
-        style="Card.TButton",
-        command=sw._install_kokoro,
-    )
+    # Run any engine plugin's voice-card extras builder. Each builder
+    # attaches engine-specific widgets to `sw` (e.g. Pro's Kokoro
+    # language filter row + install button); the engine-change
+    # handlers later show / hide them based on the selected engine.
+    for builder in plugins.voice_card_extras_builders():
+        try:
+            builder(sw, card)
+        except Exception as exc:
+            import sys
+            print(f"[settings] voice card extras failed: {exc}",
+                  file=sys.stderr)
+
     sw._on_engine_change()
 
 

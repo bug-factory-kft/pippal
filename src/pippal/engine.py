@@ -5,8 +5,10 @@ status) and delegates the heavy work to focused modules:
 
 - :mod:`pippal.clipboard_capture`  selection capture
 - :mod:`pippal.playback`           synthesis + audio loop
-- :mod:`pippal.ai_runner`          AI actions over Ollama
-- :mod:`pippal.exporter`           save selection to a WAV file
+
+Extension packages can plug in additional behaviours through the
+plugin host (e.g. AI actions, audio export) — those handlers run
+out-of-process from this module's perspective.
 
 UI updates flow through an `overlay_ref` callable so the engine never
 imports Tk."""

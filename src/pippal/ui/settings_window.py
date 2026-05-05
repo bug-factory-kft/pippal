@@ -21,23 +21,6 @@ from .theme import UI, apply_dark_theme
 from .voice_manager import VoiceManagerDialog
 
 
-# Pro-only behaviour that the Settings window touches when the user
-# picks the Kokoro engine. The core distribution doesn't ship these
-# modules; if pippal_pro isn't installed the engine combo never offers
-# 'kokoro' as an option (plugins.engines() doesn't include it), so
-# the lazy lookups below are unreachable when no extension is installed.
-def _pro_kokoro_helpers() -> tuple[Any | None, Any | None]:
-    """Return (kokoro_installed_fn, KokoroInstallDialog_cls) or (None, None)
-    when pippal_pro isn't loaded. Localised here so the Settings UI
-    only has one bridge point to the Pro package."""
-    try:
-        from pippal_pro.moods import kokoro_installed
-        from pippal_pro.ui.kokoro_install import KokoroInstallDialog
-    except ImportError:
-        return None, None
-    return kokoro_installed, KokoroInstallDialog
-
-
 class SettingsWindow:
     def __init__(
         self,
@@ -282,99 +265,43 @@ class SettingsWindow:
         self.var_label.config(text=f"{v:.2f}")
 
     def _refresh_voice_list(self) -> None:
-        if "engine" in self.vars and self.vars["engine"].get() == "piper":
+        # Voice list refresh is engine-agnostic: rebuild whichever
+        # engine is currently selected. Engine plugins decide for
+        # themselves whether their voice combo content depends on
+        # disk state (Piper) or is a static catalogue (Kokoro).
+        if "engine" in self.vars:
             self._on_engine_change()
 
     def _on_engine_change(self) -> None:
+        """Re-populate the Voice card after the user picks an engine.
+
+        The default behaviour here covers the always-registered Piper
+        engine: list installed `.onnx` files, nudge the user toward
+        Manage…, and tell every registered handler about the change
+        so engine-specific extensions (e.g. pippal_pro for Kokoro)
+        can show / hide their own widgets and override the voice
+        combo content."""
         eng = self.vars["engine"].get()
-        if eng == "kokoro":
-            # Make sure the Kokoro language filter row is visible —
-            # packed directly below Engine (above the Voice row) so
-            # the dependent Voice combo reads top-to-bottom.
+
+        # Default Piper-style population. Plugin handlers below may
+        # override the voice combo for their own engine.
+        installed = installed_voices() or [DEFAULT_CONFIG["voice"]]
+        self.voice_combo["values"] = installed
+        cur = str(self.vars["voice"].get())
+        self.vars["voice_display"].set(cur if cur in installed else installed[0])
+        self.engine_hint.config(
+            text="Piper voice. Click Manage to install more from the curated list.",
+        )
+        self.manage_btn.pack(side="left", padx=(10, 0))
+
+        # Engine-specific handlers — they self-filter on `eng`.
+        for handler in plugins.voice_card_engine_handlers():
             try:
-                self.kokoro_lang_row.pack(
-                    fill="x", pady=(10, 0), before=self.voice_row,
-                )
-            except Exception:
-                pass
-
-            # The voice combo and language filter content come from
-            # whichever plugin registered the Kokoro engine — the core
-            # package doesn't know what a Kokoro voice looks like.
-            kokoro_options = plugins.engine_voice_options("kokoro")
-            extract_lang = plugins.engine_language_extractor("kokoro")
-
-            langs_in_catalog: list[str] = []
-            if extract_lang is not None:
-                seen_langs: set[str] = set()
-                for vid, _desc in kokoro_options:
-                    lang = extract_lang(vid)
-                    if lang not in seen_langs:
-                        seen_langs.add(lang)
-                        langs_in_catalog.append(lang)
-            self.kokoro_lang_combo["values"] = ["All", *langs_in_catalog]
-            chosen_lang = self.vars["kokoro_lang"].get() or "All"
-            if chosen_lang not in ("All", *langs_in_catalog):
-                chosen_lang = "All"
-                self.vars["kokoro_lang"].set("All")
-
-            # Build the voice combo from the filtered subset.
-            if extract_lang is None or chosen_lang == "All":
-                filtered = list(kokoro_options)
-            else:
-                filtered = [
-                    (vid, desc) for vid, desc in kokoro_options
-                    if extract_lang(vid) == chosen_lang
-                ] or list(kokoro_options)
-            labels = [f"{vid} — {desc}" for vid, desc in filtered]
-            self.voice_combo["values"] = labels
-            cur = str(self.vars["kokoro_voice"].get() or "af_bella")
-            match = next(
-                (lab for lab in labels if lab.startswith(cur + " —")), labels[0],
-            )
-            self.vars["voice_display"].set(match)
-
-            kokoro_installed, _dlg = _pro_kokoro_helpers()
-            if kokoro_installed is None:
-                # Pro not loaded — shouldn't happen because the engine
-                # combo wouldn't even have offered 'kokoro', but degrade
-                # gracefully if the user typed it manually into config.
-                self.engine_hint.config(
-                    text="Kokoro engine requires PipPal Pro.")
-                self.kokoro_install_btn.pack_forget()
-                self.manage_btn.pack_forget()
-            elif kokoro_installed():
-                self.engine_hint.config(
-                    text="Kokoro is installed. Voices are bundled — no per-voice download.")
-                self.kokoro_install_btn.pack_forget()
-                self.manage_btn.pack_forget()
-            else:
-                self.engine_hint.config(
-                    text="Kokoro is not installed yet. The model and voices "
-                         "(~340 MB) need to be downloaded once.")
-                self.kokoro_install_btn.pack(anchor="w", pady=(8, 0))
-                self.manage_btn.pack_forget()
-        else:
-            # Piper (or any non-Kokoro engine): hide the Kokoro
-            # language filter row and show the per-voice list of
-            # installed Piper models.
-            try:
-                self.kokoro_lang_row.pack_forget()
-            except Exception:
-                pass
-            installed = installed_voices() or [DEFAULT_CONFIG["voice"]]
-            self.voice_combo["values"] = installed
-            cur = str(self.vars["voice"].get())
-            self.vars["voice_display"].set(cur if cur in installed else installed[0])
-            self.engine_hint.config(
-                text="Piper voice. Click Manage to install more from the curated list.")
-            self.kokoro_install_btn.pack_forget()
-            self.manage_btn.pack(side="left", padx=(10, 0))
-
-    def _install_kokoro(self) -> None:
-        _, KokoroInstallDialog = _pro_kokoro_helpers()
-        if KokoroInstallDialog is not None:
-            KokoroInstallDialog(self.win, on_done=self._on_engine_change)
+                handler(self, eng)
+            except Exception as exc:
+                import sys
+                print(f"[settings] engine handler error: {exc}",
+                      file=sys.stderr)
 
     def _refresh_ctx_status(self) -> None:
         status = context_menu_status()
