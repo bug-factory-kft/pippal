@@ -245,6 +245,54 @@ def voices() -> list[Any]:
 
 
 # ---------------------------------------------------------------------------
+# Per-engine voice options registry
+# ---------------------------------------------------------------------------
+# An engine plugin like the Kokoro backend ships with a flat list of
+# voices that don't fit the Piper-style ``PiperVoice`` shape (no
+# language code in the id, no ``.onnx`` filename to install). The
+# Settings Voice card needs *some* way to populate the voice combo
+# when the user selects that engine, but the core has no opinion on
+# what those voices look like — so we expose a tiny opaque registry:
+# the engine plugin hands us ``(value, label)`` pairs and an optional
+# ``language_extractor(value) -> str`` for the language filter.
+
+_engine_voice_options: dict[
+    str,
+    tuple[list[tuple[str, str]], Callable[[str], str] | None],
+] = {}
+
+
+def register_engine_voice_options(
+    engine_name: str,
+    options: list[tuple[str, str]],
+    language_extractor: Callable[[str], str] | None = None,
+) -> None:
+    """Register the voice combo content for an engine.
+
+    ``options`` is a list of ``(value, label)`` pairs as the Settings
+    voice combo will display them. ``language_extractor`` is an
+    optional callable that derives a human-readable language name from
+    a voice value — when present, the Voice card shows a Language
+    filter row that lets the user trim a long list to one language at
+    a time."""
+    _engine_voice_options[engine_name] = (list(options), language_extractor)
+
+
+def engine_voice_options(engine_name: str) -> list[tuple[str, str]]:
+    """``(value, label)`` pairs the engine's voice combo should show.
+    Empty list when no plugin has registered options for ``engine_name``
+    — the Settings card hides the engine-specific UI in that case."""
+    return list(_engine_voice_options.get(engine_name, ([], None))[0])
+
+
+def engine_language_extractor(engine_name: str) -> Callable[[str], str] | None:
+    """Optional ``value -> language`` callable for an engine. Returns
+    None when the registered engine doesn't categorise voices by
+    language (or when no engine is registered for ``engine_name``)."""
+    return _engine_voice_options.get(engine_name, ([], None))[1]
+
+
+# ---------------------------------------------------------------------------
 # Discovery
 # ---------------------------------------------------------------------------
 
@@ -287,3 +335,4 @@ def _reset_for_tests() -> None:
     _tray_items.clear()
     _defaults.clear()
     _voices.clear()
+    _engine_voice_options.clear()

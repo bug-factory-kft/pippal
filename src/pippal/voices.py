@@ -127,78 +127,12 @@ def voice_filename(v: PiperVoice) -> str:
     return f"{v['id']}.onnx"
 
 
-# All 54 Kokoro v1.0 voices. The id encodes language + gender:
-#   first char  = locale     (a US-en, b UK-en, e Spanish, f French,
-#                              h Hindi, i Italian, j Japanese,
-#                              p Brazilian Portuguese, z Mandarin)
-#   second char = gender     (f female, m male)
-# The list is ordered: US English → UK English → other languages
-# alphabetical, females before males inside a language.
-KOKORO_CURATED: list[tuple[str, str]] = [
-    # ---- US English ----
-    ("af_bella",      "Bella — US female (recommended)"),
-    ("af_heart",      "Heart — US female, warm"),
-    ("af_nicole",     "Nicole — US female"),
-    ("af_sarah",      "Sarah — US female"),
-    ("af_sky",        "Sky — US female"),
-    ("af_alloy",      "Alloy — US female"),
-    ("af_aoede",      "Aoede — US female"),
-    ("af_jessica",    "Jessica — US female"),
-    ("af_kore",       "Kore — US female"),
-    ("af_nova",       "Nova — US female"),
-    ("af_river",      "River — US female"),
-    ("am_adam",       "Adam — US male"),
-    ("am_michael",    "Michael — US male"),
-    ("am_fenrir",     "Fenrir — US male, deep"),
-    ("am_puck",       "Puck — US male"),
-    ("am_echo",       "Echo — US male"),
-    ("am_eric",       "Eric — US male"),
-    ("am_liam",       "Liam — US male"),
-    ("am_onyx",       "Onyx — US male"),
-    ("am_santa",      "Santa — US male"),
-    # ---- UK English ----
-    ("bf_emma",       "Emma — UK female"),
-    ("bf_isabella",   "Isabella — UK female"),
-    ("bf_alice",      "Alice — UK female"),
-    ("bf_lily",       "Lily — UK female"),
-    ("bm_george",     "George — UK male"),
-    ("bm_lewis",      "Lewis — UK male"),
-    ("bm_daniel",     "Daniel — UK male"),
-    ("bm_fable",      "Fable — UK male"),
-    # ---- Spanish ----
-    ("ef_dora",       "Dora — Spanish female"),
-    ("em_alex",       "Alex — Spanish male"),
-    ("em_santa",      "Santa — Spanish male"),
-    # ---- French ----
-    ("ff_siwis",      "Siwis — French female"),
-    # ---- Hindi ----
-    ("hf_alpha",      "Alpha — Hindi female"),
-    ("hf_beta",       "Beta — Hindi female"),
-    ("hm_omega",      "Omega — Hindi male"),
-    ("hm_psi",        "Psi — Hindi male"),
-    # ---- Italian ----
-    ("if_sara",       "Sara — Italian female"),
-    ("im_nicola",     "Nicola — Italian male"),
-    # ---- Japanese ----
-    ("jf_alpha",      "Alpha — Japanese female"),
-    ("jf_gongitsune", "Gongitsune — Japanese female"),
-    ("jf_nezumi",     "Nezumi — Japanese female"),
-    ("jf_tebukuro",   "Tebukuro — Japanese female"),
-    ("jm_kumo",       "Kumo — Japanese male"),
-    # ---- Portuguese (Brazil) ----
-    ("pf_dora",       "Dora — BR Portuguese female"),
-    ("pm_alex",       "Alex — BR Portuguese male"),
-    ("pm_santa",      "Santa — BR Portuguese male"),
-    # ---- Mandarin Chinese ----
-    ("zf_xiaobei",    "Xiaobei — Mandarin female"),
-    ("zf_xiaoni",     "Xiaoni — Mandarin female"),
-    ("zf_xiaoxiao",   "Xiaoxiao — Mandarin female"),
-    ("zf_xiaoyi",     "Xiaoyi — Mandarin female"),
-    ("zm_yunjian",    "Yunjian — Mandarin male"),
-    ("zm_yunxi",      "Yunxi — Mandarin male"),
-    ("zm_yunxia",     "Yunxia — Mandarin male"),
-    ("zm_yunyang",    "Yunyang — Mandarin male"),
-]
+# Kokoro voices live in pippal_pro — they don't fit the PiperVoice
+# shape (no .onnx filename, no model card) and the Kokoro engine is a
+# Pro-only extension. The Pro package registers the catalogue via
+# `plugins.register_engine_voice_options("kokoro", ...)`; the public
+# package's Settings Voice card reads from that registry rather than
+# hard-coding a list here.
 
 
 def installed_voices() -> list[str]:

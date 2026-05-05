@@ -44,12 +44,6 @@ OVERLAY_MESSAGE_MS: int = 1800
 TRAY_POLL_MS: int = 400
 
 # ----- network -----
-# Streaming download timeout for Voice Manager (Hugging Face) and
-# the Kokoro installer.
+# Streaming download timeout for Voice Manager (Hugging Face) and any
+# extension package's installer.
 DOWNLOAD_TIMEOUT_S: float = 30.0
-# Per-call timeout for Ollama list_models — 3 s is enough for the
-# UI to feel snappy while the daemon is local.
-OLLAMA_LIST_TIMEOUT_S: float = 3.0
-# Per-call timeout for Ollama chat completions; intentionally generous
-# so a slow first-token doesn't kill a translate.
-OLLAMA_CHAT_TIMEOUT_S: float = 180.0

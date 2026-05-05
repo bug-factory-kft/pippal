@@ -8,11 +8,14 @@ from pippal import config
 
 class TestDefaultConfig:
     def test_has_required_keys(self):
+        # Built-in keys only — Pro-specific keys (kokoro_voice,
+        # ollama_*, ai_translate_target, AI hotkeys) are contributed
+        # by `pippal_pro` via `plugins.register_defaults`, not part of
+        # this static dict.
         for key in (
-            "engine", "voice", "kokoro_voice",
+            "engine", "voice",
             "length_scale", "noise_scale",
             "hotkey_speak", "hotkey_stop",
-            "ollama_endpoint", "ollama_model",
         ):
             assert key in config.DEFAULT_CONFIG, f"missing default for {key}"
 

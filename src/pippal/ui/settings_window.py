@@ -3,7 +3,6 @@
 
 from __future__ import annotations
 
-import threading
 import tkinter as tk
 from collections.abc import Callable
 from tkinter import messagebox, ttk
@@ -16,8 +15,7 @@ from ..context_menu import (
     install_context_menu,
     uninstall_context_menu,
 )
-from ..ollama_client import OllamaClient
-from ..voices import KOKORO_CURATED, installed_voices
+from ..voices import installed_voices
 from . import theme
 from .theme import UI, apply_dark_theme
 from .voice_manager import VoiceManagerDialog
@@ -287,27 +285,6 @@ class SettingsWindow:
         if "engine" in self.vars and self.vars["engine"].get() == "piper":
             self._on_engine_change()
 
-    # Map of Kokoro id-prefix → human-readable language name. The
-    # first character of every Kokoro voice id encodes the locale.
-    # Module-level mapping (RUF012: no mutable class-attrs) tucked
-    # inside the method via a default-arg trick when needed.
-    @staticmethod
-    def _kokoro_lang_for(voice_id: str) -> str:
-        prefix_map = {
-            "a": "English (US)",
-            "b": "English (UK)",
-            "e": "Spanish",
-            "f": "French",
-            "h": "Hindi",
-            "i": "Italian",
-            "j": "Japanese",
-            "p": "Portuguese (BR)",
-            "z": "Mandarin",
-        }
-        return prefix_map.get(
-            voice_id[:1], voice_id[:1] if voice_id else "Other",
-        )
-
     def _on_engine_change(self) -> None:
         eng = self.vars["engine"].get()
         if eng == "kokoro":
@@ -321,15 +298,20 @@ class SettingsWindow:
             except Exception:
                 pass
 
-            # Populate the language dropdown with the unique languages
-            # present in KOKORO_CURATED. 'All' is always first.
+            # The voice combo and language filter content come from
+            # whichever plugin registered the Kokoro engine — the core
+            # package doesn't know what a Kokoro voice looks like.
+            kokoro_options = plugins.engine_voice_options("kokoro")
+            extract_lang = plugins.engine_language_extractor("kokoro")
+
             langs_in_catalog: list[str] = []
-            seen_langs: set[str] = set()
-            for vid, _desc in KOKORO_CURATED:
-                lang = self._kokoro_lang_for(vid)
-                if lang not in seen_langs:
-                    seen_langs.add(lang)
-                    langs_in_catalog.append(lang)
+            if extract_lang is not None:
+                seen_langs: set[str] = set()
+                for vid, _desc in kokoro_options:
+                    lang = extract_lang(vid)
+                    if lang not in seen_langs:
+                        seen_langs.add(lang)
+                        langs_in_catalog.append(lang)
             self.kokoro_lang_combo["values"] = ["All", *langs_in_catalog]
             chosen_lang = self.vars["kokoro_lang"].get() or "All"
             if chosen_lang not in ("All", *langs_in_catalog):
@@ -337,10 +319,13 @@ class SettingsWindow:
                 self.vars["kokoro_lang"].set("All")
 
             # Build the voice combo from the filtered subset.
-            filtered = [
-                (vid, desc) for vid, desc in KOKORO_CURATED
-                if chosen_lang == "All" or self._kokoro_lang_for(vid) == chosen_lang
-            ] or list(KOKORO_CURATED)
+            if extract_lang is None or chosen_lang == "All":
+                filtered = list(kokoro_options)
+            else:
+                filtered = [
+                    (vid, desc) for vid, desc in kokoro_options
+                    if extract_lang(vid) == chosen_lang
+                ] or list(kokoro_options)
             labels = [f"{vid} — {desc}" for vid, desc in filtered]
             self.voice_combo["values"] = labels
             cur = str(self.vars["kokoro_voice"].get() or "af_bella")
@@ -423,71 +408,6 @@ class SettingsWindow:
             return
         self._refresh_ctx_status()
 
-    def _refresh_ollama_models(self, quiet: bool = False) -> None:
-        """List Ollama models in a background thread so the Settings UI
-        doesn't freeze for 3 s when Ollama is down."""
-        endpoint = self.vars.get("ollama_endpoint")
-        url = endpoint.get() if endpoint else DEFAULT_CONFIG["ollama_endpoint"]
-
-        def _fetch() -> None:
-            client = OllamaClient(url)
-            available = client.is_available()
-            models = client.list_models() if available else []
-            try:
-                self.win.after(
-                    0,
-                    lambda: self._apply_ollama_models(models, available, quiet, url),
-                )
-            except Exception:
-                pass
-
-        threading.Thread(target=_fetch, daemon=True).start()
-
-    def _apply_ollama_models(
-        self,
-        models: list[str],
-        available: bool,
-        quiet: bool,
-        url: str,
-    ) -> None:
-        if self.win is None or not self.win.winfo_exists():
-            return
-        if not available:
-            # Ollama daemon not reachable. Disable the model picker and
-            # surface the install hint inline (no popup — the label is
-            # less obtrusive and stays visible while the user reads).
-            self.ollama_status_label.config(
-                text="○ Ollama not detected. Install from https://ollama.com — "
-                     "AI hotkeys (Summary / Explain / Translate / Define) will "
-                     "speak an install hint until it's running.",
-            )
-            self.model_combo["values"] = []
-            self.model_combo.config(state="disabled")
-            return
-        # Reachable — re-enable controls.
-        self.model_combo.config(state="normal")
-        if models:
-            self.ollama_status_label.config(
-                text=f"✓ Ollama reachable at {url} — {len(models)} model(s) "
-                     "available.",
-            )
-            self.model_combo["values"] = models
-            cur = self.vars["ollama_model"].get()
-            if cur not in models:
-                self.vars["ollama_model"].set(models[0])
-        else:
-            self.ollama_status_label.config(
-                text=f"⚠ Ollama is running at {url} but no models are pulled. "
-                     "Run e.g. `ollama pull qwen2.5:1.5b`.",
-            )
-            self.model_combo["values"] = []
-            if not quiet:
-                messagebox.showinfo(
-                    "No Ollama models",
-                    f"Connected to {url} but no models are available.\n"
-                    "Pull one with `ollama pull qwen2.5:1.5b`.",
-                    parent=self.win,
-                )
 
     def _open_voice_manager(self) -> None:
         VoiceManagerDialog(self.win, on_changed=self._refresh_voice_list)
@@ -517,22 +437,38 @@ class SettingsWindow:
             parent=self.win,
         ):
             return
-        d = DEFAULT_CONFIG
-        self.vars["engine"].set(d["engine"])
-        self.vars["voice"].set(d["voice"])
-        self.vars["kokoro_voice"].set(d["kokoro_voice"])
-        self.vars["speed"].set(round(1.0 / float(d["length_scale"]), 2))
-        self.vars["noise_scale"].set(float(d["noise_scale"]))
-        self.vars["show_overlay"].set(bool(d["show_overlay"]))
-        self.vars["show_text_in_overlay"].set(bool(d["show_text_in_overlay"]))
-        self.vars["auto_hide_ms"].set(int(d["auto_hide_ms"]))
-        self.vars["overlay_y_offset"].set(int(d["overlay_y_offset"]))
-        self.vars["karaoke_offset_ms"].set(int(d["karaoke_offset_ms"]))
-        for _aid, key, _label, _default in plugins.hotkey_actions():
-            self.vars[key].set(str(d.get(key, "")))
-        self.vars["ollama_endpoint"].set(d["ollama_endpoint"])
-        self.vars["ollama_model"].set(d["ollama_model"])
-        self.vars["ai_translate_target"].set(d["ai_translate_target"])
+        # `_layered_defaults` includes any plugin (e.g. pippal_pro)
+        # contributions, so when the AI card is present its keys are
+        # in `d` and we'll reset them; without Pro they're absent and
+        # we silently skip.
+        from ..config import _layered_defaults
+        d = _layered_defaults()
+
+        # Helper vars without a direct config-key counterpart. `speed`
+        # is the inverse of `length_scale`; `voice_display` is just
+        # the rendered combo label.
+        if "length_scale" in d and "speed" in self.vars:
+            self.vars["speed"].set(round(1.0 / float(d["length_scale"]), 2))
+
+        skip = {"speed", "voice_display"}
+        for key, var in list(self.vars.items()):
+            if key in skip or key not in d:
+                continue
+            try:
+                cur = var.get()
+            except Exception:
+                continue
+            try:
+                if isinstance(cur, bool):
+                    var.set(bool(d[key]))
+                elif isinstance(cur, int) and not isinstance(cur, bool):
+                    var.set(int(d[key]))
+                elif isinstance(cur, float):
+                    var.set(float(d[key]))
+                else:
+                    var.set(str(d[key]))
+            except Exception:
+                pass
         self._update_speed_label()
         self._update_var_label()
         self._on_engine_change()
@@ -545,25 +481,35 @@ class SettingsWindow:
         eng = self.vars["engine"].get().lower()
         candidate["engine"] = eng
         sel = str(self.vars["voice_display"].get())
-        if eng == "kokoro":
+        if eng == "kokoro" and "kokoro_voice" in self.vars:
             voice_id = sel.split(" — ", 1)[0] if " — " in sel else sel
             candidate["kokoro_voice"] = voice_id.strip()
         else:
             candidate["voice"] = sel
 
+        # `speed` is the user-facing inverse of length_scale.
         speed = max(0.4, float(self.vars["speed"].get()))
         candidate["length_scale"] = round(1.0 / speed, 3)
-        candidate["noise_scale"] = round(float(self.vars["noise_scale"].get()), 3)
-        candidate["show_overlay"] = bool(self.vars["show_overlay"].get())
-        candidate["show_text_in_overlay"] = bool(self.vars["show_text_in_overlay"].get())
-        candidate["auto_hide_ms"] = int(self.vars["auto_hide_ms"].get())
-        candidate["overlay_y_offset"] = int(self.vars["overlay_y_offset"].get())
-        candidate["karaoke_offset_ms"] = int(self.vars["karaoke_offset_ms"].get())
-        for _aid, key, _label, _default in plugins.hotkey_actions():
-            candidate[key] = str(self.vars[key].get()).strip().lower()
-        candidate["ollama_endpoint"] = str(self.vars["ollama_endpoint"].get()).strip()
-        candidate["ollama_model"] = str(self.vars["ollama_model"].get()).strip()
-        candidate["ai_translate_target"] = str(self.vars["ai_translate_target"].get()).strip()
+
+        # Persist whatever else cards have registered. Any vars they
+        # added become candidate keys automatically, so an extension
+        # package's settings get saved without the core knowing the
+        # key names.
+        skip = {"engine", "voice", "voice_display", "kokoro_voice", "speed"}
+        for key, var in list(self.vars.items()):
+            if key in skip:
+                continue
+            try:
+                value = var.get()
+            except Exception:
+                continue
+            if isinstance(value, str):
+                value = value.strip()
+                # Hotkey combos are case-insensitive; normalise here so
+                # config diffs don't churn on capitalisation.
+                if key.startswith("hotkey_"):
+                    value = value.lower()
+            candidate[key] = value
 
         # Persist first.
         try:

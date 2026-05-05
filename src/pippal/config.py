@@ -27,10 +27,8 @@ from .paths import CONFIG_PATH
 
 DEFAULT_CONFIG: dict[str, Any] = {
     "brand_name": "PipPal",
-    "engine": "piper",                      # "piper" | "kokoro"
-    "mood_id": "",                          # last applied tray mood preset
+    "engine": "piper",                      # "piper" | (any plugin-registered)
     "voice": "en_US-ryan-high.onnx",        # Piper voice file
-    "kokoro_voice": "af_bella",             # Kokoro voice id
     "length_scale": 1.0,
     "noise_scale": 0.667,
     "noise_w": 0.8,
@@ -40,26 +38,19 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "overlay_y_offset": 100,
     "karaoke_offset_ms": 120,
 
-    # Hotkeys — Windows+Shift+letter scheme. Chrome / Edge / Firefox /
-    # Office never see Win-key combinations, so we don't trample
-    # browser actions like Ctrl+Shift+T (reopen tab) or Ctrl+Shift+Q
-    # (quit Chrome). Layout-independent: no AltGr collision with
-    # Hungarian / Polish keyboards. Win+Shift combos taken by Windows
-    # itself (S=screenshot, M=restore, arrows=move-window) avoided;
-    # letters picked for mnemonic value where possible.
+    # Built-in hotkeys — Windows+Shift+letter scheme. Chrome / Edge /
+    # Firefox / Office never see Win-key combinations, so we don't
+    # trample browser actions like Ctrl+Shift+T (reopen tab) or
+    # Ctrl+Shift+Q (quit Chrome). Layout-independent: no AltGr
+    # collision with Hungarian / Polish keyboards. Win+Shift combos
+    # taken by Windows itself (S=screenshot, M=restore,
+    # arrows=move-window) avoided; letters picked for mnemonic value
+    # where possible. Extension packages (e.g. `pippal_pro`) register
+    # their own combos via `plugins.register_hotkey_action`.
     "hotkey_speak":     "windows+shift+r",   # Read
     "hotkey_stop":      "windows+shift+b",   # Break (S is screenshot)
     "hotkey_pause":     "windows+shift+p",
     "hotkey_queue":     "windows+shift+q",
-    "hotkey_summary":   "windows+shift+u",   # sUmmary (S taken)
-    "hotkey_explain":   "windows+shift+e",
-    "hotkey_translate": "windows+shift+t",
-    "hotkey_define":    "windows+shift+d",
-
-    # AI / Ollama
-    "ollama_endpoint": "http://localhost:11434",
-    "ollama_model":    "qwen2.5:1.5b",
-    "ai_translate_target": "Hungarian",
 }
 
 
