@@ -1,0 +1,113 @@
+name: E2E (Windows)
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  e2e:
+    name: Synth pipeline E2E
+    # Self-hosted Windows runner (headless service, Session 0). Tray
+    # / Tk / hotkey hook can't run in this session — those need a
+    # logged-in interactive runner. What works headless: the synth
+    # subprocess + WAV file inspection, which is the highest-value
+    # bit anyway.
+    runs-on: [self-hosted, windows, pippal-windows]
+
+    env:
+      PIPER_VERSION: "2023.11.14-2"
+      VOICE: "en_US-ryan-high.onnx"
+      VOICE_QUALITY: "high"
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.11" }
+
+      - name: Cache piper binary + voice
+        id: cache-piper
+        uses: actions/cache@v4
+        with:
+          path: e2e-cache/
+          key: piper-${{ env.PIPER_VERSION }}-${{ env.VOICE }}-v1
+
+      - name: Download piper.exe (cache miss)
+        if: steps.cache-piper.outputs.cache-hit != 'true'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path e2e-cache/piper -Force | Out-Null
+          $url = "https://github.com/rhasspy/piper/releases/download/$env:PIPER_VERSION/piper_windows_amd64.zip"
+          Invoke-WebRequest -Uri $url -OutFile piper.zip
+          Expand-Archive -Path piper.zip -DestinationPath e2e-cache/ -Force
+          Remove-Item piper.zip
+          Get-ChildItem e2e-cache/piper -Recurse | Select-Object -First 5 FullName
+
+      - name: Download voice model (cache miss)
+        if: steps.cache-piper.outputs.cache-hit != 'true'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path e2e-cache/voices -Force | Out-Null
+          # Same URL pattern as the in-app Voice Manager builds
+          $base = "https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US/ryan/$env:VOICE_QUALITY"
+          Invoke-WebRequest -Uri "$base/$env:VOICE" -OutFile "e2e-cache/voices/$env:VOICE"
+          Invoke-WebRequest -Uri "$base/$env:VOICE.json" -OutFile "e2e-cache/voices/$env:VOICE.json"
+          Get-ChildItem e2e-cache/voices
+
+      - name: Install package + dev extras + faster-whisper
+        shell: pwsh
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]"
+          python -m pip install faster-whisper
+
+      - name: Run E2E suite
+        shell: pwsh
+        env:
+          PIPPAL_PIPER_EXE: ${{ github.workspace }}\e2e-cache\piper\piper.exe
+          PIPPAL_VOICE_DIR: ${{ github.workspace }}\e2e-cache\voices
+          PIPPAL_TEST_VOICE: ${{ env.VOICE }}
+        run: |
+          python -m pytest tests/e2e -v -m e2e | Tee-Object -FilePath e2e-output.txt
+
+      - name: Format E2E comment
+        if: always() && github.event_name == 'pull_request'
+        shell: pwsh
+        run: |
+          $icon = if ('${{ job.status }}' -eq 'success') { '✅' } else { '❌' }
+          @(
+            "### $icon E2E (synth pipeline) — ``$($env:GITHUB_SHA.Substring(0,7))``"
+            ""
+            "<details><summary>pytest output (tail)</summary>"
+            ""
+            '```'
+            (Get-Content e2e-output.txt -Tail 60 -ErrorAction SilentlyContinue)
+            '```'
+            ""
+            "</details>"
+          ) | Out-File -FilePath e2e-comment.md -Encoding utf8
+
+      - name: Find prior E2E comment
+        if: always() && github.event_name == 'pull_request'
+        id: find-e2e
+        uses: peter-evans/find-comment@v3
+        with:
+          issue-number: ${{ github.event.pull_request.number }}
+          comment-author: github-actions[bot]
+          body-includes: "E2E (synth pipeline)"
+
+      - name: Comment E2E result on PR
+        if: always() && github.event_name == 'pull_request'
+        uses: peter-evans/create-or-update-comment@v4
+        with:
+          issue-number: ${{ github.event.pull_request.number }}
+          comment-id: ${{ steps.find-e2e.outputs.comment-id }}
+          body-path: e2e-comment.md
+          edit-mode: replace
