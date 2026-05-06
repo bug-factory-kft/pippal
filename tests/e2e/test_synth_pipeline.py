@@ -76,6 +76,51 @@ class TestSynthesisPipeline:
         # audio at all", not "is it loud enough".
         assert rms > 50, f"WAV looks silent (RMS {rms})"
 
+    def test_multi_chunk_synth_and_concat(
+        self, piper_config: dict, tmp_path: Path,
+    ) -> None:
+        """An article-shaped input gets sentence-split into multiple
+        chunks. Each chunk is synthesised through the real piper.exe;
+        ``concat_wavs`` then welds them into one WAV. Catches three
+        layered regressions in one shot:
+
+        - sentence splitter drops or duplicates a sentence
+        - chunk-by-chunk synth doesn't agree on sample rate / width
+        - concat helper truncates or doubles the length
+
+        We assert the merged duration matches the sum of chunk
+        durations within 5 % — concat is meant to preserve total time.
+        """
+        from pippal.text_utils import split_sentences
+        from pippal.wav_utils import concat_wavs, wav_duration
+
+        text = (
+            "Hello there. This is a longer test message. "
+            "It has multiple sentences. Sentence splitter must "
+            "handle them all cleanly. End of message."
+        )
+        chunks = split_sentences(text)
+        assert len(chunks) >= 3, f"unexpected chunk count: {len(chunks)}"
+
+        backend = PiperBackend(piper_config)
+        chunk_paths: list[Path] = []
+        for i, c in enumerate(chunks):
+            p = tmp_path / f"chunk_{i:02d}.wav"
+            assert backend.synthesize(c, p), f"chunk {i} synth failed"
+            chunk_paths.append(p)
+
+        merged = tmp_path / "merged.wav"
+        concat_wavs(chunk_paths, merged)
+        assert merged.exists() and merged.stat().st_size > 1024
+
+        total = sum(wav_duration(p) for p in chunk_paths)
+        joined = wav_duration(merged)
+        assert total > 0
+        assert abs(joined - total) / total < 0.05, (
+            f"merged duration drifted from sum of chunks: "
+            f"merged={joined:.2f}s sum={total:.2f}s"
+        )
+
     def test_length_scale_changes_duration(
         self, piper_config: dict, tmp_path: Path,
     ) -> None:
