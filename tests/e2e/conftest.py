@@ -60,12 +60,20 @@ def piper_config(piper_exe: Path, voice_dir: Path, test_voice: str,
                   monkeypatch: pytest.MonkeyPatch) -> dict:
     """Backend config + monkey-patched paths so PiperBackend resolves
     against the runner's installed piper.exe / voice model rather than
-    the package's default lookup."""
-    from pippal import paths
+    the package's default lookup.
 
-    monkeypatch.setattr(paths, "PIPER_EXE", piper_exe)
-    monkeypatch.setattr(paths, "PIPER_DIR", piper_exe.parent)
-    monkeypatch.setattr(paths, "VOICES_DIR", voice_dir)
+    ``pippal.engines.piper`` does ``from ..paths import PIPER_EXE,
+    VOICES_DIR``, so the names bound there are independent of the
+    original module. Patching only ``pippal.paths`` would leave the
+    backend reading the stale defaults — patch both modules to be
+    safe."""
+    from pippal import paths
+    from pippal.engines import piper as piper_mod
+
+    for mod in (paths, piper_mod):
+        monkeypatch.setattr(mod, "PIPER_EXE", piper_exe, raising=False)
+        monkeypatch.setattr(mod, "PIPER_DIR", piper_exe.parent, raising=False)
+        monkeypatch.setattr(mod, "VOICES_DIR", voice_dir, raising=False)
     return {
         "voice": test_voice,
         "length_scale": 1.0,
