@@ -21,7 +21,7 @@ import pyperclip
 # fallback is fine for CI.
 try:
     import keyboard  # type: ignore[import-untyped]
-except Exception:  # noqa: BLE001
+except Exception:
     keyboard = None  # type: ignore[assignment]
 
 from . import plugins
