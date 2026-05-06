@@ -1,0 +1,89 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+  pull-requests: write   # needed by the benchmark-comment step on PRs
+
+jobs:
+  test:
+    runs-on: pippal-runner   # self-hosted runner scale set on MicroK8s
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # The base actions-runner image is a minimal Ubuntu without
+      # Python. setup-python downloads a release-managed CPython into
+      # the runner workspace.
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install package + dev extras
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]"
+
+      - name: Lint
+        run: ruff check src/pippal tests
+
+      - name: Unit tests
+        run: python -m pytest -q
+
+      # Benchmarks are skipped from `pytest -q` by default. We always
+      # run them in CI, but the result handling differs by trigger:
+      # - on a PR, we post the table as a comment so reviewers see it
+      # - on push to main, we just print to the Actions log (no PR to
+      #   comment on; consider a benchmark-baseline workflow later)
+      - name: Run benchmarks
+        id: bench
+        run: |
+          set -o pipefail
+          python -m pytest tests/benchmarks --benchmark-only \
+              --benchmark-columns=mean,stddev,ops \
+              --benchmark-sort=mean \
+              | tee bench-output.txt
+
+      # Wrap the captured output in a markdown code block + collapsible
+      # details so the comment stays readable on long suites.
+      - name: Format benchmark comment
+        if: github.event_name == 'pull_request'
+        run: |
+          {
+            echo "### 📊 Benchmark results — \`${GITHUB_SHA::7}\`"
+            echo ""
+            echo "<details><summary>Click to expand</summary>"
+            echo ""
+            echo '```'
+            tail -120 bench-output.txt
+            echo '```'
+            echo ""
+            echo "</details>"
+          } > bench-comment.md
+
+      # Reuse the same comment across pushes so the PR doesn't pile
+      # up with one benchmark report per commit. find-comment looks
+      # for the marker line we put at the top of bench-comment.md.
+      - name: Find prior benchmark comment
+        if: github.event_name == 'pull_request'
+        id: find-prior
+        uses: peter-evans/find-comment@v3
+        with:
+          issue-number: ${{ github.event.pull_request.number }}
+          comment-author: github-actions[bot]
+          body-includes: "📊 Benchmark results"
+
+      - name: Comment benchmark results on PR
+        if: github.event_name == 'pull_request'
+        uses: peter-evans/create-or-update-comment@v4
+        with:
+          issue-number: ${{ github.event.pull_request.number }}
+          comment-id: ${{ steps.find-prior.outputs.comment-id }}
+          body-path: bench-comment.md
+          edit-mode: replace
