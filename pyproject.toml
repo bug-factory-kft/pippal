@@ -9,7 +9,7 @@ description = "Your little offline reading buddy — Windows tray TTS reader"
 readme = "README.md"
 requires-python = ">=3.11"
 authors = [{ name = "Bug Factory Kft.", email = "hello@bugfactory.hu" }]
-license = { text = "MIT" }
+license = "MIT"
 license-files = ["LICENSE.md"]
 dependencies = [
     "keyboard",
