@@ -13,6 +13,7 @@ unit run by default."""
 from __future__ import annotations
 
 import urllib.error
+import urllib.parse
 import urllib.request
 
 import pytest
@@ -45,8 +46,16 @@ def _head(url: str) -> None:
 
     Hugging Face redirects model-file URLs to a CDN, hence the
     ``allow_redirects=True`` semantics — urllib follows by default.
+
+    Some catalogue paths contain non-ASCII characters (e.g. the
+    Portuguese voice ``pt_PT-tug\xe3o-medium``), so percent-encode
+    the path/query before handing it to ``http.client``, which
+    refuses non-ASCII bytes on the request line.
     """
-    req = urllib.request.Request(url, method="HEAD")
+    parts = urllib.parse.urlsplit(url)
+    safe_path = urllib.parse.quote(parts.path, safe="/")
+    encoded = urllib.parse.urlunsplit(parts._replace(path=safe_path))
+    req = urllib.request.Request(encoded, method="HEAD")
     try:
         with urllib.request.urlopen(req, timeout=15) as resp:
             assert resp.status in (200, 301, 302, 303, 307, 308), (

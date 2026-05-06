@@ -94,11 +94,16 @@ class TestSynthesisPipeline:
         from pippal.text_utils import split_sentences
         from pippal.wav_utils import concat_wavs, wav_duration
 
-        text = (
+        # split_sentences groups shorter sentences into chunks up to
+        # the 400-char cap, so a brisk paragraph would all fit in
+        # one chunk and bypass the concat path. Repeat the body
+        # until it actually overflows the cap and yields ≥3 chunks.
+        body = (
             "Hello there. This is a longer test message. "
-            "It has multiple sentences. Sentence splitter must "
-            "handle them all cleanly. End of message."
+            "It has multiple sentences. The sentence splitter must "
+            "handle them all cleanly. End of message. "
         )
+        text = body * 4
         chunks = split_sentences(text)
         assert len(chunks) >= 3, f"unexpected chunk count: {len(chunks)}"
 
