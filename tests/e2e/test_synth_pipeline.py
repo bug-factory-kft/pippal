@@ -95,9 +95,10 @@ class TestSynthesisPipeline:
         from pippal.wav_utils import concat_wavs, wav_duration
 
         # split_sentences groups shorter sentences into chunks up to
-        # the 400-char cap, so a brisk paragraph would all fit in
-        # one chunk and bypass the concat path. Repeat the body
-        # until it actually overflows the cap and yields ≥3 chunks.
+        # the 400-char cap. Repeat the body so the input overflows
+        # the cap and concat sees ≥2 inputs — that's enough to
+        # exercise the multi-WAV concat path (single-input concat
+        # is a separate code branch we already cover in unit tests).
         body = (
             "Hello there. This is a longer test message. "
             "It has multiple sentences. The sentence splitter must "
@@ -105,7 +106,7 @@ class TestSynthesisPipeline:
         )
         text = body * 4
         chunks = split_sentences(text)
-        assert len(chunks) >= 3, f"unexpected chunk count: {len(chunks)}"
+        assert len(chunks) >= 2, f"need ≥2 chunks for concat, got {len(chunks)}"
 
         backend = PiperBackend(piper_config)
         chunk_paths: list[Path] = []
