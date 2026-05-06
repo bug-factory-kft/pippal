@@ -73,6 +73,44 @@ tests (`tests/test_plugin_host.py`) pin the registry shape that
 third-party plugins code against — extend them when you change the
 public registry API.
 
+## Benchmarks
+
+Microbenchmarks for the latency-sensitive helpers live under
+`tests/benchmarks/` and are skipped from the default `pytest` run
+so the unit suite stays fast and deterministic. Run them explicitly:
+
+```powershell
+python -m pytest tests/benchmarks --benchmark-only
+```
+
+To save a baseline and compare later runs against it:
+
+```powershell
+python -m pytest tests/benchmarks --benchmark-only --benchmark-save=baseline
+# … hack the code …
+python -m pytest tests/benchmarks --benchmark-only --benchmark-compare=baseline
+```
+
+Coverage groups:
+
+- `hotkey` — LL-hook dispatch latency. Must stay well under the
+  Windows 1 s `LowLevelHooksTimeout`. Pass-through (~400 ns) and
+  repeat-suppress (~360 ns) are the keystroke-by-keystroke paths;
+  the match-and-dispatch path is dominated by `threading.Thread.start()`
+  (~70 µs) — still cheap relative to the timeout but the obvious
+  thing to optimise if it ever matters.
+- `text_utils` — sentence splitting + word iteration + karaoke
+  layout, run per synthesis chunk. Article-sized text splits in
+  ~15 µs.
+- `voices` — catalogue lookups + the on-disk glob; the latter is
+  the disk-bound floor for `Settings → Voice` populating its combo.
+- `plugins` — registry hot-path lookups (engine, voice, hotkey).
+  All under 250 ns, so 1000s of dispatches per second is easy.
+- `io` — config / history JSON round-trip, WAV duration + concat,
+  tray-icon factory first-paint and cache-hit. The atomic
+  `save_config` lands around 600 µs; the cache-hit `make_tray_icon`
+  is ~60 ns (matters because the tray-tick fires every 400 ms).
+
 ## Lint and type-check
 
 ```powershell
