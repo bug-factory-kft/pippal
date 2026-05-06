@@ -62,7 +62,7 @@ roadmap.
   cleans up chunk WAVs before exiting; tray icon flips to idle
   authoritatively.
 
-142 tests pass; ruff clean; multi-reviewer code-quality audit closed
+140 tests pass; ruff clean; multi-reviewer code-quality audit closed
 all HIGH and MEDIUM findings before this release (see
 [CODEREVIEW.md](CODEREVIEW.md)).
 

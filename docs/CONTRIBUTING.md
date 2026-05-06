@@ -16,7 +16,7 @@ git clone https://github.com/bug-factory-kft/pippal.git
 cd pippal
 .\setup.ps1                       # one-shot: piper + default voice
 python -m pip install -e ".[dev]" # editable install + dev deps
-python -m pytest -q               # 142 tests should pass
+python -m pytest -q               # 140+ tests should pass
 ruff check pippal tests
 ```
 

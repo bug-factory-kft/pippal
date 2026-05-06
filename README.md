@@ -171,7 +171,7 @@ the same API. The contract is pinned by `tests/test_plugin_host.py`.
 
 ## Status
 
-**v0.2.0 — public release.** 142 tests, ruff clean. End-to-end smoke
+**v0.2.0 — public release.** 140 tests, ruff clean. End-to-end smoke
 test of the live app on Windows 11: green. See
 [docs/CODEREVIEW.md](docs/CODEREVIEW.md) for the multi-reviewer audit
 (codex CLI + independent Claude agent + ruff + mypy) that closed
