@@ -29,10 +29,14 @@ jobs:
       # so test collection that goes anywhere near `pippal/__init__.py`
       # needs a display. Headless CI uses Xvfb. PipPal itself never
       # runs on Linux outside CI.
-      - name: Install xvfb
+      # Headless dependencies for the Linux CI runner:
+      # - xvfb: pystray's _xorg backend connects to X at import time
+      # - libtk8.6: setup-python's portable CPython dlopen's libtk
+      #   when test modules touch tkinter (overlay / theme tests do)
+      - name: Install xvfb + tk runtime
         run: |
           sudo apt-get update
-          sudo apt-get install -y xvfb
+          sudo apt-get install -y xvfb libtk8.6
 
       - name: Install package + dev extras
         run: |
