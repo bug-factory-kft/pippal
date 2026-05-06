@@ -8,54 +8,102 @@ on:
 
 permissions:
   contents: read
-  pull-requests: write   # needed by the benchmark-comment step on PRs
+  pull-requests: write   # find-comment + create-or-update-comment
 
 jobs:
-  test:
-    runs-on: pippal-runner   # self-hosted runner scale set on MicroK8s
+  # ----- Lint -----------------------------------------------------------
+  # Cheapest — runs in parallel with the other two so a typo gets
+  # reported immediately while the test job is still pulling deps.
+  lint:
+    name: Lint
+    runs-on: pippal-runner
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.11" }
+      - run: python -m pip install --upgrade pip ruff
+      - run: ruff check src/pippal tests
 
-      # The base actions-runner image is a minimal Ubuntu without
-      # Python. setup-python downloads a release-managed CPython into
-      # the runner workspace.
-      - name: Setup Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-
-      # pystray's Linux backend (_xorg) connects to X at import time,
-      # so test collection that goes anywhere near `pippal/__init__.py`
-      # needs a display. Headless CI uses Xvfb. PipPal itself never
-      # runs on Linux outside CI.
-      # Headless dependencies for the Linux CI runner:
-      # - xvfb: pystray's _xorg backend connects to X at import time
-      # - libtk8.6: setup-python's portable CPython dlopen's libtk
-      #   when test modules touch tkinter (overlay / theme tests do)
+  # ----- Unit tests -----------------------------------------------------
+  # 140 tests in tests/, benchmarks/ excluded by pytest.ini.
+  unit-tests:
+    name: Unit tests
+    runs-on: pippal-runner
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.11" }
       - name: Install xvfb + tk runtime
         run: |
           sudo apt-get update
           sudo apt-get install -y xvfb libtk8.6
-
-      - name: Install package + dev extras
-        run: |
+      - run: |
           python -m pip install --upgrade pip
           python -m pip install -e ".[dev]"
+      - name: Run unit suite
+        id: unit
+        # `tee` so we have the output for a possible failure comment
+        # while pytest's own exit code still drives the job result.
+        run: |
+          set -o pipefail
+          xvfb-run -a python -m pytest -q | tee unit-output.txt
 
-      - name: Lint
-        run: ruff check src/pippal tests
+      # If unit tests failed, post a comment with the summary so the
+      # reviewer can see what broke without hunting through the log.
+      # Success doesn't get a comment (less noise; the green check is
+      # enough).
+      - name: Format unit failure comment
+        if: failure() && github.event_name == 'pull_request'
+        run: |
+          {
+            echo "### ❌ Unit tests failed — \`${GITHUB_SHA::7}\`"
+            echo ""
+            echo "<details><summary>pytest output (tail)</summary>"
+            echo ""
+            echo '```'
+            tail -80 unit-output.txt
+            echo '```'
+            echo ""
+            echo "</details>"
+          } > unit-comment.md
 
-      - name: Unit tests
-        run: xvfb-run -a python -m pytest -q
+      - name: Find prior unit comment
+        if: failure() && github.event_name == 'pull_request'
+        id: find-unit
+        uses: peter-evans/find-comment@v3
+        with:
+          issue-number: ${{ github.event.pull_request.number }}
+          comment-author: github-actions[bot]
+          body-includes: "❌ Unit tests"
 
-      # Benchmarks are skipped from `pytest -q` by default. We always
-      # run them in CI, but the result handling differs by trigger:
-      # - on a PR, we post the table as a comment so reviewers see it
-      # - on push to main, we just print to the Actions log (no PR to
-      #   comment on; consider a benchmark-baseline workflow later)
+      - name: Comment unit failure on PR
+        if: failure() && github.event_name == 'pull_request'
+        uses: peter-evans/create-or-update-comment@v4
+        with:
+          issue-number: ${{ github.event.pull_request.number }}
+          comment-id: ${{ steps.find-unit.outputs.comment-id }}
+          body-path: unit-comment.md
+          edit-mode: replace
+
+  # ----- Benchmarks -----------------------------------------------------
+  # 35 microbenchmarks across hotkey / text_utils / voices / plugins / io.
+  # Always posts a comment on PRs so reviewers can compare numbers
+  # against the baseline they remember from the previous PR.
+  benchmarks:
+    name: Benchmarks
+    runs-on: pippal-runner
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.11" }
+      - name: Install xvfb + tk runtime
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y xvfb libtk8.6
+      - run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]"
       - name: Run benchmarks
-        id: bench
         run: |
           set -o pipefail
           xvfb-run -a python -m pytest tests/benchmarks --benchmark-only \
@@ -63,8 +111,6 @@ jobs:
               --benchmark-sort=mean \
               | tee bench-output.txt
 
-      # Wrap the captured output in a markdown code block + collapsible
-      # details so the comment stays readable on long suites.
       - name: Format benchmark comment
         if: github.event_name == 'pull_request'
         run: |
@@ -80,12 +126,9 @@ jobs:
             echo "</details>"
           } > bench-comment.md
 
-      # Reuse the same comment across pushes so the PR doesn't pile
-      # up with one benchmark report per commit. find-comment looks
-      # for the marker line we put at the top of bench-comment.md.
       - name: Find prior benchmark comment
         if: github.event_name == 'pull_request'
-        id: find-prior
+        id: find-bench
         uses: peter-evans/find-comment@v3
         with:
           issue-number: ${{ github.event.pull_request.number }}
@@ -97,6 +140,6 @@ jobs:
         uses: peter-evans/create-or-update-comment@v4
         with:
           issue-number: ${{ github.event.pull_request.number }}
-          comment-id: ${{ steps.find-prior.outputs.comment-id }}
+          comment-id: ${{ steps.find-bench.outputs.comment-id }}
           body-path: bench-comment.md
           edit-mode: replace
