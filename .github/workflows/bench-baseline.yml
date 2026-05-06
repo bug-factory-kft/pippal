@@ -1,0 +1,54 @@
+name: Update benchmark baseline
+
+# Manual trigger only — running this regenerates the
+# bench-baselines/ directory from a fresh measurement on the
+# self-hosted runner. Download the resulting artifact, commit it
+# to the repo, and the next CI run will compare against the new
+# numbers.
+#
+# Reasons to run this:
+#   - First-time bootstrap (no baseline exists yet)
+#   - After an intentional perf change (faster *or* slower)
+#   - After upgrading the runner image / Python version, which
+#     would shift absolute numbers across the board
+on:
+  workflow_dispatch:
+
+jobs:
+  measure:
+    name: Measure baseline
+    runs-on: pippal-runner
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.11" }
+
+      - name: Install runtime deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y xvfb libtk8.6
+
+      - run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]"
+
+      # `--benchmark-storage=file://bench-baselines` writes under that
+      # directory using the runner's machine fingerprint
+      # (e.g. Linux-CPython-3.11-64bit). `--benchmark-save=baseline`
+      # names this run "baseline" so a later --benchmark-compare can
+      # find it without guessing a numeric counter.
+      - name: Run + save baseline
+        run: |
+          rm -rf bench-baselines
+          xvfb-run -a python -m pytest tests/benchmarks --benchmark-only \
+              --benchmark-storage=file://bench-baselines \
+              --benchmark-save=baseline \
+              --benchmark-columns=mean,stddev,ops \
+              --benchmark-sort=mean
+
+      - name: Upload baseline as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-baseline
+          path: bench-baselines/
+          if-no-files-found: error
