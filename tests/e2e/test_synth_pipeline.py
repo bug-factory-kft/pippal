@@ -128,7 +128,11 @@ class TestSynthesisASRRoundTrip:
             f"ASR didn't recover 'hello' from synth output. "
             f"Got: {decoded!r}"
         )
-        assert "pippal" in decoded or "pi pal" in decoded or "pippa" in decoded, (
+        # whisper-tiny mishears "PipPal" — sometimes "pippal", sometimes
+        # "pip pal", sometimes "pippa" — so we strip whitespace before
+        # the membership test instead of enumerating spellings.
+        decoded_squashed = decoded.replace(" ", "")
+        assert "pippal" in decoded_squashed or "pippa" in decoded_squashed, (
             f"ASR didn't recover 'pippal' from synth output. "
             f"Got: {decoded!r}"
         )
