@@ -12,7 +12,11 @@ authors = [{ name = "Bug Factory Kft.", email = "hello@bugfactory.hu" }]
 license = "MIT"
 license-files = ["LICENSE.md"]
 dependencies = [
-    "keyboard",
+    # `keyboard` ships an X11 backend on Linux that grabs DISPLAY at
+    # import time and a kernel-input backend that needs root. PipPal
+    # is a Windows-only app, so pin the dep to Windows; tests on a
+    # headless Linux runner just stub the import in conftest.
+    'keyboard ; platform_system == "Windows"',
     "pyperclip",
     "pystray",
     "Pillow",
