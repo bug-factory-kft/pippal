@@ -122,7 +122,12 @@ jobs:
             # file path directly, so we pass the absolute baseline
             # JSON. The matching `--benchmark-storage` keeps the
             # current run + comparison rooted in the same dir tree.
-            COMPARE_FLAGS="--benchmark-storage=file://bench-baselines --benchmark-compare=$(basename $BASELINE_FILE .json | cut -d_ -f1) --benchmark-compare-fail=mean:30%"
+            # 50% threshold: many of our hot-path microbenchmarks
+            # are sub-microsecond and have high run-to-run variance
+            # on a shared k8s node. Anything >50% slower than the
+            # committed baseline is a real concern; tighter
+            # thresholds produce noise.
+            COMPARE_FLAGS="--benchmark-storage=file://bench-baselines --benchmark-compare=$(basename $BASELINE_FILE .json | cut -d_ -f1) --benchmark-compare-fail=mean:50%"
           else
             echo "No baseline in bench-baselines/. Run the 'Update benchmark baseline' workflow once to seed it."
           fi
