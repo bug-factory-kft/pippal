@@ -11,8 +11,18 @@ from __future__ import annotations
 import time
 from typing import TYPE_CHECKING
 
-import keyboard
 import pyperclip
+
+# `keyboard` is a Windows-only runtime dep — its Linux backend tries
+# to grab the X DISPLAY (or read /dev/input/event*, requiring root)
+# at import time. PipPal never runs on Linux outside CI; soft-import
+# here so module collection works on a headless runner. Tests that
+# exercise the keyboard surface patch this attribute, so a None
+# fallback is fine for CI.
+try:
+    import keyboard  # type: ignore[import-untyped]
+except Exception:
+    keyboard = None  # type: ignore[assignment]
 
 from . import plugins
 from .timing import (
