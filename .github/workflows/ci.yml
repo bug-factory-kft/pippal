@@ -114,10 +114,15 @@ jobs:
       - name: Run benchmarks
         run: |
           set -o pipefail
+          BASELINE_FILE=$(find bench-baselines -name '0001_baseline.json' 2>/dev/null | head -1)
           COMPARE_FLAGS=""
-          if find bench-baselines -name "0001_baseline.json" 2>/dev/null | grep -q .; then
-            echo "Baseline found — comparing with mean:30% regression threshold."
-            COMPARE_FLAGS="--benchmark-storage=file://bench-baselines --benchmark-compare=baseline --benchmark-compare-fail=mean:30%"
+          if [ -n "$BASELINE_FILE" ]; then
+            echo "Baseline found at $BASELINE_FILE — comparing with mean:30% regression threshold."
+            # Pytest-benchmark's `--benchmark-compare` accepts a
+            # file path directly, so we pass the absolute baseline
+            # JSON. The matching `--benchmark-storage` keeps the
+            # current run + comparison rooted in the same dir tree.
+            COMPARE_FLAGS="--benchmark-storage=file://bench-baselines --benchmark-compare=$(basename $BASELINE_FILE .json | cut -d_ -f1) --benchmark-compare-fail=mean:30%"
           else
             echo "No baseline in bench-baselines/. Run the 'Update benchmark baseline' workflow once to seed it."
           fi
