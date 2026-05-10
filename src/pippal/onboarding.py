@@ -1,7 +1,7 @@
 """First-run nudges that don't depend on a working TTS engine.
 
-When the user triggers Read / Queue and no engine is actually ready
-to synth (no Piper voice on disk, no Kokoro model, …), we can't
+When the user triggers a synth-driven action and no engine is
+actually ready (no voice on disk for the selected backend), we can't
 synthesise the standard reply — so we play a pre-recorded WAV that
 walks them through Settings → Voice Manager. The recording was made
 once with a clean voice and bundled with the install.
@@ -39,9 +39,9 @@ NO_VOICE_SCRIPT: str = (
 
 def is_default_engine_ready() -> bool:
     """True when the always-available Piper backend has at least one
-    voice on disk. Other engines (e.g. Kokoro from pippal_pro) make
-    their own readiness call via ``backend.is_available()``; this
-    helper only covers the public package's own engine."""
+    voice on disk. Plugin-registered engines make their own readiness
+    call via ``backend.is_available()``; this helper only covers the
+    public package's own engine."""
     return bool(installed_voices())
 
 

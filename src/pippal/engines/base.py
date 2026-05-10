@@ -39,6 +39,7 @@ class TTSBackend(ABC):
         Default is ``is_available()`` because a backend that doesn't
         carry per-voice assets (a hypothetical self-contained engine)
         needs nothing more. Piper overrides to also require an .onnx
-        voice on disk; Kokoro's existing ``is_available`` already
-        covers both binary and model files."""
+        voice on disk. Plugin-registered backends should override when
+        their availability check doesn't already gate on the per-voice
+        assets they need."""
         return self.is_available()

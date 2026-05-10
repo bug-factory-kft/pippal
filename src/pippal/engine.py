@@ -116,11 +116,11 @@ class TTSEngine:
         handler = plugins.get_ai_action(action_id)
         if handler is None:
             return
-        # Same gate as Speak / Queue: if no voice is installed yet,
-        # play the onboarding clip instead of an AI action that would
-        # produce synth-less silence at the end. Cheaper than letting
-        # the AI handler hit Ollama, get a response, then fail to
-        # speak it.
+        # Same gate as Speak / Queue: when no voice is installed, play
+        # the onboarding clip rather than letting the plugin handler
+        # do its work and then fail at the synth boundary. Cheaper to
+        # short-circuit before the handler runs at all — handlers may
+        # do meaningful network / disk work before reaching synth.
         self._async(self._dispatch_ai_action_impl, action_id, handler)
 
     def _dispatch_ai_action_impl(
