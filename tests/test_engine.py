@@ -156,7 +156,6 @@ class TestBackendCacheRequestedName:
         from pippal import plugins
         from pippal.engine import TTSEngine
         from pippal.engines.base import TTSBackend
-        from pippal.engines.piper import PiperBackend
 
         class _FakeEngine(TTSBackend):
             name = "fake-engine"

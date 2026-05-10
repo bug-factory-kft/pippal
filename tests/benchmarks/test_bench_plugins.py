@@ -18,7 +18,7 @@ def _seeded_registry():
     realistic non-empty registries."""
     snap = {
         "engines":    dict(plugins._engines),
-        "ai":         dict(plugins._ai_actions),
+        "ai":         dict(plugins._plugin_actions),
         "hk":         list(plugins._hotkey_actions),
         "voices":     list(plugins._voices),
         "evo":        dict(plugins._engine_voice_options),
@@ -33,8 +33,8 @@ def _seeded_registry():
     yield
     plugins._engines.clear()
     plugins._engines.update(snap["engines"])
-    plugins._ai_actions.clear()
-    plugins._ai_actions.update(snap["ai"])
+    plugins._plugin_actions.clear()
+    plugins._plugin_actions.update(snap["ai"])
     plugins._hotkey_actions.clear()
     plugins._hotkey_actions.extend(snap["hk"])
     plugins._voices.clear()

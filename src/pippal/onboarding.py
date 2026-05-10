@@ -57,7 +57,7 @@ def _wav_duration_s(path) -> float:
         return 0.0
 
 
-def play_no_voice_clip(overlay: "Overlay | None" = None) -> float:
+def play_no_voice_clip(overlay: Overlay | None = None) -> float:
     """Play the bundled "I can't read anything yet, install a voice"
     clip asynchronously and start the karaoke overlay alongside.
 
@@ -87,7 +87,7 @@ def play_no_voice_clip(overlay: "Overlay | None" = None) -> float:
             # in karaoke-cursor mode, which is what start_chunk feeds.
             overlay.set_state("reading")
             overlay.start_chunk(NO_VOICE_SCRIPT, duration_s, idx=0, total=1)
-        except Exception as exc:  # noqa: BLE001 — overlay quirks must
+        except Exception as exc:
             # never block the audio cue.
             print(f"[onboarding] overlay sync failed: {exc}", file=sys.stderr)
 
@@ -104,7 +104,7 @@ def play_no_voice_clip(overlay: "Overlay | None" = None) -> float:
     def _play() -> None:
         try:
             winsound.PlaySound(str(ASSET_NO_VOICE_WAV), flags)
-        except Exception as exc:  # noqa: BLE001 — we never want to
+        except Exception as exc:
             # crash an action handler over an onboarding nicety.
             print(f"[onboarding] PlaySound failed: {exc}", file=sys.stderr)
 

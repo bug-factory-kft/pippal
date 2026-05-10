@@ -9,7 +9,6 @@ from tkinter import messagebox, ttk
 from typing import Any
 
 from .. import plugins
-from ..config import DEFAULT_CONFIG
 from ..context_menu import (
     context_menu_status,
     install_context_menu,
