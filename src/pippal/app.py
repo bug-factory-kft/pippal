@@ -162,7 +162,15 @@ def main() -> None:
             return builtin_handlers[action_id]
         ai = plugins.get_ai_action(action_id)
         if ai is not None:
-            return lambda aid=action_id: ai(engine, aid)
+            # Route every AI invocation through engine.dispatch_ai_action
+            # rather than calling the plugin handler directly. The engine
+            # method does two things we'd otherwise have to duplicate at
+            # every call site:
+            #   1. ``_async`` so hotkey / tray threads don't block.
+            #   2. ``_maybe_play_onboarding`` so an AI action with no
+            #      voice installed plays the onboarding clip instead of
+            #      hitting Ollama and silently failing on the synth.
+            return lambda aid=action_id: engine.dispatch_ai_action(aid)
         # Legacy path: the engine still carries `speak_<action>_async`
         # methods until Stage 2 moves them to pippal_pro. Once
         # pippal.engine drops those, this branch becomes unreachable

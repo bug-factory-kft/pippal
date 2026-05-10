@@ -8,6 +8,7 @@ from pathlib import Path
 
 from ..config import DEFAULT_CONFIG
 from ..paths import PIPER_DIR, PIPER_EXE, VOICES_DIR
+from ..voices import installed_voices
 from .base import TTSBackend
 
 _NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
@@ -18,6 +19,12 @@ class PiperBackend(TTSBackend):
 
     def is_available(self) -> bool:
         return PIPER_EXE.exists()
+
+    def is_ready(self) -> bool:
+        # piper.exe alone isn't enough — synth needs an .onnx voice
+        # in VOICES_DIR. Without one, the action handlers should play
+        # the onboarding clip instead of letting synth fail silently.
+        return self.is_available() and bool(installed_voices())
 
     def synthesize(self, text: str, out_path: Path) -> bool:
         model = VOICES_DIR / self.config.get("voice", DEFAULT_CONFIG["voice"])

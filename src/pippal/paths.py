@@ -48,6 +48,13 @@ PIPER_DIR: Path = INSTALL_ROOT / "piper"
 PIPER_EXE: Path = PIPER_DIR / "piper.exe"
 ASSET_ICON_PATH: Path = INSTALL_ROOT / "assets" / "pippal_icon.png"
 
+# Pre-recorded onboarding clip played when the user triggers a Read /
+# Queue action and no engine is ready (no voice installed). Tells the
+# user how to install a voice — without needing a working TTS to do it.
+ASSET_NO_VOICE_WAV: Path = (
+    INSTALL_ROOT / "assets" / "onboarding" / "pippal-no-installed-language.wav"
+)
+
 
 # ---- Data root (always writable) -------------------------------------
 def _resolve_data_root() -> Path:
