@@ -18,13 +18,29 @@ real profile."""
 from __future__ import annotations
 
 import os
+import sys
 from pathlib import Path
 
+
 # ---- Install root (read-only-safe) -----------------------------------
-# ``__file__`` is ``…/src/pippal/paths.py`` → three .parent hops to the
-# checkout/install root. After PyInstaller --onedir this resolves
-# inside the bundle.
-INSTALL_ROOT: Path = Path(__file__).resolve().parent.parent.parent
+def _resolve_install_root() -> Path:
+    """Where the bundled engine binary and static assets live.
+
+    PyInstaller ``--onedir`` puts ``datas`` under ``_internal/``;
+    ``sys._MEIPASS`` points at that ``_internal/`` dir at runtime, so
+    ``INSTALL_ROOT/assets/...`` and ``INSTALL_ROOT/piper/...`` resolve
+    correctly inside the MSIX bundle.
+
+    In dev (no frozen build) ``__file__`` is ``…/src/pippal/paths.py``,
+    so three ``.parent`` hops give the source checkout root."""
+    if getattr(sys, "frozen", False):
+        meipass = getattr(sys, "_MEIPASS", None)
+        if meipass:
+            return Path(meipass)
+    return Path(__file__).resolve().parent.parent.parent
+
+
+INSTALL_ROOT: Path = _resolve_install_root()
 
 # Bundled engine binary + static assets — the install layer is allowed
 # to be read-only.
