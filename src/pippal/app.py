@@ -19,7 +19,7 @@ from .command_server import start_command_server
 from .config import load_config, save_config
 from .engine import TTSEngine
 from .history import load_history, save_history
-from .paths import PIPER_EXE, ensure_dirs
+from .paths import CMD_SERVER_PORT, PIPER_EXE, ensure_dirs
 from .timing import TRAY_POLL_MS
 from .tray import make_tray_icon
 from .ui import Overlay, SettingsWindow
@@ -96,7 +96,41 @@ def _build_history_submenu(engine: TTSEngine,
     return builder
 
 
+def _another_instance_running() -> bool:
+    """True when something else already holds the PipPal IPC port.
+
+    PipPal is a tray app — running two copies is never useful, just
+    confusing (two icons, double-played audio, fighting over hotkeys).
+    The IPC port doubles as a cheap mutex: if we can't bind, somebody
+    else is up. Avoids pulling in a Win32 mutex just for this."""
+    import socket
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 0)
+            s.bind(("127.0.0.1", CMD_SERVER_PORT))
+        return False
+    except OSError:
+        return True
+
+
 def main() -> None:
+    if _another_instance_running():
+        # Surface a tiny modal so the user understands why "nothing
+        # happened" when they clicked the Start menu shortcut a second
+        # time — they should look in the system tray instead.
+        try:
+            import ctypes
+            ctypes.windll.user32.MessageBoxW(
+                None,
+                "PipPal is already running.\n\n"
+                "Look for the icon in the system tray (next to the clock).",
+                "PipPal",
+                0x40,  # MB_ICONINFORMATION
+            )
+        except Exception:
+            pass
+        sys.exit(0)
+
     ensure_dirs()
     config = load_config()
 

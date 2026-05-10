@@ -285,13 +285,32 @@ class SettingsWindow:
 
         # Default Piper-style population. Plugin handlers below may
         # override the voice combo for their own engine.
-        installed = installed_voices() or [DEFAULT_CONFIG["voice"]]
-        self.voice_combo["values"] = installed
-        cur = str(self.vars["voice"].get())
-        self.vars["voice_display"].set(cur if cur in installed else installed[0])
-        self.engine_hint.config(
-            text="Piper voice. Click Manage to install more from the curated list.",
-        )
+        installed = installed_voices()
+        if installed:
+            self.voice_combo["values"] = installed
+            self.voice_combo.configure(state="readonly")
+            cur = str(self.vars["voice"].get())
+            self.vars["voice_display"].set(
+                cur if cur in installed else installed[0]
+            )
+            self.engine_hint.config(
+                text="Piper voice. Click Manage to install more from the "
+                     "curated list.",
+            )
+            self.manage_btn.configure(text="Manage…")
+        else:
+            # Empty Piper install — don't pretend a voice is selected;
+            # show a disabled placeholder and turn the Manage button
+            # into the call-to-action so the user can't miss it.
+            placeholder = "(no voice installed)"
+            self.voice_combo["values"] = [placeholder]
+            self.vars["voice_display"].set(placeholder)
+            self.voice_combo.configure(state="disabled")
+            self.engine_hint.config(
+                text="No Piper voice installed yet. Click Install voices "
+                     "to download one.",
+            )
+            self.manage_btn.configure(text="Install voices…")
         self.manage_btn.pack(side="left", padx=(10, 0))
 
         # Engine-specific handlers — they self-filter on `eng`.
