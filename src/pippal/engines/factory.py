@@ -4,9 +4,9 @@ The factory has zero name-awareness of specific engines: it just looks
 up the requested engine name in the plugin registry. The core
 distribution always registers `piper` (in `pippal/_register.py`),
 so the always-available fallback is `plugins.get_engine("piper")`.
-The optional `pippal_pro` package registers e.g. `kokoro`. A
-hypothetical third-party plugin could register `elevenlabs`,
-`edge_tts`, etc. — none of which require touching this file."""
+Extension packages or third-party plugins register additional engines
+via ``plugins.register_engine`` — none of which require touching
+this file."""
 
 from __future__ import annotations
 

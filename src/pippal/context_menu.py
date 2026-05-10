@@ -6,7 +6,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from .paths import PIPER_EXE, ROOT
+from .paths import INSTALL_ROOT, PIPER_EXE
 
 CONTEXT_MENU_EXTENSIONS: tuple[str, ...] = (".txt", ".md")
 CONTEXT_MENU_LABEL: str = "Read with PipPal"
@@ -60,7 +60,7 @@ def install_context_menu() -> None:
     """Register 'Read with PipPal' on .txt and .md files for the current
     user. Raises RuntimeError if any registry write fails."""
     pythonw = _pythonw_path()
-    client = str(ROOT / PIPPAL_OPEN_SCRIPT)
+    client = str(INSTALL_ROOT / PIPPAL_OPEN_SCRIPT)
     cmd = f'"{pythonw}" "{client}" "%1"'
 
     for ext in CONTEXT_MENU_EXTENSIONS:

@@ -43,30 +43,17 @@ machine.
 - 🚀 Tray icon, autostart on login, single tiny process.
 - 🔌 **Plugin host** — `pippal.plugins` lets a separate package register
   engines, settings cards, hotkey actions, tray items and config
-  defaults without touching the core. The paid build adds Kokoro, AI
-  actions and mood presets through this same API.
+  defaults without touching the core.
 
 ## Editions
 
-PipPal ships in two editions. The Community edition is this open-source
-repo; the Microsoft Store edition adds a few quality-of-life features
-on top through a separate proprietary plugin.
-
-| | Community (this repo) | Microsoft Store edition |
-|---|---|---|
-| Source | MIT, [public](https://github.com/bug-factory-kft/pippal) | Community + the proprietary `pippal_pro` plugin |
-| Engine | Piper | Piper + Kokoro |
-| Hotkeys | Read / Queue / Pause / Stop | + Summary / Explain / Translate / Define |
-| AI | — | Local Ollama (offline LLM) |
-| Tray menu | Recent / Settings / Quit | + Mood presets |
-| Settings cards | Voice / Speech / Hotkeys / Panel / Integration / About | + AI / Ollama |
-| Audio export | — | Save selection as WAV |
-
-The Store edition is the same binary plus one extra Python package
-(see [the plugin host architecture](#how-the-plugin-host-works)
-below). The Community edition stays fully usable on its own — Piper +
-the floating reader panel + the right-click integration are the
-backbone, the Store edition layers convenience on top.
+PipPal ships in two editions. The **Community edition** is this
+open-source repo; the **Microsoft Store edition** is a paid build
+that layers extra quality-of-life features on top via a separate
+proprietary plugin. The Community edition stays fully usable on its
+own — Piper + the floating reader panel + the right-click integration
+are the backbone, and the paid edition layers convenience on top
+without changing how the core works.
 
 ## Install (Windows, build from source)
 
@@ -87,9 +74,9 @@ Startup folder:
 copy start_server.vbs "$env:APPDATA\Microsoft\Windows\Start Menu\Programs\Startup\PipPal.vbs"
 ```
 
-`reader_app.py` works whether or not `pippal_pro` is installed —
-without it you get the Community feature set; the Microsoft Store
-edition bundles it and lights up the extra features.
+`reader_app.py` works whether or not the optional extension package
+is installed — without it you get the Community feature set; the
+paid edition bundles the plugin and lights up its extra features.
 
 ## Usage
 
@@ -123,21 +110,17 @@ can extend on import. The hooks an extension can target:
 | `register_voice_card_engine_handler(handler)` | Engine-change hook that shows / hides those widgets and may override the voice combo |
 | `register_voice_card_persist_hook(hook)` | Engine-specific config keys written on Save |
 | `register_hotkey_action(action_id, key, label, default_combo)` | A bindable global hotkey |
-| `register_ai_action(action_id, handler)` | Generic per-action handler invoked by hotkey or tray |
+| `register_plugin_action(action_id, handler)` | Generic per-action handler invoked by hotkey or tray |
 | `register_settings_card(builder, zone=…, order=…)` | A whole card in the Settings window |
 | `register_tray_item(builder, zone=…, order=…)` | One or more items in the tray menu |
 | `register_defaults(d)` | Config defaults the extension owns |
 
 The Community package self-registers Piper + four selection-driven
 hotkeys + six settings cards (Voice / Speech / Hotkeys / Panel /
-Integration / About) in `src/pippal/_register.py`. The optional
-sibling `pippal_pro` package (distributed with the Microsoft Store
-edition) layers on Kokoro neural TTS, four AI actions
-(Summary / Explain / Translate / Define) over local Ollama, mood
-presets, audio export, and the AI settings card — every one of
-those goes through the same hooks above, with no name-awareness on
-the public side beyond a single `importlib.import_module("pippal_pro")`
-in the discovery path.
+Integration / About) in `src/pippal/_register.py`. Optional extension
+packages plug into these same hooks at import time — the core has no
+name-awareness of any specific extension beyond a single
+`importlib.import_module("pippal_pro")` in the discovery path.
 
 A third-party plugin (e.g. `pippal-elevenlabs`, `pippal-edge-tts`)
 could ship today by registering its engine + voice provider through

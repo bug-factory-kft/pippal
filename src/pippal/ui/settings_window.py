@@ -268,7 +268,7 @@ class SettingsWindow:
         # Voice list refresh is engine-agnostic: rebuild whichever
         # engine is currently selected. Engine plugins decide for
         # themselves whether their voice combo content depends on
-        # disk state (Piper) or is a static catalogue (Kokoro).
+        # disk state (Piper) or is a static catalogue.
         if "engine" in self.vars:
             self._on_engine_change()
 
@@ -278,20 +278,38 @@ class SettingsWindow:
         The default behaviour here covers the always-registered Piper
         engine: list installed `.onnx` files, nudge the user toward
         Manage…, and tell every registered handler about the change
-        so engine-specific extensions (e.g. pippal_pro for Kokoro)
-        can show / hide their own widgets and override the voice
-        combo content."""
+        so engine-specific extensions can show / hide their own
+        widgets and override the voice combo content."""
         eng = self.vars["engine"].get()
 
         # Default Piper-style population. Plugin handlers below may
         # override the voice combo for their own engine.
-        installed = installed_voices() or [DEFAULT_CONFIG["voice"]]
-        self.voice_combo["values"] = installed
-        cur = str(self.vars["voice"].get())
-        self.vars["voice_display"].set(cur if cur in installed else installed[0])
-        self.engine_hint.config(
-            text="Piper voice. Click Manage to install more from the curated list.",
-        )
+        installed = installed_voices()
+        if installed:
+            self.voice_combo["values"] = installed
+            self.voice_combo.configure(state="readonly")
+            cur = str(self.vars["voice"].get())
+            self.vars["voice_display"].set(
+                cur if cur in installed else installed[0]
+            )
+            self.engine_hint.config(
+                text="Piper voice. Click Manage to install more from the "
+                     "curated list.",
+            )
+            self.manage_btn.configure(text="Manage…")
+        else:
+            # Empty Piper install — don't pretend a voice is selected;
+            # show a disabled placeholder and turn the Manage button
+            # into the call-to-action so the user can't miss it.
+            placeholder = "(no voice installed)"
+            self.voice_combo["values"] = [placeholder]
+            self.vars["voice_display"].set(placeholder)
+            self.voice_combo.configure(state="disabled")
+            self.engine_hint.config(
+                text="No Piper voice installed yet. Click Install voices "
+                     "to download one.",
+            )
+            self.manage_btn.configure(text="Install voices…")
         self.manage_btn.pack(side="left", padx=(10, 0))
 
         # Engine-specific handlers — they self-filter on `eng`.
@@ -411,7 +429,7 @@ class SettingsWindow:
         # Engine-specific persist hooks decide what gets written for
         # the current engine. The built-in Piper hook reads
         # ``voice_display`` into ``voice``; an extension's hook may
-        # set its own per-engine key (Pro writes ``kokoro_voice``).
+        # set its own per-engine config keys.
         for hook in plugins.voice_card_persist_hooks():
             try:
                 hook(self, eng, candidate)

@@ -19,7 +19,7 @@ def wav_duration(path: str | Path) -> float:
     except Exception:
         pass
     try:
-        import soundfile as sf  # optional dep, present with Kokoro
+        import soundfile as sf  # optional dep, present when an extension installs it
 
         return float(sf.info(str(path)).duration)
     except Exception:

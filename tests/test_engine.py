@@ -1,5 +1,5 @@
 """Smoke tests for TTSEngine state — exercises the synchronous helpers
-that don't require a working winsound / Kokoro / clipboard."""
+that don't require a working winsound / external engine / clipboard."""
 
 from __future__ import annotations
 
@@ -15,7 +15,7 @@ from pippal.engines.piper import PiperBackend
 @pytest.fixture()
 def engine() -> TTSEngine:
     root = MagicMock()
-    config: dict[str, Any] = {"engine": "piper", "ollama_model": ""}
+    config: dict[str, Any] = {"engine": "piper"}
     return TTSEngine(root, config, overlay_ref=lambda: None)
 
 
@@ -145,31 +145,40 @@ class TestTokenCancellation:
 
 
 class TestBackendCacheRequestedName:
-    """When the user requests Kokoro but it's unavailable, the factory
-    falls back to Piper. The cache is keyed against the *requested*
-    engine, so subsequent calls don't re-instantiate the fallback every
-    chunk."""
+    """When the user requests an extension-supplied engine but it's
+    unavailable, the factory falls back to Piper. The cache is keyed
+    against the *requested* engine, so subsequent calls don't
+    re-instantiate the fallback every chunk."""
 
-    def test_kokoro_fallback_caches_against_requested_name(self):
-        from pippal_pro.engines.kokoro import KokoroBackend
+    def test_unavailable_engine_fallback_caches_against_requested_name(self):
+        from pathlib import Path
 
         from pippal import plugins
         from pippal.engine import TTSEngine
+        from pippal.engines.base import TTSBackend
         from pippal.engines.piper import PiperBackend
 
-        engine = TTSEngine(MagicMock(), {"engine": "kokoro"}, lambda: None)
-        # Free build doesn't ship Kokoro, so register it here for the
-        # test only — see the matching teardown below.
-        plugins.register_engine("kokoro", KokoroBackend)
+        class _FakeEngine(TTSBackend):
+            name = "fake-engine"
+
+            def is_available(self) -> bool:
+                return False
+
+            def synthesize(self, text: str, out_path: Path) -> bool:
+                return False
+
+        engine = TTSEngine(MagicMock(), {"engine": "fake-engine"}, lambda: None)
+        plugins.register_engine("fake-engine", _FakeEngine)
         try:
-            with patch.object(KokoroBackend, "is_available", return_value=False):
-                backend1 = engine._get_backend()
-                backend2 = engine._get_backend()
+            backend1 = engine._get_backend()
+            backend2 = engine._get_backend()
         finally:
-            plugins._engines.pop("kokoro", None)
+            plugins._engines.pop("fake-engine", None)
         assert backend1 is backend2  # cached, not re-built every call
         assert isinstance(backend1, PiperBackend)
-        assert engine._backend_name == "kokoro"  # cached against requested name
+        # Cache key is the *requested* name so subsequent calls don't
+        # re-resolve and re-warn.
+        assert engine._backend_name == "fake-engine"
 
 
 class TestCaptureSelectionReleasesModifiers:
@@ -195,108 +204,4 @@ class TestCaptureSelectionReleasesModifiers:
             released = {c.args[0] for c in kb.release.call_args_list}
         assert {"ctrl", "shift", "alt", "super"} <= released
 
-
-class TestTranslateVoiceOverride:
-    """The translate AI flow must build a one-off PiperBackend with the
-    target-language voice, NOT mutate the live config."""
-
-    def test_translate_swaps_voice_without_touching_config(
-        self,
-        engine: TTSEngine,
-    ):
-        engine.config["voice"] = "en_US-ryan-high.onnx"
-        engine.config["engine"] = "kokoro"
-        engine.config["ai_translate_target"] = "Hungarian"
-        engine.config["ollama_model"] = "qwen2.5:1.5b"
-
-        captured: dict[str, Any] = {}
-
-        def fake_play(_engine, text: str, my_token: int, backend=None) -> None:
-            captured["text"] = text
-            captured["backend"] = backend
-            captured["voice_in_engine_config"] = engine.config.get("voice")
-            captured["engine_in_engine_config"] = engine.config.get("engine")
-
-        with patch("pippal_pro.ai_runner.synthesize_and_play",
-                   side_effect=fake_play), \
-             patch("pippal_pro.ai_runner.capture_for_action",
-                   return_value="Hello world"), \
-             patch("pippal_pro.ai_runner.OllamaClient") as ollama_cls, \
-             patch("pippal_pro.ai_runner.find_piper_voice_for_language",
-                   return_value="hu_HU-anna-medium.onnx"), \
-             patch("pippal_pro.ai_runner.winsound"):
-            ollama_cls.return_value.chat.return_value = "Sziasztok, vilag"
-            from pippal_pro.ai_runner import run_ai_action
-            run_ai_action(engine, "translate")
-
-        # Played the AI response, not the original text.
-        assert captured["text"] == "Sziasztok, vilag"
-        # Used a one-off backend (not the cached default).
-        backend = captured["backend"]
-        assert isinstance(backend, PiperBackend)
-        assert backend.config["voice"] == "hu_HU-anna-medium.onnx"
-        assert backend.config["engine"] == "piper"
-        # Critically, the live config wasn't touched mid-call.
-        assert captured["voice_in_engine_config"] == "en_US-ryan-high.onnx"
-        assert captured["engine_in_engine_config"] == "kokoro"
-        # And after the call returns it's still untouched.
-        assert engine.config["voice"] == "en_US-ryan-high.onnx"
-        assert engine.config["engine"] == "kokoro"
-
-    def test_translate_without_target_voice_falls_through(
-        self,
-        engine: TTSEngine,
-    ):
-        engine.config["ollama_model"] = "qwen2.5:1.5b"
-        engine.config["ai_translate_target"] = "Klingon"
-
-        captured: dict[str, Any] = {}
-
-        def fake_play(_engine, text: str, my_token: int, backend=None) -> None:
-            captured["backend"] = backend
-
-        with patch("pippal_pro.ai_runner.synthesize_and_play",
-                   side_effect=fake_play), \
-             patch("pippal_pro.ai_runner.capture_for_action",
-                   return_value="anything"), \
-             patch("pippal_pro.ai_runner.OllamaClient") as ollama_cls, \
-             patch("pippal_pro.ai_runner.find_piper_voice_for_language",
-                   return_value=None), \
-             patch("pippal_pro.ai_runner.winsound"):
-            ollama_cls.return_value.chat.return_value = "tlhIngan Hol"
-            from pippal_pro.ai_runner import run_ai_action
-            run_ai_action(engine, "translate")
-
-        # No matching voice → no override; backend defaults to None
-        # (engine uses its cached backend).
-        assert captured["backend"] is None
-
-
-class TestAiRunnerNoOllama:
-    """When the Ollama daemon is unreachable, AI hotkeys should TTS-speak
-    an install hint rather than silently failing or showing a tiny
-    overlay error the user might miss."""
-
-    def test_unreachable_speaks_install_hint(self, engine: TTSEngine):
-        engine.config["ollama_model"] = "qwen2.5:1.5b"
-        captured: dict[str, Any] = {}
-
-        def fake_play(_engine, text: str, _my_token: int, backend=None) -> None:
-            captured["text"] = text
-
-        with patch("pippal_pro.ai_runner.synthesize_and_play",
-                   side_effect=fake_play), \
-             patch("pippal_pro.ai_runner.capture_for_action",
-                   return_value="anything"), \
-             patch("pippal_pro.ai_runner.OllamaClient") as ollama_cls, \
-             patch("pippal_pro.ai_runner.winsound"):
-            ollama_cls.return_value.is_available.return_value = False
-            from pippal_pro.ai_runner import run_ai_action
-            run_ai_action(engine, "summary")
-
-        # chat() is NEVER called when Ollama is unreachable.
-        ollama_cls.return_value.chat.assert_not_called()
-        # The user hears an install hint instead.
-        assert "Ollama" in captured["text"]
-        assert "install" in captured["text"].lower()
 

@@ -22,3 +22,7 @@ kokoro/
 # OS
 Thumbs.db
 .DS_Store
+
+# Serena MCP (machine-specific cache; config and memories are committed)
+.serena/cache/
+src/*.egg-info/

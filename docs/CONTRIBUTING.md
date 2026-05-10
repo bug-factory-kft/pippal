@@ -43,8 +43,7 @@ src/pippal/
 ├── config.py           # layered defaults + user overrides
 ├── history.py          # JSON persistence for the Recent submenu
 ├── voices.py           # Piper voice catalogue + helpers
-├── ollama_client.py    # tiny stdlib HTTP client (used by pippal_pro)
-└── text_utils.py / wav_utils.py / context_menu.py / paths.py / timing.py
+└── text_utils.py / wav_utils.py / context_menu.py / paths.py / timing.py / onboarding.py
 tests/                  # pytest, pure-logic only (UI is not unit-tested)
 ```
 
@@ -52,10 +51,9 @@ The rule of thumb: **one class per file**, behind one clear
 responsibility. If a file gets past ~500 lines or mixes two concerns,
 split it.
 
-`pippal_pro/` (Pro extensions — Kokoro engine, AI actions, mood
-presets, audio export) lives in a separate **private** repo. The
-public `pippal` package never imports it; the plugin host wires
-things up at runtime via registry lookups.
+The paid Microsoft Store edition adds a separate proprietary plugin
+package. The public `pippal` package never imports it by name; the
+plugin host wires things up at runtime via registry lookups.
 
 ## Tests
 
@@ -64,7 +62,7 @@ python -m pytest -q
 ```
 
 Pytest only covers pure-logic modules (text utils, WAV utils, voices,
-history, config, Ollama client, engine state, plugin host contract).
+history, config, engine state, plugin host contract).
 The UI is intentionally not unit-tested — Tk roots are brittle in
 headless CI. UI changes get tested by running the app.
 
@@ -209,12 +207,12 @@ plugins.register_hotkey_action(
     "My Action",                  # label shown in the Hotkeys settings row
     "windows+shift+m",            # default combo (also seeds defaults registry)
 )
-plugins.register_ai_action("my-action", my_action_handler)
+plugins.register_plugin_action("my-action", my_action_handler)
 ```
 
 The Settings → Hotkeys card iterates `plugins.hotkey_actions()`, the
 app's hotkey binder iterates the same list and looks the handler up
-in `plugins.ai_actions()`. No edits required to `app.py`,
+in `plugins.plugin_actions()`. No edits required to `app.py`,
 `config.py`, or `settings_cards.py`.
 
 ## What we won't take
@@ -226,7 +224,7 @@ in `plugins.ai_actions()`. No edits required to `app.py`,
   the same PR.
 - **Auto-update / telemetry / cloud sync.** PipPal is offline-first
   by design.
-- **Pro-feature ports** (Kokoro, AI, mood presets, audio export).
-  Those are proprietary and ship in `pippal_pro`. If you'd like to
-  contribute a similar feature, build it as a separate plugin package
-  using the API documented above.
+- **Re-implementations of paid-edition features.** Those ship in a
+  separate proprietary plugin. If you'd like to contribute a similar
+  feature, build it as a separate plugin package using the API
+  documented above.

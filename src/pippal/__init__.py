@@ -1,8 +1,9 @@
 """PipPal — your little offline reading buddy.
 
-Tray-resident Windows app that reads selected text aloud using Piper or
-Kokoro neural TTS, with an animated reader panel, AI shortcuts via
-Ollama, and right-click integration.
+Tray-resident Windows app that reads selected text aloud using the
+Piper neural TTS engine, with an animated reader panel and right-click
+integration. Optional extension packages can self-register additional
+engines and selection-driven actions through ``pippal.plugins``.
 
 Public API:
 - `main()`     — entry point used by `python -m pippal` and reader_app.py

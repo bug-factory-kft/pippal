@@ -19,7 +19,7 @@ from .command_server import start_command_server
 from .config import load_config, save_config
 from .engine import TTSEngine
 from .history import load_history, save_history
-from .paths import PIPER_EXE, ensure_dirs
+from .paths import CMD_SERVER_PORT, PIPER_EXE, ensure_dirs
 from .timing import TRAY_POLL_MS
 from .tray import make_tray_icon
 from .ui import Overlay, SettingsWindow
@@ -96,17 +96,52 @@ def _build_history_submenu(engine: TTSEngine,
     return builder
 
 
+def _another_instance_running() -> bool:
+    """True when something else already holds the PipPal IPC port.
+
+    PipPal is a tray app — running two copies is never useful, just
+    confusing (two icons, double-played audio, fighting over hotkeys).
+    The IPC port doubles as a cheap mutex: if we can't bind, somebody
+    else is up. Avoids pulling in a Win32 mutex just for this."""
+    import socket
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 0)
+            s.bind(("127.0.0.1", CMD_SERVER_PORT))
+        return False
+    except OSError:
+        return True
+
+
 def main() -> None:
+    if _another_instance_running():
+        # Surface a tiny modal so the user understands why "nothing
+        # happened" when they clicked the Start menu shortcut a second
+        # time — they should look in the system tray instead.
+        try:
+            import ctypes
+            ctypes.windll.user32.MessageBoxW(
+                None,
+                "PipPal is already running.\n\n"
+                "Look for the icon in the system tray (next to the clock).",
+                "PipPal",
+                0x40,  # MB_ICONINFORMATION
+            )
+        except Exception:
+            pass
+        sys.exit(0)
+
     ensure_dirs()
     config = load_config()
 
-    # The user can opt into Kokoro-only setups; only require piper.exe
-    # when Piper is the configured engine.
+    # piper.exe is only required when Piper is actually selected;
+    # users on a non-Piper engine (extension-supplied) can run with
+    # the Piper binary absent.
     engine_name = (config.get("engine") or "piper").lower()
     if engine_name == "piper" and not PIPER_EXE.exists():
         print(
             f"piper.exe missing at {PIPER_EXE}; run setup.ps1 or "
-            "switch engine to Kokoro in Settings.",
+            "switch engine in Settings.",
             file=sys.stderr,
         )
         sys.exit(1)
@@ -147,9 +182,10 @@ def main() -> None:
     # ----- Hotkeys -----
     # The action → handler mapping is composed from two sources:
     #   1. Built-in selection-driven actions, supplied by the engine.
-    #   2. AI actions, looked up in plugins.ai_actions(). When pippal_pro
-    #      is loaded, those are populated; when no extension is loaded they're empty
-    #      and the corresponding hotkeys simply skip binding.
+    #   2. Plugin-registered actions, looked up in
+    #      ``plugins.plugin_actions()``. When an extension is loaded
+    #      those are populated; otherwise they're empty and the
+    #      corresponding hotkeys simply skip binding.
     builtin_handlers: dict[str, Callable[[], None]] = {
         "speak": engine.speak_selection_async,
         "queue": engine.queue_selection_async,
@@ -160,13 +196,19 @@ def main() -> None:
     def _resolve_handler(action_id: str) -> Callable[[], None] | None:
         if action_id in builtin_handlers:
             return builtin_handlers[action_id]
-        ai = plugins.get_ai_action(action_id)
-        if ai is not None:
-            return lambda aid=action_id: ai(engine, aid)
+        ext = plugins.get_plugin_action(action_id)
+        if ext is not None:
+            # Route plugin-registered actions through the engine method
+            # rather than calling the handler directly. The engine
+            # method ``_async``-wraps (so hotkey / tray threads don't
+            # block) and runs the no-voice gate (so a plugin action
+            # whose synth would silently fail plays the onboarding
+            # clip instead). Calling the handler directly would skip
+            # both behaviours.
+            return lambda aid=action_id: engine.dispatch_plugin_action(aid)
         # Legacy path: the engine still carries `speak_<action>_async`
-        # methods until Stage 2 moves them to pippal_pro. Once
-        # pippal.engine drops those, this branch becomes unreachable
-        # when no extension is loaded (correctly — no Pro = no AI hotkeys).
+        # methods kept for backwards compatibility until extension
+        # plugins move every selection-driven flow over.
         legacy = getattr(engine, f"speak_{action_id}_async", None)
         return legacy if callable(legacy) else None
 

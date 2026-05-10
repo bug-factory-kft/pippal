@@ -51,9 +51,9 @@ def build_voice_card(sw: SettingsWindow, body: ttk.Frame) -> None:
     sw.engine_combo.bind("<<ComboboxSelected>>",
                           lambda _e: sw._on_engine_change())
 
-    # Voice row — engine-specific extras (e.g. Pro's Kokoro language
-    # filter) get packed *before* this row by their builder, so the
-    # form reads top-to-bottom: Engine → engine extras → Voice.
+    # Voice row — engine-specific extras get packed *before* this row
+    # by their builder, so the form reads top-to-bottom: Engine →
+    # engine extras → Voice.
     sw.voice_row = ttk.Frame(card, style="Card.TFrame")
     vrow = sw.voice_row
     vrow.pack(fill="x", pady=(10, 0))
@@ -75,8 +75,7 @@ def build_voice_card(sw: SettingsWindow, body: ttk.Frame) -> None:
     sw.engine_hint.pack(anchor="w", pady=(8, 0))
 
     # Run any engine plugin's voice-card extras builder. Each builder
-    # attaches engine-specific widgets to `sw` (e.g. Pro's Kokoro
-    # language filter row + install button); the engine-change
+    # attaches engine-specific widgets to ``sw``; the engine-change
     # handlers later show / hide them based on the selected engine.
     for builder in plugins.voice_card_extras_builders():
         try:
@@ -248,8 +247,8 @@ def build_about_card(sw: SettingsWindow, body: ttk.Frame) -> None:
 
     # Clickable links — public site first (Bug Factory's user-facing
     # landing page), then GitHub for source / licence / privacy /
-    # terms. Microsoft Store paid users still see them so they have a
-    # way to read the licence and terms even without the repo.
+    # terms. Users still see them so they have a way to read the
+    # licence and terms even without the repo.
     link_row = ttk.Frame(card, style="Card.TFrame")
     link_row.pack(anchor="w", pady=(10, 0))
 

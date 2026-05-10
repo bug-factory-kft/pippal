@@ -25,7 +25,7 @@ Tests: **142 passing** (Free build only). `ruff`: **0 errors**.
    block; Python 3 deletes the binding so any download error would
    `NameError` on the UI thread. Fixed: capture `str(e)` into a
    default arg.
-2. ✅ Same NameError pattern in the Kokoro install dialog (Pro repo).
+2. ✅ Same NameError pattern in an extension package's install dialog.
 3. ✅ Clipboard race in `_capture_selection` — added a per-engine
    lock; sentinel/save/restore can no longer interleave across two
    simultaneous hotkey actions.
@@ -97,9 +97,9 @@ Tests: **142 passing** (Free build only). `ruff`: **0 errors**.
 23. ✅ `bind_all("<MouseWheel>")` leak — Settings and Voice Manager
     use `canvas.bind` (local) instead of `bind_all` (global), so
     closing the window stops hijacking scroll events.
-24. ✅ Settings sync Ollama call — `_refresh_ollama_models` runs the
-    HTTP request in a background thread and marshals results back
-    via `self.win.after`.
+24. ✅ Settings sync HTTP call — extension settings cards run remote
+    fetches in a background thread and marshal results back via
+    `self.win.after`.
 25. ✅ Settings `_save` atomic — builds a `candidate` dict, calls
     `on_save` first, then `self.config.clear() / .update(candidate)`
     only on success.

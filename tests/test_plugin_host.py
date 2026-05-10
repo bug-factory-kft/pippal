@@ -3,13 +3,13 @@
 These pin the registry's behaviour from the perspective of a hypothetical
 third-party plugin. The public `pippal` package guarantees:
 
-- engines, ai_actions, hotkey_actions, settings cards, tray items and
+- engines, plugin_actions, hotkey_actions, settings cards, tray items and
   defaults can be registered from any imported module
 - registrations are visible to the engine factory and the app composer
 - a name registered later WINS (last-writer semantics) so an extension
   can replace a default registration
 - unknown / unregistered names degrade gracefully (Piper fallback for
-  engines, no-op for AI actions, skipped for hotkeys)
+  engines, no-op for plugin actions, skipped for hotkeys)
 
 The `pippal_pro` package is just one consumer of this API; if anyone
 ships a `pippal-elevenlabs` or `pippal-edge-tts` plugin tomorrow, these
@@ -47,7 +47,7 @@ def _isolated_registry():
     global registry exactly as they found it."""
     snap = {
         "engines": dict(plugins._engines),
-        "ai":      dict(plugins._ai_actions),
+        "ai":      dict(plugins._plugin_actions),
         "hk":      list(plugins._hotkey_actions),
         "cards":   list(plugins._settings_cards),
         "tray":    list(plugins._tray_items),
@@ -57,8 +57,8 @@ def _isolated_registry():
     yield
     plugins._engines.clear()
     plugins._engines.update(snap["engines"])
-    plugins._ai_actions.clear()
-    plugins._ai_actions.update(snap["ai"])
+    plugins._plugin_actions.clear()
+    plugins._plugin_actions.update(snap["ai"])
     plugins._hotkey_actions.clear()
     plugins._hotkey_actions.extend(snap["hk"])
     plugins._settings_cards.clear()
@@ -113,7 +113,7 @@ class TestEngineRegistry:
         assert plugins.get_engine("fake-test-engine") is _Replacement
 
 
-class TestAiActionRegistry:
+class TestPluginActionRegistry:
     def test_register_and_lookup(self, _isolated_registry):
         seen: dict[str, Any] = {}
 
@@ -121,8 +121,8 @@ class TestAiActionRegistry:
             seen["engine"] = engine
             seen["action_id"] = action_id
 
-        plugins.register_ai_action("fake-action", handler)
-        h = plugins.get_ai_action("fake-action")
+        plugins.register_plugin_action("fake-action", handler)
+        h = plugins.get_plugin_action("fake-action")
         assert h is handler
 
         sentinel_engine = MagicMock()
@@ -131,7 +131,7 @@ class TestAiActionRegistry:
         assert seen["action_id"] == "fake-action"
 
     def test_get_unknown_returns_none(self, _isolated_registry):
-        assert plugins.get_ai_action("never-registered") is None
+        assert plugins.get_plugin_action("never-registered") is None
 
 
 class TestHotkeyRegistry:
@@ -162,12 +162,12 @@ class TestSettingsCardRegistry:
             zone=plugins.Zone.VOICE,
         )
         plugins.register_settings_card(
-            lambda *_a, **_k: calls.append("ai"),
-            zone=plugins.Zone.AI,
+            lambda *_a, **_k: calls.append("extra"),
+            zone=plugins.Zone.EXTRA,
         )
         for builder in plugins.settings_cards():
             builder()
-        assert calls == ["voice", "ai", "late"]
+        assert calls == ["voice", "extra", "late"]
 
 
 class TestTrayItemRegistry:

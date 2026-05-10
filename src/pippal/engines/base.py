@@ -31,3 +31,15 @@ class TTSBackend(ABC):
 
     def is_available(self) -> bool:
         return True
+
+    def is_ready(self) -> bool:
+        """Stronger check than ``is_available``: the engine is wired up
+        AND has a voice / model loaded ready to actually synth.
+
+        Default is ``is_available()`` because a backend that doesn't
+        carry per-voice assets (a hypothetical self-contained engine)
+        needs nothing more. Piper overrides to also require an .onnx
+        voice on disk. Plugin-registered backends should override when
+        their availability check doesn't already gate on the per-voice
+        assets they need."""
+        return self.is_available()

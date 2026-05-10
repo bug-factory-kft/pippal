@@ -65,6 +65,13 @@ class TTSEngine:
         self.token: int = 0
         self.is_speaking: bool = False
 
+        # Onboarding-clip bookkeeping. We re-use the regular tray-app
+        # state machinery (is_speaking + overlay state) so the existing
+        # stop/replay buttons just work, but also need to cancel the
+        # auto-hide timer when the user stops mid-clip.
+        self._onboarding_active: bool = False
+        self._onboarding_timer: threading.Timer | None = None
+
         self._backend: TTSBackend | None = None
         self._backend_name: str | None = None  # name we cached FOR
         self._backend_cls: type | None = None  # concrete class we cached
@@ -99,17 +106,29 @@ class TTSEngine:
     def queue_selection_async(self) -> None:
         self._async(self._queue_selection_impl)
 
-    def dispatch_ai_action(self, action_id: str) -> None:
-        """Run a registered AI action (`summary`, `explain`, etc.).
+    def dispatch_plugin_action(self, action_id: str) -> None:
+        """Run a registered plugin action.
 
         Resolution goes through the plugin host (`pippal.plugins`) so
-        the engine has zero name-awareness of which AI handler is
-        active. In a core build no AI handler is registered and this
-        method is a silent no-op."""
-        handler = plugins.get_ai_action(action_id)
+        the engine has zero name-awareness of which handler is active.
+        In a core build no plugin action is registered and this method
+        is a silent no-op."""
+        handler = plugins.get_plugin_action(action_id)
         if handler is None:
             return
-        self._async(handler, self, action_id)
+        # Same gate as Speak / Queue: when no voice is installed, play
+        # the onboarding clip rather than letting the plugin handler
+        # do its work and then fail at the synth boundary. Cheaper to
+        # short-circuit before the handler runs at all — handlers may
+        # do meaningful network / disk work before reaching synth.
+        self._async(self._dispatch_plugin_action_impl, action_id, handler)
+
+    def _dispatch_plugin_action_impl(
+        self, action_id: str, handler: Callable[..., Any],
+    ) -> None:
+        if self._maybe_play_onboarding():
+            return
+        handler(self, action_id)
 
 
     def replay_text(self, text: str) -> None:
@@ -125,6 +144,10 @@ class TTSEngine:
             self.is_speaking = False
             self._is_paused = False
             self._queue = []
+            self._onboarding_active = False
+        if self._onboarding_timer is not None:
+            self._onboarding_timer.cancel()
+            self._onboarding_timer = None
         try:
             winsound.PlaySound(None, winsound.SND_PURGE)
         except Exception:
@@ -172,12 +195,22 @@ class TTSEngine:
             pass
 
     def prev_chunk(self) -> None:
+        if self._onboarding_active:
+            self._start_onboarding()
+            return
         self.seek(-1)
 
     def next_chunk(self) -> None:
+        if self._onboarding_active:
+            # No "next" inside a single onboarding clip; just replay.
+            self._start_onboarding()
+            return
         self.seek(+1)
 
     def replay_chunk(self) -> None:
+        if self._onboarding_active:
+            self._start_onboarding()
+            return
         self.seek(0)
 
     # ----- history -----
@@ -248,15 +281,84 @@ class TTSEngine:
             except Exception:
                 pass
 
+    def _maybe_play_onboarding(self) -> bool:
+        """When no engine is ready to synth (no voice installed yet),
+        play the bundled onboarding clip — with the same karaoke
+        overlay we'd show during a normal Read — and tell the caller
+        to bail. Returns True when onboarding fired so the caller can
+        return early instead of starting a synth that would silently
+        fail."""
+        backend = self._get_backend()
+        if backend.is_ready():
+            return False
+        self._start_onboarding()
+        return True
+
+    def _start_onboarding(self) -> None:
+        """Kick off (or restart) the no-voice onboarding clip + karaoke
+        overlay. Reuses the engine's normal speak-state so the existing
+        Stop / Replay buttons in the mini-player Just Work — the timer
+        finishes the visuals when the audio runs out, but Stop can
+        cancel both, and Replay calls back into here for a re-play."""
+        from . import onboarding
+
+        # Cancel any in-flight onboarding before starting a fresh one;
+        # otherwise the previous timer would race with the new one and
+        # could flip the overlay to "done" half-way through replay.
+        if self._onboarding_timer is not None:
+            self._onboarding_timer.cancel()
+            self._onboarding_timer = None
+        try:
+            winsound.PlaySound(None, winsound.SND_PURGE)
+        except Exception:
+            pass
+
+        ov = self._overlay()
+        with self.lock:
+            self.token += 1
+            my_token = self.token
+            # Pretend we're synthesising — Stop handler in the overlay
+            # looks at is_speaking to decide whether to flip the panel
+            # to "done", and we want it to.
+            self.is_speaking = True
+            self._onboarding_active = True
+
+        duration = onboarding.play_no_voice_clip(overlay=ov)
+        if duration <= 0:
+            # WAV missing — undo the speak-state we just set so the
+            # tray icon doesn't sit there pretending to read.
+            with self.lock:
+                self.is_speaking = False
+                self._onboarding_active = False
+            return
+
+        def _finish() -> None:
+            with self.lock:
+                # Stop / next replay bumped the token — leave the
+                # state alone, the new flow owns it.
+                if self.token != my_token or not self._onboarding_active:
+                    return
+                self._onboarding_active = False
+                self.is_speaking = False
+            if ov is not None:
+                try:
+                    ov.set_state("done")
+                except Exception:
+                    pass
+
+        self._onboarding_timer = threading.Timer(duration, _finish)
+        self._onboarding_timer.daemon = True
+        self._onboarding_timer.start()
+
     def _get_backend(self) -> TTSBackend:
         # Cache key is the *requested* engine name, NOT the concrete
-        # class — when Kokoro is requested but unavailable we want the
-        # Piper fallback to stay cached (otherwise we'd rebuild on
-        # every chunk). Settings save and mood change explicitly call
-        # `reset_backend()` / `reload_engine()` to invalidate; the
-        # engine never tries to hot-detect re-registrations on its
-        # own. (Codex' guidance: require an explicit reload API
-        # instead of magic invalidation.)
+        # class — when an extension-supplied engine is requested but
+        # unavailable, we want the Piper fallback to stay cached
+        # (otherwise we'd rebuild on every chunk). Settings save and
+        # mood change explicitly call ``reset_backend()`` /
+        # ``reload_engine()`` to invalidate; the engine never tries to
+        # hot-detect re-registrations on its own. (Codex' guidance:
+        # require an explicit reload API instead of magic invalidation.)
         wanted = (self.config.get("engine") or "piper").lower()
         with self.lock:
             if self._backend is None or self._backend_name != wanted:
@@ -294,6 +396,8 @@ class TTSEngine:
     # ------------------------------------------------------------------
 
     def _speak_selection_impl(self) -> None:
+        if self._maybe_play_onboarding():
+            return
         with self.lock:
             self.token += 1
             my_token = self.token
@@ -321,6 +425,8 @@ class TTSEngine:
         playback.synthesize_and_play(self, text, my_token)
 
     def _queue_selection_impl(self) -> None:
+        if self._maybe_play_onboarding():
+            return
         text = clipboard_capture.capture_for_action(self, "queue")
         if not text:
             ov = self._overlay()
@@ -349,6 +455,8 @@ class TTSEngine:
         playback.synthesize_and_play(self, text, my_token)
 
     def _replay_text_impl(self, text: str) -> None:
+        if self._maybe_play_onboarding():
+            return
         text = (text or "").strip()
         if not text:
             return

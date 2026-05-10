@@ -7,11 +7,10 @@ anywhere in Windows, using a local neural TTS engine. Press a hotkey,
 get a clean reader panel with karaoke-style highlighting. No cloud,
 no API keys, no telemetry.
 
-This document tracks the **public Free** roadmap. Pro features
-(Kokoro, AI actions, mood presets, audio export) ship in the separate
-proprietary `pippal_pro` package distributed with the paid Microsoft
-Store build — those are not part of this open-source project's
-roadmap.
+This document tracks the **public Free** roadmap. The paid
+Microsoft Store edition adds extra features through a separate
+proprietary plugin — those are out of scope for this open-source
+project's roadmap.
 
 ---
 
@@ -129,18 +128,12 @@ naturally.
 
 ---
 
-## Pro feature backlog (separate product)
+## Paid edition
 
-For visibility — these aren't in this repo, but they exist in the
-paid `pippal_pro` package:
-
-- ✅ Kokoro neural TTS engine
-- ✅ Local Ollama AI actions (Summary / Explain / Translate / Define)
-- ✅ Mood / style presets (tray submenu)
-- ✅ Audio export (selection → WAV)
-- ⏳ MP3 export (ffmpeg wrap of WAV export)
-- ⏳ Per-language auto-voice routing for translate
-- ⏳ Ambient bed (subtle background music while reading)
+The Microsoft Store edition layers extra features on top through a
+separate proprietary plugin — see the Store listing for what that
+edition includes. Those features are out of scope for this
+open-source roadmap.
 
 If those interest you, the paid Microsoft Store build is the way.
 The plugin host is also fully public, so a third-party

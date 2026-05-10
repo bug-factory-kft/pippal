@@ -1,20 +1,20 @@
 """Plugin host registries for PipPal.
 
 PipPal is split into a public MIT core (`pippal`) and an optional
-proprietary extension package (`pippal_pro`). The core has zero
-name-awareness of Pro features: it never imports `kokoro`, `ai_runner`,
-`moods`, etc. Instead, this module exposes registries that any plugin
-package — including the core `pippal` package itself — can fill.
+extension package. The core has zero name-awareness of any extension:
+it never imports extension modules. Instead, this module exposes
+registries that any plugin package — including the core `pippal`
+package itself — can fill.
 
 The core distribution self-registers Piper, the four selection-driven
 hotkey actions (read / queue / pause / stop), the core settings cards,
-the core tray items, and the core config defaults. The Pro distribution,
-when installed alongside, self-registers Kokoro, the AI actions, AI
-hotkeys, AI settings card, Mood tray submenu, and Pro defaults.
+the core tray items, and the core config defaults. Optional extension
+packages, when installed alongside, self-register their own engines,
+plugin actions, hotkeys, settings cards, tray items, and defaults.
 
 EXPERIMENTAL — the registry shape is not yet a stable API. It will move
-toward a 1.0 contract once Pro has shipped against it for a few
-releases. Third-party plugins should pin to a specific PipPal minor
+toward a 1.0 contract once an extension has shipped against it for a
+few releases. Third-party plugins should pin to a specific PipPal minor
 version until then.
 
 Discovery (`pippal/__init__.py`):
@@ -23,15 +23,13 @@ Discovery (`pippal/__init__.py`):
         try:
             import pippal_pro  # self-registers
         except Exception as exc:
-            # Don't silently swallow: a partial Pro install is worse
-            # than no Pro install. Log and continue with built-in only.
+            # Don't silently swallow: a partial install is worse
+            # than no install. Log and continue with built-in only.
             print(f"[pippal] pippal_pro present but failed to load: {exc}",
                   file=sys.stderr)
 
-There is no `is_pro_user()` orthogonal license check. The presence of
-`pippal_pro` IS the gate — Microsoft Store delivers an MSIX bundling
-both packages to paid users; Public users `pip install pippal` and only
-ever see the core registry.
+There is no orthogonal license check. The presence of an extension
+package on the import path IS the gate.
 """
 
 from __future__ import annotations
@@ -53,7 +51,7 @@ class Zone:
     VOICE    = 100   # voice / engine selection
     SPEECH   = 200   # speed, variation
     HOTKEYS  = 300   # hotkey bindings
-    AI       = 400   # AI / Ollama configuration
+    EXTRA    = 400   # extension-supplied configuration
     PANEL    = 500   # reader panel / overlay
     INTEGRATION = 600  # Windows context menu etc.
     ADVANCED = 700   # advanced / power-user
@@ -66,7 +64,7 @@ class Zone:
 # ---------------------------------------------------------------------------
 
 EngineCls = type  # subclass of TTSBackend; we don't import to avoid a cycle
-AiHandler = Callable[[Any, str], None]   # (engine, action_id) -> None
+PluginActionHandler = Callable[[Any, str], None]   # (engine, action_id) -> None
 HotkeyAction = tuple[str, str, str, str]  # (id, config_key, label, default)
 SettingsCardBuilder = Callable[..., None]
 TrayItem = Any   # opaque pystray.MenuItem-or-Menu
@@ -77,7 +75,7 @@ TrayItem = Any   # opaque pystray.MenuItem-or-Menu
 # ---------------------------------------------------------------------------
 
 _engines: dict[str, EngineCls] = {}
-_ai_actions: dict[str, AiHandler] = {}
+_plugin_actions: dict[str, PluginActionHandler] = {}
 _hotkey_actions: list[HotkeyAction] = []
 _settings_cards: list[tuple[int, int, SettingsCardBuilder]] = []
 _tray_items: list[tuple[int, int, TrayItem]] = []
@@ -99,8 +97,8 @@ def register_engine(name: str, cls: EngineCls) -> None:
 
     The engine name is what shows up in `config["engine"]` and in the
     Settings → Voice → Engine combobox. Re-registering an existing name
-    overwrites — last writer wins, which is intentional so Pro can
-    replace a core fallback if both are present."""
+    overwrites — last writer wins, which is intentional so an extension
+    can replace a core fallback if both are present."""
     _engines[name] = cls
 
 
@@ -116,22 +114,27 @@ def get_engine(name: str) -> EngineCls | None:
 
 
 # ---------------------------------------------------------------------------
-# AI action registry
+# Plugin action registry
 # ---------------------------------------------------------------------------
+# Plugin actions are coarse-grained selection-driven operations
+# (e.g. "summary"). They take ``(engine, action_id)`` and own the
+# full capture → process → speak round-trip themselves. The core
+# distribution registers none; extension packages register theirs in
+# their own ``__init__``.
 
-def register_ai_action(action_id: str, handler: AiHandler) -> None:
-    """Register a handler for a named AI action (e.g. 'summary'). The
-    handler receives `(engine, action_id)` and is responsible for the
-    full capture → prompt → speak round-trip."""
-    _ai_actions[action_id] = handler
+def register_plugin_action(action_id: str, handler: PluginActionHandler) -> None:
+    """Register a handler for a named plugin action. The handler
+    receives ``(engine, action_id)`` and is responsible for the full
+    capture → process → speak round-trip."""
+    _plugin_actions[action_id] = handler
 
 
-def ai_actions() -> dict[str, AiHandler]:
-    return dict(_ai_actions)
+def plugin_actions() -> dict[str, PluginActionHandler]:
+    return dict(_plugin_actions)
 
 
-def get_ai_action(action_id: str) -> AiHandler | None:
-    return _ai_actions.get(action_id)
+def get_plugin_action(action_id: str) -> PluginActionHandler | None:
+    return _plugin_actions.get(action_id)
 
 
 # ---------------------------------------------------------------------------
@@ -146,7 +149,7 @@ def register_hotkey_action(
 ) -> None:
     """Register an action that can be bound to a global hotkey.
 
-    `config_key` is the JSON key in config.json (e.g. 'hotkey_summary').
+    `config_key` is the JSON key in config.json (e.g. 'hotkey_speak').
     `default_combo` populates `_defaults` so the user gets a sensible
     starting binding even if they've never opened Settings."""
     _hotkey_actions.append((action_id, config_key, label, default_combo))
@@ -247,13 +250,13 @@ def voices() -> list[Any]:
 # ---------------------------------------------------------------------------
 # Per-engine voice options registry
 # ---------------------------------------------------------------------------
-# An engine plugin like the Kokoro backend ships with a flat list of
-# voices that don't fit the Piper-style ``PiperVoice`` shape (no
-# language code in the id, no ``.onnx`` filename to install). The
-# Settings Voice card needs *some* way to populate the voice combo
-# when the user selects that engine, but the core has no opinion on
-# what those voices look like — so we expose a tiny opaque registry:
-# the engine plugin hands us ``(value, label)`` pairs and an optional
+# An extension-supplied engine may ship voices that don't fit the
+# Piper-style ``PiperVoice`` shape (no language code in the id, no
+# ``.onnx`` filename to install). The Settings Voice card needs *some*
+# way to populate the voice combo when the user selects that engine,
+# but the core has no opinion on what those voices look like — so we
+# expose a tiny opaque registry: the engine plugin hands us
+# ``(value, label)`` pairs and an optional
 # ``language_extractor(value) -> str`` for the language filter.
 
 _engine_voice_options: dict[
@@ -296,21 +299,21 @@ def engine_language_extractor(engine_name: str) -> Callable[[str], str] | None:
 # Voice card extension hooks
 # ---------------------------------------------------------------------------
 # Engines whose Settings UI needs more than the generic Engine + Voice
-# combo (e.g. Kokoro wants a Language filter row and an Install
-# button) register two callbacks here. The core Voice-card builder
-# walks the registries — it has no engine-specific code.
+# combo (e.g. an extra Language filter row, an Install button) register
+# two callbacks here. The core Voice-card builder walks the registries
+# — it has no engine-specific code.
 
 # Builders that attach extra widgets to the Voice card. Each builder is
 # called once at card-build time with ``(sw, card)`` and is expected
-# to attach widgets to ``sw`` (e.g. ``sw.kokoro_lang_row = ...``) so
-# the engine-change handler can show / hide them later.
+# to attach widgets to ``sw`` so the engine-change handler can show /
+# hide them later.
 _voice_card_extras_builders: list[Callable[[Any, Any], None]] = []
 
 # Handlers that run on every engine-combo change. Receive
 # ``(sw, current_engine_name)`` and are expected to show their own
 # widgets when the user picked their engine and hide them otherwise.
-# A handler may also override the voice combo content (Pro's Kokoro
-# handler does this via ``plugins.engine_voice_options``).
+# A handler may also override the voice combo content (e.g. via
+# ``plugins.engine_voice_options``).
 _voice_card_engine_handlers: list[Callable[[Any, str], None]] = []
 
 
@@ -352,8 +355,8 @@ def register_voice_card_persist_hook(
 ) -> None:
     """Called from Settings → Save with ``(sw, current_engine_name,
     candidate)``. The hook may write engine-specific keys into
-    ``candidate`` (e.g. Piper writes ``voice``, Pro writes
-    ``kokoro_voice``)."""
+    ``candidate`` (Piper's built-in hook writes ``voice``; extension
+    plugins write whatever per-engine keys they own)."""
     _voice_card_persist_hooks.append(hook)
 
 
@@ -369,9 +372,10 @@ def load_pro_plugin() -> bool:
     """Try to load `pippal_pro` if installed. Returns True on success.
 
     Uses `find_spec` first so an `ImportError` from inside the package
-    (broken Pro dependency) doesn't get conflated with 'Pro not
-    installed'. A partial install logs to stderr and we continue with
-    the built-in package only — the user shouldn't get a half-Pro experience silently.
+    (broken extension dependency) doesn't get conflated with 'extension
+    not installed'. A partial install logs to stderr and we continue
+    with the built-in package only — the user shouldn't get a
+    half-extension experience silently.
     """
     import importlib
     import importlib.util
@@ -398,7 +402,7 @@ def _reset_for_tests() -> None:
     """Public for tests only. Clears every registry. Production code
     should never call this."""
     _engines.clear()
-    _ai_actions.clear()
+    _plugin_actions.clear()
     _hotkey_actions.clear()
     _settings_cards.clear()
     _tray_items.clear()

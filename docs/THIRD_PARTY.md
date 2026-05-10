@@ -13,8 +13,6 @@ file lists what is involved and under what terms.
 | [pyperclip](https://github.com/asweigart/pyperclip) | BSD-3-Clause | Clipboard get/set. |
 | [pystray](https://github.com/moses-palmer/pystray) | LGPL-3.0 | Tray icon. Used as an unmodified, dynamically-linked library — no LGPL obligation propagates to PipPal. |
 | [Pillow](https://python-pillow.org/) | MIT-CMU (HPND) | Image generation for the tray icon. |
-| [kokoro-onnx](https://github.com/thewh1teagle/kokoro-onnx) | MIT | Optional. Runs Kokoro TTS in-process. |
-| [soundfile](https://github.com/bastibe/python-soundfile) | BSD-3-Clause | Optional. WAV write helper for the Kokoro path. |
 | [pytest](https://pytest.org/), [ruff](https://docs.astral.sh/ruff/), [mypy](https://mypy-lang.org/) | MIT | Dev-only. |
 
 The dependency tree is small and entirely permissive. None of these
@@ -44,13 +42,6 @@ when the user runs it for the first time.
   (LibriTTS / LibriTTS-R / VCTK derivatives). PipPal does not ship
   voice files; the user downloads them on demand.
 
-### Kokoro TTS (optional)
-
-- Model: <https://github.com/thewh1teagle/kokoro-onnx>
-- Licence: **Apache-2.0** (model and ONNX export). PipPal does not
-  ship the Kokoro model; it is downloaded inside the app via the
-  Kokoro install dialog.
-
 ### ONNX Runtime (bundled inside the Piper release)
 
 - Project: <https://github.com/microsoft/onnxruntime>
@@ -58,6 +49,6 @@ when the user runs it for the first time.
 
 ## Trademarks
 
-"Piper", "Kokoro", "ONNX", "Hugging Face", "Windows", "Microsoft" and
-other product names are trademarks of their respective owners. Use of
-these names in PipPal is purely descriptive.
+"Piper", "ONNX", "Hugging Face", "Windows", "Microsoft" and other
+product names are trademarks of their respective owners. Use of these
+names in PipPal is purely descriptive.

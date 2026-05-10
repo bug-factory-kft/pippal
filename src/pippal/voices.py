@@ -127,12 +127,12 @@ def voice_filename(v: PiperVoice) -> str:
     return f"{v['id']}.onnx"
 
 
-# Kokoro voices live in pippal_pro — they don't fit the PiperVoice
-# shape (no .onnx filename, no model card) and the Kokoro engine is a
-# Pro-only extension. The Pro package registers the catalogue via
-# `plugins.register_engine_voice_options("kokoro", ...)`; the public
+# Extension-supplied engines may use voices that don't fit the
+# PiperVoice shape (no ``.onnx`` filename, no model card). They
+# register their catalogues via
+# ``plugins.register_engine_voice_options(<engine>, ...)``; the public
 # package's Settings Voice card reads from that registry rather than
-# hard-coding a list here.
+# hard-coding additional engines here.
 
 
 def installed_voices() -> list[str]:
