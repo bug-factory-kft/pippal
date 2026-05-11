@@ -8,6 +8,17 @@ $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
 $root = $PSScriptRoot
 
+function Resolve-PipPalDataRoot {
+    if ($env:PIPPAL_DATA_DIR) {
+        return $env:PIPPAL_DATA_DIR
+    }
+    $localAppData = $env:LOCALAPPDATA
+    if (-not $localAppData) {
+        $localAppData = Join-Path $env:USERPROFILE 'AppData\Local'
+    }
+    return Join-Path $localAppData 'PipPal'
+}
+
 Write-Host "PipPal setup" -ForegroundColor Cyan
 Write-Host "Working directory: $root"
 
@@ -27,7 +38,8 @@ if (-not (Test-Path $piperExe)) {
 }
 
 # --- Default voice ---
-$voicesDir = Join-Path $root 'voices'
+$dataRoot = Resolve-PipPalDataRoot
+$voicesDir = Join-Path $dataRoot 'voices'
 New-Item -ItemType Directory -Force -Path $voicesDir | Out-Null
 $voiceOnnx = Join-Path $voicesDir 'en_US-ryan-high.onnx'
 $voiceJson = Join-Path $voicesDir 'en_US-ryan-high.onnx.json'
