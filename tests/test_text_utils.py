@@ -42,6 +42,23 @@ class TestSplitSentences:
         # Re-joining recovers the original (modulo single spaces).
         assert " ".join(chunks).split() == text.split()
 
+    def test_hard_wraps_long_unbroken_token(self):
+        text = "x" * 1000
+        chunks = split_sentences(text, max_chunk_len=200)
+
+        assert len(chunks) == 5
+        assert all(len(c) <= 200 for c in chunks)
+        assert "".join(chunks) == text
+
+    def test_hard_wraps_long_unbroken_token_inside_sentence(self):
+        token = "a" * 450
+        chunks = split_sentences(f"prefix {token} suffix", max_chunk_len=200)
+
+        assert all(len(c) <= 200 for c in chunks)
+        assert chunks[0] == "prefix"
+        assert chunks[-1].endswith("suffix")
+        assert any(c == "a" * 200 for c in chunks)
+
     def test_question_and_exclamation(self):
         assert split_sentences("Hi! How are you?") == ["Hi! How are you?"]
 

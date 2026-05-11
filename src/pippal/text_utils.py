@@ -15,8 +15,9 @@ def split_sentences(text: str, max_chunk_len: int = 400) -> list[str]:
     """Split text into chunks of up to ~`max_chunk_len` characters along
     sentence boundaries. Aimed at TTS engines that want medium-length
     inputs for natural prosody. A single sentence longer than
-    `max_chunk_len` is hard-wrapped on whitespace as a fallback so a
-    paragraph-shaped one-sentence input never exceeds the cap."""
+    `max_chunk_len` is hard-wrapped on whitespace as a fallback, with
+    oversized unbroken tokens split directly so a paragraph-shaped
+    one-sentence input never exceeds the cap."""
     text = (text or "").strip()
     if not text:
         return []
@@ -41,9 +42,13 @@ def split_sentences(text: str, max_chunk_len: int = 400) -> list[str]:
 
 
 def _wrap_long(sentence: str, max_len: int) -> list[str]:
-    """Hard-wrap an over-long sentence on whitespace. If the sentence
-    fits in `max_len`, returns it unchanged."""
+    """Hard-wrap an over-long sentence.
+
+    Prefer whitespace boundaries, but split a single oversized token
+    directly so URLs/base64/minified identifiers cannot exceed the cap.
+    """
     sentence = sentence.strip()
+    max_len = max(1, int(max_len))
     if len(sentence) <= max_len:
         return [sentence]
 
@@ -51,7 +56,12 @@ def _wrap_long(sentence: str, max_len: int) -> list[str]:
     out: list[str] = []
     buf = ""
     for w in words:
-        if not buf:
+        if len(w) > max_len:
+            if buf:
+                out.append(buf)
+                buf = ""
+            out.extend(_split_unbroken_token(w, max_len))
+        elif not buf:
             buf = w
         elif len(buf) + 1 + len(w) <= max_len:
             buf = f"{buf} {w}"
@@ -61,6 +71,10 @@ def _wrap_long(sentence: str, max_len: int) -> list[str]:
     if buf:
         out.append(buf)
     return out
+
+
+def _split_unbroken_token(token: str, max_len: int) -> list[str]:
+    return [token[i:i + max_len] for i in range(0, len(token), max_len)]
 
 
 def count_syllables(word: str) -> int:
