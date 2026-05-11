@@ -228,7 +228,7 @@ def main() -> None:
     # The current LL-hook approach: we see every keystroke before
     # Windows routes it, suppress only the *exact* combos we own,
     # and pass everything else through unchanged.
-    from .hotkey import HotkeyManager
+    from .hotkey import HotkeyManager, duplicate_combo_failures
     hotkey_manager = HotkeyManager()
     hotkey_manager.start()
     # Unhook on exit so we don't leave a Windows hook installed
@@ -242,16 +242,20 @@ def main() -> None:
         so the Settings UI can warn the user instead of silently
         saving a broken value."""
         hotkey_manager.unregister_all()
-        for action_id, key, _label, default_combo in plugins.hotkey_actions():
+        actions = plugins.hotkey_actions()
+        failures = duplicate_combo_failures(config, actions)
+        duplicate_action_ids = {aid for aid, _combo, _reason in failures}
+        for action_id, key, _label, default_combo in actions:
+            if action_id in duplicate_action_ids:
+                continue
             combo = config.get(key, default_combo)
             fn = _resolve_handler(action_id)
             if not combo or fn is None:
                 continue
             hotkey_manager.register(combo, fn)
-        failures: list[tuple[str, str, str]] = []
         for combo, reason in hotkey_manager.failures():
             aid = next(
-                (a for a, k, _l, _d in plugins.hotkey_actions()
+                (a for a, k, _l, _d in actions
                  if config.get(k, _d) == combo),
                 "?",
             )

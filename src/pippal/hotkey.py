@@ -38,7 +38,7 @@ from __future__ import annotations
 
 import sys
 import threading
-from collections.abc import Callable
+from collections.abc import Callable, Iterable, Mapping
 
 # Public combo-name aliases. Stored as frozensets so the matcher can
 # compare in O(1) regardless of the order the user pressed modifiers
@@ -145,6 +145,38 @@ def parse_combo(combo: str) -> tuple[frozenset[str], str] | None:
     return frozenset(mods), triggers[0]
 
 
+def duplicate_combo_failures(
+    config: Mapping[str, object],
+    actions: Iterable[tuple[str, str, str, str]],
+) -> list[tuple[str, str, str]]:
+    """Return `(action_id, combo, reason)` for duplicate valid combos.
+
+    Invalid combos are left to ``register`` so the existing parse-error
+    path can report them. This helper only catches the silent-overwrite
+    case where two action rows parse to the same hotkey identity.
+    """
+    seen: dict[tuple[frozenset[str], str], tuple[str, str]] = {}
+    failures: list[tuple[str, str, str]] = []
+    for action_id, key, _label, default_combo in actions:
+        combo = str(config.get(key, default_combo) or "").strip()
+        if not combo:
+            continue
+        parsed = parse_combo(combo)
+        if parsed is None:
+            continue
+        prior = seen.get(parsed)
+        if prior is not None:
+            prior_action, _prior_combo = prior
+            failures.append((
+                action_id,
+                combo,
+                f"duplicate combo also used by {prior_action}",
+            ))
+            continue
+        seen[parsed] = (action_id, combo)
+    return failures
+
+
 class HotkeyManager:
     """Single low-level hook + a strict exact-match dispatcher."""
 
@@ -217,8 +249,8 @@ class HotkeyManager:
     def register(self, combo: str, callback: Callable[[], None]) -> bool:
         """Add a combo. Returns False if the combo string is unparseable
         or the hook never started; otherwise the matcher picks it up
-        immediately. Re-registering an existing combo replaces the
-        callback."""
+        immediately. Duplicate combos are rejected so one action cannot
+        silently replace another."""
         parsed = parse_combo(combo)
         if parsed is None:
             with self._lock:
@@ -232,6 +264,9 @@ class HotkeyManager:
         # ``self._handlers`` without locking the lookup itself) always
         # sees a consistent, fully-populated dict.
         with self._lock:
+            if parsed in self._handlers:
+                self._failures.append((combo, "duplicate combo"))
+                return False
             new_handlers = dict(self._handlers)
             new_handlers[parsed] = callback
             self._handlers = new_handlers

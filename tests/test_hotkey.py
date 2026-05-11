@@ -219,19 +219,38 @@ class TestRegister:
         fails = m.failures()
         assert any(reason == "hook not running" for _combo, reason in fails)
 
-    def test_re_registering_replaces_callback(self):
+    def test_duplicate_register_is_rejected_and_keeps_first_callback(self):
         m = _ready_manager()
         first = []
         second = []
-        m.register("windows+shift+r", lambda: first.append(1))
-        m.register("windows+shift+r", lambda: second.append(1))
+        assert m.register("windows+shift+r", lambda: first.append(1)) is True
+        assert m.register("windows+shift+r", lambda: second.append(1)) is False
         with patch.object(hotkey, "_physical_modifiers",
                            return_value=frozenset({"win", "shift"})):
             m._on_event(_ev("r", "down"))
         import time
         time.sleep(0.05)
-        assert first == []
-        assert second == [1]
+        assert first == [1]
+        assert second == []
+        assert ("windows+shift+r", "duplicate combo") in m.failures()
+
+    def test_duplicate_combo_failures_reports_later_action(self):
+        actions = [
+            ("speak", "hotkey_speak", "Read", "windows+shift+r"),
+            ("queue", "hotkey_queue", "Queue", "windows+shift+q"),
+        ]
+        cfg = {
+            "hotkey_speak": "windows+shift+r",
+            "hotkey_queue": "shift+windows+r",
+        }
+
+        assert hotkey.duplicate_combo_failures(cfg, actions) == [
+            (
+                "queue",
+                "shift+windows+r",
+                "duplicate combo also used by speak",
+            ),
+        ]
 
     def test_unregister_all_drops_handlers(self):
         m = _ready_manager()
