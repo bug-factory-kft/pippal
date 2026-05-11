@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import TypedDict
 
 from .paths import VOICES_DIR
@@ -135,13 +136,25 @@ def voice_filename(v: PiperVoice) -> str:
 # hard-coding additional engines here.
 
 
-def installed_voices() -> list[str]:
+def is_installed_voice(filename: str, voices_dir: Path | None = None) -> bool:
+    """True when ``filename`` is a plain Piper .onnx file with sidecar."""
+    name = (filename or "").strip()
+    if not name.endswith(".onnx"):
+        return False
+    if Path(name).name != name:
+        return False
+    root = voices_dir or VOICES_DIR
+    return (root / name).is_file() and (root / f"{name}.json").is_file()
+
+
+def installed_voices(voices_dir: Path | None = None) -> list[str]:
     """Filenames of voices that have both .onnx and .onnx.json on disk."""
-    if not VOICES_DIR.exists():
+    root = voices_dir or VOICES_DIR
+    if not root.exists():
         return []
     return sorted(
-        p.name for p in VOICES_DIR.glob("*.onnx")
-        if (VOICES_DIR / (p.name + ".json")).exists()
+        p.name for p in root.glob("*.onnx")
+        if is_installed_voice(p.name, voices_dir=root)
     )
 
 

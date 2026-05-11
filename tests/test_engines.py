@@ -28,6 +28,26 @@ class TestPiperBackend:
             ok = b.synthesize("hello", tmp_path / "out.wav")
         assert ok is False
 
+    def test_is_ready_requires_configured_voice_with_sidecar(self, tmp_path: Path):
+        exe = tmp_path / "piper.exe"
+        exe.write_bytes(b"fake exe")
+        (tmp_path / "installed.onnx").write_bytes(b"model")
+        (tmp_path / "installed.onnx.json").write_text("{}", encoding="utf-8")
+
+        with patch("pippal.engines.piper.VOICES_DIR", tmp_path), \
+             patch("pippal.engines.piper.PIPER_EXE", exe):
+            assert PiperBackend({"voice": "missing.onnx"}).is_ready() is False
+            assert PiperBackend({"voice": "installed.onnx"}).is_ready() is True
+
+    def test_is_ready_rejects_voice_without_sidecar(self, tmp_path: Path):
+        exe = tmp_path / "piper.exe"
+        exe.write_bytes(b"fake exe")
+        (tmp_path / "orphan.onnx").write_bytes(b"model")
+
+        with patch("pippal.engines.piper.VOICES_DIR", tmp_path), \
+             patch("pippal.engines.piper.PIPER_EXE", exe):
+            assert PiperBackend({"voice": "orphan.onnx"}).is_ready() is False
+
 
 class TestMakeBackend:
     def test_default_is_piper(self):

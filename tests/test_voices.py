@@ -37,6 +37,17 @@ def test_voice_filename():
     assert voices.voice_filename(v) == "en_US-ryan-high.onnx"
 
 
+def test_is_installed_voice_requires_model_and_sidecar(tmp_path: Path):
+    (tmp_path / "ready.onnx").write_bytes(b"model")
+    (tmp_path / "ready.onnx.json").write_text("{}", encoding="utf-8")
+    (tmp_path / "orphan.onnx").write_bytes(b"model")
+
+    assert voices.is_installed_voice("ready.onnx", voices_dir=tmp_path) is True
+    assert voices.is_installed_voice("orphan.onnx", voices_dir=tmp_path) is False
+    assert voices.is_installed_voice("(no voice installed)", voices_dir=tmp_path) is False
+    assert voices.is_installed_voice("../ready.onnx", voices_dir=tmp_path) is False
+
+
 class TestKnownVoicesShape:
     def test_required_keys(self):
         for v in voices.KNOWN_VOICES:
