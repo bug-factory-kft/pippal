@@ -27,7 +27,7 @@ dev = ["pytest>=7", "pytest-benchmark>=4", "ruff>=0.5", "mypy>=1.8"]
 
 [project.scripts]
 pippal = "pippal.app:main"
-pippal-open = "pippal_open:main"
+pippal-open = "pippal.open_file:main"
 
 [project.urls]
 Homepage   = "https://pippal.bugfactory.hu"
