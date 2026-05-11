@@ -143,3 +143,12 @@ class TestServerWiring:
         # Sanity check the constant is in sync with the docstring.
         for ext in ALLOWED_EXTENSIONS:
             assert ext.startswith(".") and ext == ext.lower()
+
+    def test_start_returns_none_when_port_is_already_bound(self):
+        engine = _FakeEngine()
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            s.bind(("127.0.0.1", 0))
+            s.listen()
+            port = s.getsockname()[1]
+
+            assert start_command_server(engine, port=port) is None
