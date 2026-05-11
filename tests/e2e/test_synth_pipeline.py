@@ -180,10 +180,13 @@ class TestSynthesisASRRoundTrip:
             f"Got: {decoded!r}"
         )
         # whisper-tiny mishears "PipPal" — sometimes "pippal", sometimes
-        # "pip pal", sometimes "pippa" — so we strip whitespace before
-        # the membership test instead of enumerating spellings.
+        # "pip pal", sometimes "pippa", sometimes "hip pal" — so we
+        # strip whitespace and accept the known phonetic variants.
         decoded_squashed = decoded.replace(" ", "")
-        assert "pippal" in decoded_squashed or "pippa" in decoded_squashed, (
+        assert any(
+            variant in decoded_squashed
+            for variant in ("pippal", "pippa", "hippal")
+        ), (
             f"ASR didn't recover 'pippal' from synth output. "
             f"Got: {decoded!r}"
         )

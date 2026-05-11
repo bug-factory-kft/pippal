@@ -63,13 +63,23 @@ def _quit_tray_builder(ctx: Any) -> list:
 
 def _piper_voice_persist(sw: Any, engine_name: str, candidate: dict[str, Any]) -> None:
     """Persist hook: when the user picked Piper in the engine combo,
-    write whatever the voice-display var holds into ``candidate["voice"]``.
-    The voice-display value for Piper is the on-disk filename
-    (e.g. ``en_US-amy-medium.onnx``) the combo populated."""
+    write a valid on-disk voice filename into ``candidate["voice"]``.
+
+    Empty installs show a disabled placeholder in ``voice_display``;
+    never persist that as if it were a model filename."""
     if engine_name != "piper":
         return
+    from .voices import installed_voices, is_installed_voice
+
     sel = str(sw.vars["voice_display"].get())
-    candidate["voice"] = sel
+    if is_installed_voice(sel):
+        candidate["voice"] = sel
+        return
+    available = installed_voices()
+    if available:
+        candidate["voice"] = available[0]
+    else:
+        candidate.pop("voice", None)
 
 
 def _register() -> None:

@@ -8,7 +8,7 @@ from pathlib import Path
 
 from ..config import DEFAULT_CONFIG
 from ..paths import PIPER_DIR, PIPER_EXE, VOICES_DIR
-from ..voices import installed_voices
+from ..voices import is_installed_voice
 from .base import TTSBackend
 
 _NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
@@ -21,17 +21,21 @@ class PiperBackend(TTSBackend):
         return PIPER_EXE.exists()
 
     def is_ready(self) -> bool:
-        # piper.exe alone isn't enough — synth needs an .onnx voice
-        # in VOICES_DIR. Without one, the action handlers should play
-        # the onboarding clip instead of letting synth fail silently.
-        return self.is_available() and bool(installed_voices())
+        # piper.exe alone isn't enough — synth needs the configured
+        # .onnx voice and its .onnx.json sidecar in VOICES_DIR. If the
+        # saved config points at a stale placeholder/deleted voice,
+        # action handlers should play onboarding instead of entering a
+        # synth path that is guaranteed to fail.
+        voice = str(self.config.get("voice", DEFAULT_CONFIG["voice"]))
+        return self.is_available() and is_installed_voice(voice, voices_dir=VOICES_DIR)
 
     def synthesize(self, text: str, out_path: Path) -> bool:
-        model = VOICES_DIR / self.config.get("voice", DEFAULT_CONFIG["voice"])
-        if not model.exists():
-            print(f"[piper] missing model: {model}", file=sys.stderr)
+        voice = str(self.config.get("voice", DEFAULT_CONFIG["voice"]))
+        if not is_installed_voice(voice, voices_dir=VOICES_DIR):
+            print(f"[piper] missing model or metadata: {VOICES_DIR / voice}", file=sys.stderr)
             return False
 
+        model = VOICES_DIR / voice
         cmd = [
             str(PIPER_EXE),
             "--model", str(model),
