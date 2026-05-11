@@ -1,4 +1,9 @@
-' Launches the Piper Reader tray app silently (no console window).
+' Launches the PipPal tray app silently from this source checkout.
+Set fso = CreateObject("Scripting.FileSystemObject")
 Set sh = CreateObject("WScript.Shell")
-sh.CurrentDirectory = "C:\Users\tigyi\piper-reader"
-sh.Run """C:\Python314\pythonw.exe"" ""C:\Users\tigyi\piper-reader\reader_app.py""", 0, False
+
+scriptDir = fso.GetParentFolderName(WScript.ScriptFullName)
+reader = fso.BuildPath(scriptDir, "reader_app.py")
+
+sh.CurrentDirectory = scriptDir
+sh.Run "pythonw.exe """ & reader & """", 0, False

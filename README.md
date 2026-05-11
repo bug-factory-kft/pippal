@@ -67,11 +67,15 @@ cd pippal
 pythonw reader_app.py             # tray icon appears
 ```
 
-To start automatically on login, copy `start_server.vbs` to your
-Startup folder:
+To start automatically on login, create a Startup shortcut that points
+to this checkout's `start_server.vbs`:
 
 ```powershell
-copy start_server.vbs "$env:APPDATA\Microsoft\Windows\Start Menu\Programs\Startup\PipPal.vbs"
+$startup = "$env:APPDATA\Microsoft\Windows\Start Menu\Programs\Startup\PipPal.lnk"
+$shortcut = (New-Object -ComObject WScript.Shell).CreateShortcut($startup)
+$shortcut.TargetPath = (Resolve-Path .\start_server.vbs).Path
+$shortcut.WorkingDirectory = (Get-Location).Path
+$shortcut.Save()
 ```
 
 `reader_app.py` works whether or not the optional extension package
