@@ -78,8 +78,10 @@ files = ["src/pippal"]
 testpaths = ["tests"]
 python_files = ["test_*.py"]
 # Benchmark suite lives under tests/benchmarks/. By default we skip
-# it so the regular `python -m pytest` runs in seconds and stays
-# deterministic (benchmark wall-clock varies by machine load). To
-# run it: `pytest tests/benchmarks --benchmark-only`.
-addopts = "-ra --strict-markers --ignore=tests/benchmarks"
+# it, the e2e suite, and install-surface smoke tests so the regular
+# `python -m pytest` stays fast and deterministic. To run them:
+#   pytest tests/benchmarks --benchmark-only
+#   pytest tests/e2e -m e2e
+#   pytest tests/smoke
+addopts = "-ra --strict-markers --ignore=tests/benchmarks --ignore=tests/e2e --ignore=tests/smoke"
 filterwarnings = ["ignore::DeprecationWarning"]
