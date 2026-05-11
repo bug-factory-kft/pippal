@@ -71,27 +71,7 @@ class SettingsWindow:
         w.geometry(f"{win_w}x{win_h}+{x}+{y}")
         w.minsize(560, 600)
         apply_dark_theme(w)
-        # Hide the native title bar via the canonical Win32 WndProc
-        # subclass — WM_NCCALCSIZE returns 0 so Windows treats the
-        # whole window as client area, no caption strip drawn. The
-        # window remains a normal app window from the WM's view, so
-        # taskbar / Alt+Tab / focus all keep working.
-        #
-        # Tk creates the HWND lazily; firing on `<Map>` (the moment
-        # the window becomes visible) is more reliable than a blind
-        # `after(10, ...)` timer. The `_did_chromeless` guard stops
-        # us re-running the WndProc subclass each time the window is
-        # iconified+restored.
-        def _apply_chromeless(_e=None):
-            if getattr(self, "_did_chromeless", False):
-                return
-            self._did_chromeless = True
-            theme.make_chromeless_keep_taskbar(w)
-            theme.apply_rounded_corners(w)
-        w.bind("<Map>", _apply_chromeless)
-        # Also fire after 50 ms in case the window is mapped before
-        # the binding takes effect (race-y on some Tk builds).
-        w.after(50, _apply_chromeless)
+        self._install_chromeless_handlers(w)
         # The chromeless window has no system menu; bind Esc + Alt+F4
         # so the user has both standard ways to close it.
         w.bind("<Escape>", lambda _e: self._close())
@@ -114,6 +94,32 @@ class SettingsWindow:
         self._build_footer(w)
 
         w.protocol("WM_DELETE_WINDOW", self._close)
+
+    def _install_chromeless_handlers(self, w: tk.Toplevel) -> None:
+        # Hide the native title bar via the canonical Win32 WndProc
+        # subclass — WM_NCCALCSIZE returns 0 so Windows treats the
+        # whole window as client area, no caption strip drawn. The
+        # window remains a normal app window from the WM's view, so
+        # taskbar / Alt+Tab / focus all keep working.
+        #
+        # Tk creates the HWND lazily; firing on `<Map>` (the moment
+        # the window becomes visible) is more reliable than a blind
+        # `after(10, ...)` timer. The guard is scoped to this specific
+        # Toplevel, so a later Settings reopen gets its own setup pass.
+        did_chromeless = False
+
+        def _apply_chromeless(_e: tk.Event | None = None) -> None:
+            nonlocal did_chromeless
+            if did_chromeless:
+                return
+            did_chromeless = True
+            theme.make_chromeless_keep_taskbar(w)
+            theme.apply_rounded_corners(w)
+
+        w.bind("<Map>", _apply_chromeless)
+        # Also fire after 50 ms in case the window is mapped before
+        # the binding takes effect (race-y on some Tk builds).
+        w.after(50, _apply_chromeless)
 
     def _close(self) -> None:
         if self.win is not None:
