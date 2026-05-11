@@ -19,7 +19,7 @@ from .command_server import start_command_server
 from .config import load_config, save_config
 from .engine import TTSEngine
 from .history import load_history, save_history
-from .paths import CMD_SERVER_PORT, PIPER_EXE, ensure_dirs
+from .paths import PIPER_EXE, ensure_dirs
 from .timing import TRAY_POLL_MS
 from .tray import make_tray_icon
 from .ui import Overlay, SettingsWindow
@@ -96,40 +96,37 @@ def _build_history_submenu(engine: TTSEngine,
     return builder
 
 
-def _another_instance_running() -> bool:
-    """True when something else already holds the PipPal IPC port.
-
-    PipPal is a tray app — running two copies is never useful, just
-    confusing (two icons, double-played audio, fighting over hotkeys).
-    The IPC port doubles as a cheap mutex: if we can't bind, somebody
-    else is up. Avoids pulling in a Win32 mutex just for this."""
-    import socket
+def _show_already_running_message() -> None:
+    """Tell the user why a second app launch did not open a new window."""
     try:
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-            s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 0)
-            s.bind(("127.0.0.1", CMD_SERVER_PORT))
-        return False
-    except OSError:
-        return True
+        import ctypes
+        ctypes.windll.user32.MessageBoxW(
+            None,
+            "PipPal is already running.\n\n"
+            "Look for the icon in the system tray (next to the clock).",
+            "PipPal",
+            0x40,  # MB_ICONINFORMATION
+        )
+    except Exception:
+        pass
+
+
+def _require_command_server(engine: TTSEngine, root: tk.Tk | None = None) -> Any:
+    """Start the local listener and treat it as the single-instance owner."""
+    server = start_command_server(engine)
+    if server is not None:
+        return server
+
+    if root is not None:
+        try:
+            root.destroy()
+        except Exception:
+            pass
+    _show_already_running_message()
+    raise SystemExit(0)
 
 
 def main() -> None:
-    if _another_instance_running():
-        # Surface a tiny modal so the user understands why "nothing
-        # happened" when they clicked the Start menu shortcut a second
-        # time — they should look in the system tray instead.
-        try:
-            import ctypes
-            ctypes.windll.user32.MessageBoxW(
-                None,
-                "PipPal is already running.\n\n"
-                "Look for the icon in the system tray (next to the clock).",
-                "PipPal",
-                0x40,  # MB_ICONINFORMATION
-            )
-        except Exception:
-            pass
-        sys.exit(0)
 
     ensure_dirs()
     config = load_config()
@@ -168,16 +165,10 @@ def main() -> None:
     overlay_box[0] = overlay
     engine.attach_history(load_history(), save_history)
 
-    # Local IPC server for the right-click context-menu helper. If the
-    # port is already busy (PipPal already running, or some other
-    # process), the helper just won't function — surface that loudly so
-    # we don't pretend everything's fine.
-    if start_command_server(engine) is None:
-        print(
-            "[pippal] right-click integration disabled: "
-            "could not bind 127.0.0.1:51677",
-            file=sys.stderr,
-        )
+    # Local IPC server for the right-click context-menu helper. The
+    # listener also owns the single-instance gate: if the port cannot
+    # be bound, exit before registering hotkeys or adding a tray icon.
+    _command_server = _require_command_server(engine, root)
 
     # ----- Hotkeys -----
     # The action → handler mapping is composed from two sources:
