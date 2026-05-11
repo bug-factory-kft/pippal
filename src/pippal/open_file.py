@@ -24,3 +24,7 @@ def main() -> int:
             return 0
     except Exception:
         return 2
+
+
+if __name__ == "__main__":
+    sys.exit(main())

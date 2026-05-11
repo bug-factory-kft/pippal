@@ -12,6 +12,26 @@ permissions:
   pull-requests: write
 
 jobs:
+  install-surface-smoke:
+    name: Install surface smoke
+    runs-on: [self-hosted, windows, pippal-windows]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.11" }
+
+      - name: Install smoke dependencies
+        shell: pwsh
+        run: |
+          python -m pip install --upgrade pip pytest wheel
+
+      - name: Run install surface smoke
+        shell: pwsh
+        run: |
+          python -m pytest tests/smoke -q
+
   e2e:
     name: Synth pipeline E2E
     # Self-hosted Windows runner (headless service, Session 0). Tray
