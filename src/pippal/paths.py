@@ -32,27 +32,49 @@ def _resolve_install_root() -> Path:
     correctly inside the MSIX bundle.
 
     In dev (no frozen build) ``__file__`` is ``…/src/pippal/paths.py``,
-    so three ``.parent`` hops give the source checkout root."""
+    so the ``src`` layout points back to the source checkout root. In
+    a normal package install, ``__file__`` is ``…/site-packages/pippal``
+    and package data lives next to the module itself."""
     if getattr(sys, "frozen", False):
         meipass = getattr(sys, "_MEIPASS", None)
         if meipass:
             return Path(meipass)
-    return Path(__file__).resolve().parent.parent.parent
+    package_root = Path(__file__).resolve().parent
+    source_root = _source_checkout_root(package_root)
+    return source_root if source_root is not None else package_root
+
+
+def _source_checkout_root(package_root: Path) -> Path | None:
+    src_root = package_root.parent
+    if src_root.name != "src":
+        return None
+    checkout = src_root.parent
+    if (checkout / "pyproject.toml").exists():
+        return checkout
+    return None
 
 
 INSTALL_ROOT: Path = _resolve_install_root()
+PACKAGE_ROOT: Path = Path(__file__).resolve().parent
+
+
+def _resolve_asset_path(*parts: str) -> Path:
+    install_asset = INSTALL_ROOT / "assets" / Path(*parts)
+    if install_asset.exists():
+        return install_asset
+    return PACKAGE_ROOT / "assets" / Path(*parts)
 
 # Bundled engine binary + static assets — the install layer is allowed
 # to be read-only.
 PIPER_DIR: Path = INSTALL_ROOT / "piper"
 PIPER_EXE: Path = PIPER_DIR / "piper.exe"
-ASSET_ICON_PATH: Path = INSTALL_ROOT / "assets" / "pippal_icon.png"
+ASSET_ICON_PATH: Path = _resolve_asset_path("pippal_icon.png")
 
 # Pre-recorded onboarding clip played when the user triggers a Read /
 # Queue action and no engine is ready (no voice installed). Tells the
 # user how to install a voice — without needing a working TTS to do it.
 ASSET_NO_VOICE_WAV: Path = (
-    INSTALL_ROOT / "assets" / "onboarding" / "pippal-no-installed-language.wav"
+    _resolve_asset_path("onboarding", "pippal-no-installed-language.wav")
 )
 
 
