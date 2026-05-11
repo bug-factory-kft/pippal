@@ -60,8 +60,7 @@ def install_context_menu() -> None:
     """Register 'Read with PipPal' on .txt and .md files for the current
     user. Raises RuntimeError if any registry write fails."""
     pythonw = _pythonw_path()
-    client = str(INSTALL_ROOT / PIPPAL_OPEN_SCRIPT)
-    cmd = f'"{pythonw}" "{client}" "%1"'
+    cmd = _context_menu_command(pythonw)
 
     for ext in CONTEXT_MENU_EXTENSIONS:
         base = _reg_base_path(ext)
@@ -76,6 +75,13 @@ def install_context_menu() -> None:
             if rc.returncode != 0:
                 err = rc.stderr.decode("utf-8", "replace") or "reg add failed"
                 raise RuntimeError(err)
+
+
+def _context_menu_command(pythonw: str) -> str:
+    client = INSTALL_ROOT / PIPPAL_OPEN_SCRIPT
+    if client.exists():
+        return f'"{pythonw}" "{client}" "%1"'
+    return f'"{pythonw}" -m pippal.open_file "%1"'
 
 
 def uninstall_context_menu() -> None:

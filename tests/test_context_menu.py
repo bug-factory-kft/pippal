@@ -11,6 +11,7 @@ from __future__ import annotations
 from unittest.mock import patch
 
 from pippal.context_menu import (
+    _context_menu_command,
     context_menu_installed,
     context_menu_status,
 )
@@ -34,6 +35,24 @@ class TestContextMenuStatus:
                    return_value=_Result(1)):
             assert context_menu_status() == "none"
             assert context_menu_installed() is False
+
+
+class TestContextMenuCommand:
+    def test_uses_source_helper_when_available(self, tmp_path, monkeypatch):
+        helper = tmp_path / "pippal_open.py"
+        helper.write_text("# helper", encoding="utf-8")
+        monkeypatch.setattr("pippal.context_menu.INSTALL_ROOT", tmp_path)
+
+        assert _context_menu_command("pythonw.exe") == (
+            f'"pythonw.exe" "{helper}" "%1"'
+        )
+
+    def test_falls_back_to_packaged_module_when_helper_missing(self, tmp_path, monkeypatch):
+        monkeypatch.setattr("pippal.context_menu.INSTALL_ROOT", tmp_path)
+
+        assert _context_menu_command("pythonw.exe") == (
+            '"pythonw.exe" -m pippal.open_file "%1"'
+        )
 
     def test_partial_extensions_present(self):
         # First reg query succeeds, second fails — i.e. .txt has the
