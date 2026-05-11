@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import threading
 import time
+import uuid
 import winsound
 from dataclasses import dataclass, field
 from enum import Enum
@@ -100,8 +101,7 @@ def play_one(
 
     session = PlaybackSession(
         chunks=chunks,
-        chunk_paths=[TEMP_DIR / f"out_{my_token}_{i}.wav"
-                      for i in range(len(chunks))],
+        chunk_paths=_chunk_paths(my_token, len(chunks)),
         backend=backend,
     )
 
@@ -141,6 +141,17 @@ def play_one(
 # ---------------------------------------------------------------------------
 # Per-chunk helpers
 # ---------------------------------------------------------------------------
+
+def _chunk_paths(my_token: int, count: int) -> list[Path]:
+    """Return fresh temp paths for one playback session.
+
+    ``my_token`` is only process-local and starts from 0 after restart,
+    so include a session nonce to avoid replaying stale WAVs that were
+    left behind by a crash or failed cleanup in a previous process.
+    """
+    session_id = uuid.uuid4().hex
+    return [TEMP_DIR / f"out_{my_token}_{session_id}_{i}.wav" for i in range(count)]
+
 
 def _prepare_first_chunk(
     engine: TTSEngine,
