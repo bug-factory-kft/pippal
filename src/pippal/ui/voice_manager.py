@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import threading
 import tkinter as tk
+import urllib.parse
 import urllib.request
 from collections.abc import Callable
 from pathlib import Path
@@ -23,6 +24,18 @@ from ..voices import (
 )
 from . import theme
 from .theme import UI, apply_dark_theme, make_card
+
+
+def _encode_download_url(url: str) -> str:
+    """Percent-encode the request path for urllib/http.client.
+
+    Hugging Face voice paths can contain non-ASCII speaker names. The
+    catalogue keeps them readable, but the HTTP request line must be
+    ASCII or urllib can raise before making the request.
+    """
+    parts = urllib.parse.urlsplit(url)
+    safe_path = urllib.parse.quote(parts.path, safe="/")
+    return urllib.parse.urlunsplit(parts._replace(path=safe_path))
 
 
 class VoiceManagerDialog:
@@ -395,7 +408,8 @@ class VoiceManagerDialog:
                              chunk: int = 1 << 16) -> None:
         """Download `url` to `dest` with a connect/read timeout. Raises
         if the request hangs or the response is empty."""
-        with urllib.request.urlopen(url, timeout=timeout) as resp, \
+        encoded_url = _encode_download_url(url)
+        with urllib.request.urlopen(encoded_url, timeout=timeout) as resp, \
              dest.open("wb") as f:
             while True:
                 buf = resp.read(chunk)
