@@ -3,6 +3,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 
 def test_source_helper_imports_package_under_isolated_python() -> None:
     result = subprocess.run(
@@ -21,7 +23,8 @@ def test_package_script_entry_points_at_packaged_module() -> None:
     assert 'pippal-open = "pippal.open_file:main"' in pyproject
 
 
-def test_packaged_module_runs_helper_main() -> None:
+@pytest.mark.skipif(os.name != "nt", reason="Explorer helper module is a Windows surface")
+def test_packaged_module_runs_helper_main_on_windows() -> None:
     env = os.environ.copy()
     src_path = str(Path("src").resolve())
     env["PYTHONPATH"] = os.pathsep.join(
