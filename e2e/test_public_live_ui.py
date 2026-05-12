@@ -381,14 +381,19 @@ def test_public_command_server_validates_payloads_and_open_file_helper(
     assert post_json("/read-file", {"path": str(tmp_path / "missing.txt")},
                      expected_status=404) is not None
 
+    expected = "Public command helper text."
     readable = tmp_path / "read-me.txt"
-    readable.write_text("Public command helper text.", encoding="utf-8")
+    readable.write_text(expected, encoding="utf-8")
 
     before = int(get_runtime_state()["token"])
     run_source_open_file_helper(public_root, readable)
     state = wait_for_state(
-        lambda current: int(current["token"]) > before,
-        description="source open_file dispatch",
+        lambda current: (
+            int(current["token"]) > before
+            and current["history"]
+            and current["history"][0] == expected
+        ),
+        description="source open_file dispatch records Recent history",
     )
-    assert state["history"][0] == "Public command helper text."
+    assert state["history"][0] == expected
     post_empty("/stop")
