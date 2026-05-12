@@ -362,16 +362,95 @@ def enable_drag_to_move(window: tk.Toplevel, drag_handle: tk.Misc) -> None:
     it moves the (chromeless) `window`. Works recursively across the
     handle's children except interactive controls (buttons / entries
     / comboboxes), so clicking a button on the header doesn't drag."""
-    state: dict[str, int] = {"dx": 0, "dy": 0}
+    state: dict[str, int] = {
+        "dx": 0,
+        "dy": 0,
+        "start_x": 0,
+        "start_y": 0,
+        "win_x": 0,
+        "win_y": 0,
+        "active": 0,
+        "polling": 0,
+    }
+
+    def _start_pointer_poll_drag() -> bool:
+        """Poll the global pointer while Windows holds the left button.
+
+        Tk geometry fallback works for normal Settings windows, but modal
+        chromeless dialogs can miss `<B1-Motion>` during real mouse
+        automation. Polling keeps those custom headers draggable too.
+        """
+        import sys
+        if sys.platform != "win32" or state["polling"]:
+            return False
+        try:
+            import ctypes
+
+            user32 = ctypes.windll.user32
+
+            class POINT(ctypes.Structure):
+                _fields_ = [("x", ctypes.c_long), ("y", ctypes.c_long)]
+
+            def _poll() -> None:
+                if not state["polling"]:
+                    return
+                if not (user32.GetAsyncKeyState(0x01) & 0x8000):
+                    state["polling"] = 0
+                    return
+
+                point = POINT()
+                if user32.GetCursorPos(ctypes.byref(point)):
+                    x = state["win_x"] + (int(point.x) - state["start_x"])
+                    y = state["win_y"] + (int(point.y) - state["start_y"])
+                    window.geometry(f"+{x}+{y}")
+                window.after(15, _poll)
+        except Exception:
+            return False
+
+        state["polling"] = 1
+        window.after(1, _poll)
+        return True
 
     def _press(event: tk.Event) -> None:
         state["dx"] = event.x_root - window.winfo_x()
         state["dy"] = event.y_root - window.winfo_y()
+        state["start_x"] = event.x_root
+        state["start_y"] = event.y_root
+        state["win_x"] = window.winfo_x()
+        state["win_y"] = window.winfo_y()
+        state["active"] = 1
+        _start_pointer_poll_drag()
 
     def _drag(event: tk.Event) -> None:
+        if not state["active"]:
+            return
         x = event.x_root - state["dx"]
         y = event.y_root - state["dy"]
         window.geometry(f"+{x}+{y}")
+
+    def _release(_event: tk.Event) -> None:
+        state["active"] = 0
+        state["polling"] = 0
+
+    def _press_if_header(event: tk.Event) -> None:
+        try:
+            x = event.x_root
+            y = event.y_root
+            header_x = drag_handle.winfo_rootx()
+            header_y = drag_handle.winfo_rooty()
+            header_w = drag_handle.winfo_width()
+            header_h = drag_handle.winfo_height()
+        except Exception:
+            return
+
+        if not (header_x <= x < header_x + header_w):
+            return
+        if not (header_y <= y < header_y + header_h):
+            return
+        # Reserve the right edge for custom title-bar buttons.
+        if x >= header_x + header_w - 72:
+            return
+        _press(event)
 
     def _bind_recursive(widget: tk.Misc) -> None:
         # Don't capture clicks on interactive widgets — let them work
@@ -382,10 +461,14 @@ def enable_drag_to_move(window: tk.Toplevel, drag_handle: tk.Misc) -> None:
             return
         widget.bind("<Button-1>", _press)
         widget.bind("<B1-Motion>", _drag)
+        widget.bind("<ButtonRelease-1>", _release)
         for child in widget.winfo_children():
             _bind_recursive(child)
 
     _bind_recursive(drag_handle)
+    window.bind("<Button-1>", _press_if_header, add="+")
+    window.bind("<B1-Motion>", _drag, add="+")
+    window.bind("<ButtonRelease-1>", _release, add="+")
 
 
 def make_card(parent: tk.Misc, title: str | None = None) -> tuple[ttk.Frame, ttk.Frame]:
