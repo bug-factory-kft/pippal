@@ -75,31 +75,6 @@ class TestPauseToggle:
         assert engine._is_paused is False
 
 
-# `ai_runner` lives in pippal_pro. The public package's CI runs without
-# the Pro extension on the import path; skip Pro-touching tests cleanly
-# in that case. The full test suite for these still runs in the
-# pippal-pro repo's own pytest config.
-_ai_runner = pytest.importorskip("pippal_pro.ai_runner")
-
-
-class TestPromptFor:
-    """Exercises `pippal_pro.ai_runner.prompt_for` directly. The
-    function moved out of pippal.engine during the plugin-host refactor;
-    the equivalent tests live here for now and will move under
-    pippal-pro/tests/ once the public/Pro split has settled."""
-
-    @pytest.mark.parametrize("action", ["summary", "explain", "define"])
-    def test_returns_prompt_for_known_actions(self, engine: TTSEngine, action: str):
-        assert _ai_runner.prompt_for(engine, action) != ""
-
-    def test_translate_uses_target(self, engine: TTSEngine):
-        engine.config["ai_translate_target"] = "German"
-        assert "German" in _ai_runner.prompt_for(engine, "translate")
-
-    def test_unknown_action_returns_empty(self, engine: TTSEngine):
-        assert _ai_runner.prompt_for(engine, "nope") == ""
-
-
 class TestResetBackend:
     def test_clears_cache(self, engine: TTSEngine):
         engine._backend = MagicMock()
@@ -126,9 +101,9 @@ class TestTokenCancellation:
         assert engine._is_cancelled(old)
 
     def test_each_top_level_action_bumps_token(self, engine: TTSEngine):
-        # speak / queue / replay / ai / export / stop all bump the token
-        # so any in-flight worker self-cancels. We can't run the whole
-        # async chain in a unit test, but we CAN check the bump.
+        # Top-level actions bump the token so any in-flight worker
+        # self-cancels. We can't run the whole async chain in a unit
+        # test, but we CAN check the bump.
         with engine.lock:
             t0 = engine.token
         engine.stop()

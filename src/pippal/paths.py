@@ -8,7 +8,7 @@ Two roots:
   static assets.
 - ``DATA_ROOT`` is where runtime/user state lives — voices the user
   installs, config, history, scratch files. Always under
-  ``%LOCALAPPDATA%\\PipPal`` so dev and Store builds behave the same
+  ``%LOCALAPPDATA%\\PipPal`` so dev and packaged builds behave the same
   and we never try to write into the install dir.
 
 ``DATA_ROOT`` can be overridden via the ``PIPPAL_DATA_DIR`` env var

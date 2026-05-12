@@ -27,10 +27,9 @@ class TestDefaultConfig:
 
 class TestLoadConfig:
     # `load_config` returns the LAYERED defaults (DEFAULT_CONFIG plus
-    # whatever any plugin — including an optional pippal_pro — has
-    # registered). We compare against `_layered_defaults()` rather than
-    # `DEFAULT_CONFIG` so the tests stay correct in both Free-only and
-    # Pro-loaded environments.
+    # whatever any optional extension plugin has registered). We compare
+    # against `_layered_defaults()` rather than `DEFAULT_CONFIG` so the
+    # tests stay correct in extension-loaded environments.
 
     def test_returns_defaults_when_file_missing(self, tmp_path: Path):
         cfg = config.load_config(path=tmp_path / "nope.json")
@@ -99,16 +98,16 @@ class TestSaveConfig:
         loaded = config.load_config(path=p)
         assert loaded["voice"] == "v1.onnx"
 
-    def test_mood_id_survives_round_trip(self, tmp_path: Path):
-        # Regression for the missing-DEFAULT_CONFIG-key bug: mood_id
-        # was being filtered out by load_config because it wasn't in
-        # DEFAULT_CONFIG. Adding it as a default key fixes that.
+    def test_unknown_extension_key_survives_round_trip(self, tmp_path: Path):
+        # Regression for the missing-DEFAULT_CONFIG-key bug: unknown
+        # extension-owned keys must survive even when they are not in
+        # DEFAULT_CONFIG.
         p = tmp_path / "config.json"
         cfg = dict(config.DEFAULT_CONFIG)
-        cfg["mood_id"] = "warm"
+        cfg["extension_feature_key"] = "warm"
         config.save_config(cfg, path=p)
         loaded = config.load_config(path=p)
-        assert loaded["mood_id"] == "warm"
+        assert loaded["extension_feature_key"] == "warm"
 
 
 class TestLayeredSave:
@@ -131,20 +130,23 @@ class TestLayeredSave:
         p = tmp_path / "config.json"
         cfg = dict(config.DEFAULT_CONFIG)
         cfg["voice"] = "custom.onnx"
-        cfg["mood_id"] = "warm"
+        cfg["extension_feature_key"] = "warm"
         config.save_config(cfg, path=p)
         on_disk = json.loads(p.read_text("utf-8"))
-        assert on_disk == {"voice": "custom.onnx", "mood_id": "warm"}
+        assert on_disk == {
+            "voice": "custom.onnx",
+            "extension_feature_key": "warm",
+        }
 
     def test_unknown_keys_preserved_through_save(self, tmp_path: Path):
-        # If a Pro plugin once wrote a key we don't recognise (because
-        # Pro is currently uninstalled), save_config must keep it so a
-        # later Pro reinstall finds the value still there. Without
-        # this protection, a Free Settings save would silently delete
-        # Pro state.
+        # If an extension once wrote a key we don't recognise because
+        # it is currently uninstalled, save_config must keep it so a
+        # later reinstall finds the value still there. Without this
+        # protection, a Settings save would silently delete extension
+        # state.
         p = tmp_path / "config.json"
         cfg = dict(config.DEFAULT_CONFIG)
-        cfg["custom_pro_key"] = "user-set value"
+        cfg["custom_extension_key"] = "user-set value"
         config.save_config(cfg, path=p)
         on_disk = json.loads(p.read_text("utf-8"))
-        assert on_disk["custom_pro_key"] == "user-set value"
+        assert on_disk["custom_extension_key"] == "user-set value"

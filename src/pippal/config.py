@@ -21,7 +21,7 @@ from .paths import CONFIG_PATH
 # (HOTKEY_ACTIONS) plus derived views (HOTKEY_KEYS, HOTKEY_FOR_ACTION).
 # Stage 1 of the plugin-host refactor moved that single source of truth
 # to `pippal.plugins`: the core package self-registers its actions in
-# `pippal/_register.py`, pippal_pro adds AI ones, and consumers
+# `pippal/_register.py`, extension packages add their own, and consumers
 # iterate `plugins.hotkey_actions()`.
 
 
@@ -45,8 +45,8 @@ DEFAULT_CONFIG: dict[str, Any] = {
     # collision with Hungarian / Polish keyboards. Win+Shift combos
     # taken by Windows itself (S=screenshot, M=restore,
     # arrows=move-window) avoided; letters picked for mnemonic value
-    # where possible. Extension packages (e.g. `pippal_pro`) register
-    # their own combos via `plugins.register_hotkey_action`.
+    # where possible. Extension packages register their own combos via
+    # `plugins.register_hotkey_action`.
     "hotkey_speak":     "windows+shift+r",   # Read
     "hotkey_stop":      "windows+shift+b",   # Break (S is screenshot)
     "hotkey_pause":     "windows+shift+p",
@@ -57,12 +57,12 @@ DEFAULT_CONFIG: dict[str, Any] = {
 def _layered_defaults() -> dict[str, Any]:
     """Effective defaults = `DEFAULT_CONFIG` (the core package's
     canonical list) overlaid with whatever any plugin (including
-    core `_register.py` and an optional `pippal_pro`) registered.
+    core `_register.py` and optional extension packages) registered.
 
     DEFAULT_CONFIG is kept as the in-source canonical core reference
     so existing tests, scripts, and reviewers can read one literal to
-    see what the core package ships. The plugin registry adds
-    Pro keys if Pro is installed."""
+    see what the core package ships. The plugin registry adds extension
+    defaults when those packages are installed."""
     from . import plugins
     merged = dict(DEFAULT_CONFIG)
     merged.update(plugins.defaults())
@@ -73,8 +73,8 @@ def load_config(path: Path = CONFIG_PATH) -> dict[str, Any]:
     """Load the effective config = layered defaults + user overrides.
 
     User overrides are whatever the file actually contains. Unknown
-    keys (e.g. a Pro setting saved while Pro was installed, then
-    Pro uninstalled) are PRESERVED rather than dropped — codex'
+    keys (e.g. an extension setting saved while its package was installed,
+    then removed) are PRESERVED rather than dropped — codex'
     'Unavailable action' principle: don't destroy user state when a
     plugin disappears, the next reinstall picks up where they left
     off."""

@@ -11,9 +11,8 @@ third-party plugin. The public `pippal` package guarantees:
 - unknown / unregistered names degrade gracefully (Piper fallback for
   engines, no-op for plugin actions, skipped for hotkeys)
 
-The `pippal_pro` package is just one consumer of this API; if anyone
-ships a `pippal-elevenlabs` or `pippal-edge-tts` plugin tomorrow, these
-tests are the contract they're coding against."""
+If anyone ships a `pippal-elevenlabs` or `pippal-edge-tts` plugin
+tomorrow, these tests are the contract they're coding against."""
 
 from __future__ import annotations
 

@@ -63,6 +63,6 @@ class TestConfigKeyFor:
 
     def test_unknown_action_returns_empty_string(self):
         # An unregistered action_id must not raise. Used in the
-        # capture_for_action fallback so a Pro-only action still
-        # captures (with an empty release set) when Pro is absent.
+        # capture_for_action fallback so an extension-only action still
+        # captures with an empty release set when that extension is absent.
         assert clipboard_capture._config_key_for("nope") == ""

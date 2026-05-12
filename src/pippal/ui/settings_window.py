@@ -82,7 +82,7 @@ class SettingsWindow:
         # Cards are registered into the plugin host (pippal.plugins) by
         # whichever package supplies them — the core pippal package
         # registers Voice/Speech/Hotkeys/Panel/Integration/About via
-        # `_register.py`; pippal_pro adds the AI card. The order
+        # `_register.py`; extensions can add their own cards. The order
         # comes from each registration's `zone` (with `order` as a
         # tie-breaker).
         for builder in plugins.settings_cards():
@@ -387,10 +387,9 @@ class SettingsWindow:
             parent=self.win,
         ):
             return
-        # `_layered_defaults` includes any plugin (e.g. pippal_pro)
-        # contributions, so when the AI card is present its keys are
-        # in `d` and we'll reset them; without Pro they're absent and
-        # we silently skip.
+        # `_layered_defaults` includes plugin contributions, so when
+        # extension cards are present their keys are in `d` and we'll
+        # reset them; when absent, we silently skip.
         from ..config import _layered_defaults
         d = _layered_defaults()
 

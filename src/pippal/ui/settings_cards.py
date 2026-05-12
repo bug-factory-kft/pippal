@@ -31,9 +31,8 @@ def build_voice_card(sw: SettingsWindow, body: ttk.Frame) -> None:
               width=14, anchor="w").pack(side="left")
     # Engine combo lists every TTS backend that any plugin has
     # registered. The core pippal registers `piper`; an extension
-    # package (e.g. pippal_pro) can register others. A future
-    # ElevenLabs or Edge TTS plugin would slot in here without
-    # touching this card.
+    # package can register others. A future ElevenLabs or Edge TTS
+    # plugin would slot in here without touching this card.
     available_engines = sorted(plugins.engines().keys()) or ["piper"]
     # If the saved engine isn't registered (e.g. an extension was
     # uninstalled), surface "piper" in the form rather than the

@@ -1,6 +1,6 @@
 """Pytest bootstrap.
 
-PipPal follows the PEP-660 src layout (`src/pippal/`, `src/pippal_pro/`).
+PipPal follows the PEP-660 src layout (`src/pippal/`).
 An editable install (`pip install -e ".[dev]"`) is the canonical way
 to make the packages importable, but adding `src/` to `sys.path`
 inside conftest.py keeps `python -m pytest` working in a fresh clone
