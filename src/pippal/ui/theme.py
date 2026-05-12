@@ -328,11 +328,23 @@ def make_chromeless_keep_taskbar(window: tk.Toplevel) -> None:
         )
 
         # Step 4 — bounce the window so Explorer rebuilds its Alt+Tab
-        # cache with the new flags. withdraw() unmaps; deiconify()
-        # remaps it 30 ms later (Windows wants a beat between).
+        # cache with the new flags. Preserve Tk's requested geometry
+        # across the remap; otherwise some child dialogs can flash in
+        # the requested position, then let the WM fall back to (0,0).
+        geometry = window.geometry()
         window.withdraw()
-        window.after(30, window.deiconify)
-        _chromeless_log("withdraw + deiconify scheduled")
+
+        def _deiconify_with_geometry() -> None:
+            try:
+                window.deiconify()
+                if geometry:
+                    window.geometry(geometry)
+                    _chromeless_log(f"geometry restored after remap: {geometry}")
+            except Exception as exc:
+                _chromeless_log(f"deiconify restore failed: {type(exc).__name__}: {exc}")
+
+        window.after(30, _deiconify_with_geometry)
+        _chromeless_log(f"withdraw + deiconify scheduled with geometry {geometry}")
     except Exception as e:
         _chromeless_log(f"FAILED: {type(e).__name__}: {e}")
 
@@ -357,11 +369,22 @@ def apply_rounded_corners(window: tk.Misc) -> None:
         pass
 
 
-def enable_drag_to_move(window: tk.Toplevel, drag_handle: tk.Misc) -> None:
+def enable_drag_to_move(
+    window: tk.Toplevel,
+    drag_handle: tk.Misc,
+    *,
+    native_header_drag: bool = False,
+) -> None:
     """Bind `<Button-1>` / `<B1-Motion>` on `drag_handle` so dragging
     it moves the (chromeless) `window`. Works recursively across the
     handle's children except interactive controls (buttons / entries
-    / comboboxes), so clicking a button on the header doesn't drag."""
+    / comboboxes), so clicking a button on the header doesn't drag.
+
+    Some modal override-redirect Toplevels are exposed to Windows as
+    a single `TkTopLevel` HWND, so pointer input never reaches the
+    nested Tk header widgets. `native_header_drag` adds a small Win32
+    fallback for those dialogs only.
+    """
     state: dict[str, int] = {
         "dx": 0,
         "dy": 0,
@@ -372,6 +395,22 @@ def enable_drag_to_move(window: tk.Toplevel, drag_handle: tk.Misc) -> None:
         "active": 0,
         "polling": 0,
     }
+
+    def _pointer_position(event: tk.Event) -> tuple[int, int]:
+        import sys
+        if sys.platform == "win32":
+            try:
+                import ctypes
+
+                class POINT(ctypes.Structure):
+                    _fields_ = [("x", ctypes.c_long), ("y", ctypes.c_long)]
+
+                point = POINT()
+                if ctypes.windll.user32.GetCursorPos(ctypes.byref(point)):
+                    return int(point.x), int(point.y)
+            except Exception:
+                pass
+        return int(event.x_root), int(event.y_root)
 
     def _start_pointer_poll_drag() -> bool:
         """Poll the global pointer while Windows holds the left button.
@@ -412,10 +451,11 @@ def enable_drag_to_move(window: tk.Toplevel, drag_handle: tk.Misc) -> None:
         return True
 
     def _press(event: tk.Event) -> None:
-        state["dx"] = event.x_root - window.winfo_x()
-        state["dy"] = event.y_root - window.winfo_y()
-        state["start_x"] = event.x_root
-        state["start_y"] = event.y_root
+        pointer_x, pointer_y = _pointer_position(event)
+        state["dx"] = pointer_x - window.winfo_x()
+        state["dy"] = pointer_y - window.winfo_y()
+        state["start_x"] = pointer_x
+        state["start_y"] = pointer_y
         state["win_x"] = window.winfo_x()
         state["win_y"] = window.winfo_y()
         state["active"] = 1
@@ -424,8 +464,9 @@ def enable_drag_to_move(window: tk.Toplevel, drag_handle: tk.Misc) -> None:
     def _drag(event: tk.Event) -> None:
         if not state["active"]:
             return
-        x = event.x_root - state["dx"]
-        y = event.y_root - state["dy"]
+        pointer_x, pointer_y = _pointer_position(event)
+        x = pointer_x - state["dx"]
+        y = pointer_y - state["dy"]
         window.geometry(f"+{x}+{y}")
 
     def _release(_event: tk.Event) -> None:
@@ -434,21 +475,34 @@ def enable_drag_to_move(window: tk.Toplevel, drag_handle: tk.Misc) -> None:
 
     def _press_if_header(event: tk.Event) -> None:
         try:
-            x = event.x_root
-            y = event.y_root
+            x, y = _pointer_position(event)
             header_x = drag_handle.winfo_rootx()
             header_y = drag_handle.winfo_rooty()
             header_w = drag_handle.winfo_width()
             header_h = drag_handle.winfo_height()
+            window_x = window.winfo_rootx()
+            window_y = window.winfo_rooty()
+            window_w = window.winfo_width()
         except Exception:
             return
 
-        if not (header_x <= x < header_x + header_w):
-            return
-        if not (header_y <= y < header_y + header_h):
+        in_header_widget = (
+            header_w > 1
+            and header_h > 1
+            and header_x <= x < header_x + header_w
+            and header_y <= y < header_y + header_h
+        )
+        header_band_h = max(48, min(96, header_h or 64))
+        in_window_header_band = (
+            window_w > 1
+            and window_x <= x < window_x + window_w
+            and window_y <= y < window_y + header_band_h
+        )
+        if not (in_header_widget or in_window_header_band):
             return
         # Reserve the right edge for custom title-bar buttons.
-        if x >= header_x + header_w - 72:
+        right_edge = (header_x + header_w) if in_header_widget else (window_x + window_w)
+        if x >= right_edge - 72:
             return
         _press(event)
 
@@ -465,10 +519,314 @@ def enable_drag_to_move(window: tk.Toplevel, drag_handle: tk.Misc) -> None:
         for child in widget.winfo_children():
             _bind_recursive(child)
 
+    def _native_drag_hwnd() -> int | None:
+        import sys
+        if sys.platform != "win32" or not native_header_drag:
+            return None
+        try:
+            import ctypes
+            from ctypes import wintypes
+
+            user32 = ctypes.windll.user32
+            get_parent = user32.GetParent
+            get_parent.restype = wintypes.HWND
+            get_parent.argtypes = [wintypes.HWND]
+            get_class_name = user32.GetClassNameW
+            get_class_name.restype = ctypes.c_int
+            get_class_name.argtypes = [wintypes.HWND, wintypes.LPWSTR, ctypes.c_int]
+            get_window_text = user32.GetWindowTextW
+            get_window_text.restype = ctypes.c_int
+            get_window_text.argtypes = [wintypes.HWND, wintypes.LPWSTR, ctypes.c_int]
+            get_window_rect = user32.GetWindowRect
+            get_window_rect.restype = wintypes.BOOL
+            get_window_rect.argtypes = [wintypes.HWND, ctypes.c_void_p]
+            get_window_thread_process_id = user32.GetWindowThreadProcessId
+            get_window_thread_process_id.restype = wintypes.DWORD
+            get_window_thread_process_id.argtypes = [
+                wintypes.HWND,
+                ctypes.POINTER(wintypes.DWORD),
+            ]
+
+            def _class_name(hwnd: int) -> str:
+                buf = ctypes.create_unicode_buffer(128)
+                get_class_name(hwnd, buf, len(buf))
+                return buf.value
+
+            def _window_text(hwnd: int) -> str:
+                buf = ctypes.create_unicode_buffer(512)
+                get_window_text(hwnd, buf, len(buf))
+                return buf.value
+
+            class RECT(ctypes.Structure):
+                _fields_ = [
+                    ("left", ctypes.c_long),
+                    ("top", ctypes.c_long),
+                    ("right", ctypes.c_long),
+                    ("bottom", ctypes.c_long),
+                ]
+
+            def _visible_wrapper_by_title() -> int | None:
+                try:
+                    title = window.title()
+                    target = (
+                        window.winfo_rootx(),
+                        window.winfo_rooty(),
+                        window.winfo_width(),
+                        window.winfo_height(),
+                    )
+                except Exception:
+                    return None
+                if not title:
+                    return None
+
+                import os
+
+                current_pid = os.getpid()
+                matches: list[tuple[int, int]] = []
+                enum_windows = user32.EnumWindows
+                enum_windows.restype = wintypes.BOOL
+
+                enum_proc = ctypes.WINFUNCTYPE(
+                    wintypes.BOOL,
+                    wintypes.HWND,
+                    wintypes.LPARAM,
+                )
+
+                def _enum(hwnd_candidate: wintypes.HWND, _lparam: wintypes.LPARAM) -> bool:
+                    hwnd_int = int(hwnd_candidate)
+                    pid = wintypes.DWORD()
+                    get_window_thread_process_id(hwnd_candidate, ctypes.byref(pid))
+                    if int(pid.value) != current_pid:
+                        return True
+                    if _class_name(hwnd_int) != "TkTopLevel":
+                        return True
+                    if _window_text(hwnd_int) != title:
+                        return True
+                    rect = RECT()
+                    if not get_window_rect(hwnd_candidate, ctypes.byref(rect)):
+                        return True
+                    left, top, width, height = target
+                    rect_w = int(rect.right - rect.left)
+                    rect_h = int(rect.bottom - rect.top)
+                    if rect_w <= 1 or rect_h <= 1:
+                        return True
+
+                    # Some override-redirect child dialogs report their
+                    # inner TkChild at (0,0) while Windows dispatches mouse
+                    # input to a separate visible TkTopLevel wrapper. The
+                    # title and process are the stable identity; geometry is
+                    # only a tie-breaker when multiple wrappers exist.
+                    pos_score = abs(int(rect.left) - int(left)) + abs(
+                        int(rect.top) - int(top)
+                    )
+                    size_score = abs(rect_w - int(width)) + abs(rect_h - int(height))
+                    if int(width) <= 1 or int(height) <= 1:
+                        size_score += 1000
+                    matches.append((pos_score + size_score, hwnd_int))
+                    return True
+
+                enum_windows(enum_proc(_enum), 0)
+                if not matches:
+                    _chromeless_log("native wrapper by title not found")
+                    return None
+                matches.sort(key=lambda item: item[0])
+                hwnd_match = matches[0][1]
+                _chromeless_log(f"native wrapper by title selected hwnd={hwnd_match}")
+                return hwnd_match
+
+            hwnd = int(window.winfo_id())
+            if not hwnd:
+                return None
+            if _class_name(hwnd) == "TkTopLevel":
+                return hwnd
+            parent = int(get_parent(hwnd) or 0)
+            if parent and _class_name(parent) != "#32769":
+                return parent
+            return _visible_wrapper_by_title()
+        except Exception:
+            return None
+
+    def _install_native_header_drag() -> None:
+        import sys
+        if sys.platform != "win32" or not native_header_drag:
+            return
+        try:
+            import ctypes
+            from ctypes import wintypes
+
+            hwnd = _native_drag_hwnd()
+            if not hwnd:
+                return
+            installed = getattr(window, "_pippal_native_header_drag", None)
+            if installed and installed.get("hwnd") == hwnd:
+                return
+
+            GWLP_WNDPROC = -4
+            WM_LBUTTONDOWN = 0x0201
+            WM_MOUSEMOVE = 0x0200
+            WM_LBUTTONUP = 0x0202
+            SWP_NOSIZE = 0x0001
+            SWP_NOZORDER = 0x0004
+
+            class RECT(ctypes.Structure):
+                _fields_ = [
+                    ("left", ctypes.c_long),
+                    ("top", ctypes.c_long),
+                    ("right", ctypes.c_long),
+                    ("bottom", ctypes.c_long),
+                ]
+
+            class POINT(ctypes.Structure):
+                _fields_ = [("x", ctypes.c_long), ("y", ctypes.c_long)]
+
+            user32 = ctypes.windll.user32
+            get_rect = user32.GetWindowRect
+            get_rect.restype = wintypes.BOOL
+            get_rect.argtypes = [wintypes.HWND, ctypes.POINTER(RECT)]
+            get_cursor_pos = user32.GetCursorPos
+            get_cursor_pos.restype = wintypes.BOOL
+            get_cursor_pos.argtypes = [ctypes.POINTER(POINT)]
+            get_async_key_state = user32.GetAsyncKeyState
+            get_async_key_state.restype = ctypes.c_short
+            get_async_key_state.argtypes = [ctypes.c_int]
+            set_capture = user32.SetCapture
+            set_capture.restype = wintypes.HWND
+            set_capture.argtypes = [wintypes.HWND]
+            release_capture = user32.ReleaseCapture
+            release_capture.restype = wintypes.BOOL
+            set_window_pos = user32.SetWindowPos
+            set_window_pos.restype = wintypes.BOOL
+            set_window_pos.argtypes = [
+                wintypes.HWND,
+                wintypes.HWND,
+                ctypes.c_int,
+                ctypes.c_int,
+                ctypes.c_int,
+                ctypes.c_int,
+                wintypes.UINT,
+            ]
+
+            call_window_proc = user32.CallWindowProcW
+            call_window_proc.restype = ctypes.c_ssize_t
+            call_window_proc.argtypes = [
+                ctypes.c_ssize_t,
+                wintypes.HWND,
+                wintypes.UINT,
+                wintypes.WPARAM,
+                wintypes.LPARAM,
+            ]
+
+            is_64bit = ctypes.sizeof(ctypes.c_void_p) == 8
+            if is_64bit and hasattr(user32, "GetWindowLongPtrW"):
+                get_long = user32.GetWindowLongPtrW
+                set_long = user32.SetWindowLongPtrW
+            else:
+                get_long = user32.GetWindowLongW
+                set_long = user32.SetWindowLongW
+            get_long.restype = ctypes.c_ssize_t
+            get_long.argtypes = [wintypes.HWND, ctypes.c_int]
+            set_long.restype = ctypes.c_ssize_t
+            set_long.argtypes = [wintypes.HWND, ctypes.c_int, ctypes.c_ssize_t]
+
+            drag_state: dict[str, int] = {}
+
+            def _header_hit(x: int, y: int) -> bool:
+                rect = RECT()
+                if not get_rect(hwnd, ctypes.byref(rect)):
+                    return False
+                header_band_h = 64
+                try:
+                    header_band_h = max(48, min(96, drag_handle.winfo_height() or 64))
+                except Exception:
+                    pass
+                return (
+                    rect.left <= x < rect.right - 72
+                    and rect.top <= y < rect.top + header_band_h
+                )
+
+            old_proc = get_long(hwnd, GWLP_WNDPROC)
+            if not old_proc:
+                return
+
+            wndproc_type = ctypes.WINFUNCTYPE(
+                ctypes.c_ssize_t,
+                wintypes.HWND,
+                wintypes.UINT,
+                wintypes.WPARAM,
+                wintypes.LPARAM,
+            )
+
+            def _wndproc(
+                proc_hwnd: wintypes.HWND,
+                msg: wintypes.UINT,
+                wparam: wintypes.WPARAM,
+                lparam: wintypes.LPARAM,
+            ) -> int:
+                if msg == WM_LBUTTONDOWN:
+                    point = POINT()
+                    if get_cursor_pos(ctypes.byref(point)) and _header_hit(
+                        int(point.x), int(point.y)
+                    ):
+                        rect = RECT()
+                        if get_rect(hwnd, ctypes.byref(rect)):
+                            drag_state.update(
+                                {
+                                    "start_x": int(point.x),
+                                    "start_y": int(point.y),
+                                    "win_x": int(rect.left),
+                                    "win_y": int(rect.top),
+                                }
+                            )
+                            set_capture(proc_hwnd)
+                            return 0
+                if msg == WM_MOUSEMOVE and drag_state:
+                    if not (get_async_key_state(0x01) & 0x8000):
+                        drag_state.clear()
+                        release_capture()
+                        return 0
+                    point = POINT()
+                    if get_cursor_pos(ctypes.byref(point)):
+                        x = drag_state["win_x"] + int(point.x) - drag_state["start_x"]
+                        y = drag_state["win_y"] + int(point.y) - drag_state["start_y"]
+                        set_window_pos(
+                            hwnd,
+                            None,
+                            x,
+                            y,
+                            0,
+                            0,
+                            SWP_NOSIZE | SWP_NOZORDER,
+                        )
+                        return 0
+                if msg == WM_LBUTTONUP and drag_state:
+                    drag_state.clear()
+                    release_capture()
+                    return 0
+                return int(call_window_proc(old_proc, proc_hwnd, msg, wparam, lparam))
+
+            wndproc = wndproc_type(_wndproc)
+            set_long(hwnd, GWLP_WNDPROC, ctypes.cast(wndproc, ctypes.c_void_p).value)
+            window._pippal_native_header_drag = {
+                "hwnd": hwnd,
+                "wndproc": wndproc,
+                "old_proc": old_proc,
+                "state": drag_state,
+            }
+            _chromeless_log(f"native header drag installed on hwnd={hwnd}")
+        except Exception as exc:
+            _chromeless_log(f"native header drag failed: {type(exc).__name__}: {exc}")
+
     _bind_recursive(drag_handle)
     window.bind("<Button-1>", _press_if_header, add="+")
     window.bind("<B1-Motion>", _drag, add="+")
     window.bind("<ButtonRelease-1>", _release, add="+")
+    window.bind("<Map>", lambda _e: _install_native_header_drag(), add="+")
+    window.after_idle(_install_native_header_drag)
+    window.after(35, _install_native_header_drag)
+    window.after(80, _install_native_header_drag)
+    window.after(160, _install_native_header_drag)
+    window.after(250, _install_native_header_drag)
+    window.after(500, _install_native_header_drag)
 
 
 def make_card(parent: tk.Misc, title: str | None = None) -> tuple[ttk.Frame, ttk.Frame]:
