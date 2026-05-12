@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import sys
 import threading
+from collections.abc import Callable, Mapping
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
@@ -27,7 +28,11 @@ def _looks_binary(sample: bytes) -> bool:
 
 
 def start_command_server(
-    engine: Any, port: int = CMD_SERVER_PORT,
+    engine: Any,
+    port: int = CMD_SERVER_PORT,
+    commands: Mapping[str, Callable[[], None]] | None = None,
+    json_commands: Mapping[str, Callable[[dict[str, Any]], Any]] | None = None,
+    queries: Mapping[str, Callable[[], Any]] | None = None,
 ) -> ThreadingHTTPServer | None:
     """Spin up the listener on a daemon thread. Returns the server (or
     None if the port couldn't be bound)."""
@@ -37,13 +42,45 @@ def start_command_server(
             self.send_response(200)
             self.end_headers()
 
+        def _json(self, payload: Any) -> None:
+            body = json.dumps(payload).encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
         def do_GET(self) -> None:
             if self.path == "/ping":
                 self._ok()
+            elif self.path == "/state":
+                self._handle_query("state")
             else:
                 self.send_error(404)
 
         def do_POST(self) -> None:
+            if self.path == "/settings":
+                self._handle_command("settings")
+                return
+            if self.path == "/voice-manager":
+                self._handle_command("voice-manager")
+                return
+            if self.path == "/stop":
+                self._handle_command("stop")
+                return
+            if self.path == "/pause":
+                self._handle_command("pause")
+                return
+            if self.path == "/prev":
+                self._handle_command("prev")
+                return
+            if self.path == "/replay":
+                self._handle_command("replay")
+                return
+            if self.path == "/next":
+                self._handle_command("next")
+                return
+
             length = int(self.headers.get("Content-Length", 0) or 0)
             if length > MAX_READ_TEXT_BYTES * 2:    # cheap guard before json parse
                 self.send_error(413, "payload too large")
@@ -58,6 +95,18 @@ def start_command_server(
                 self._handle_read_file(data)
             elif self.path == "/read":
                 self._handle_read(data)
+            elif self.path == "/settings/apply":
+                self._handle_json_command("settings.apply", data)
+            elif self.path == "/ui/click":
+                self._handle_json_command("ui.click", data)
+            elif self.path == "/ui/type":
+                self._handle_json_command("ui.type", data)
+            elif self.path == "/ui/set":
+                self._handle_json_command("ui.set", data)
+            elif self.path == "/ui/select":
+                self._handle_json_command("ui.select", data)
+            elif self.path == "/ui/overlay-click":
+                self._handle_json_command("ui.overlay_click", data)
             else:
                 self.send_error(404)
 
@@ -105,6 +154,45 @@ def start_command_server(
                 return
             engine.replay_text(text)
             self._ok()
+
+        def _handle_command(self, name: str) -> None:
+            callback = commands.get(name) if commands else None
+            if callback is None:
+                self.send_error(404)
+                return
+            try:
+                callback()
+            except Exception as exc:
+                self.send_error(500, f"{name}: {exc}")
+                return
+            self._ok()
+
+        def _handle_json_command(self, name: str, data: dict[str, Any]) -> None:
+            callback = json_commands.get(name) if json_commands else None
+            if callback is None:
+                self.send_error(404)
+                return
+            try:
+                payload = callback(data)
+            except Exception as exc:
+                self.send_error(500, f"{name}: {exc}")
+                return
+            if payload is None:
+                self._ok()
+            else:
+                self._json(payload)
+
+        def _handle_query(self, name: str) -> None:
+            callback = queries.get(name) if queries else None
+            if callback is None:
+                self.send_error(404)
+                return
+            try:
+                payload = callback()
+            except Exception as exc:
+                self.send_error(500, f"{name}: {exc}")
+                return
+            self._json(payload)
 
         def log_message(self, *args: Any, **kw: Any) -> None:
             return

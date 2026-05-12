@@ -7,6 +7,7 @@ the local IPC server, run the Tk mainloop."""
 from __future__ import annotations
 
 import sys
+import threading
 import tkinter as tk
 from collections.abc import Callable
 from types import SimpleNamespace
@@ -28,6 +29,261 @@ from .ui import Overlay, SettingsWindow
 # it out from under the title bars. tk.PhotoImage objects have to
 # outlive the window that uses them.
 _ICON_PHOTO_REF: Any = None
+
+
+def _widget_texts(widget: tk.Misc) -> list[str]:
+    texts: list[str] = []
+    try:
+        text = str(widget.cget("text")).strip()  # type: ignore[attr-defined]
+    except Exception:
+        text = ""
+    if text:
+        texts.append(text)
+    for child in widget.winfo_children():
+        texts.extend(_widget_texts(child))
+    return texts
+
+
+def _widget_option(widget: tk.Misc, option: str) -> Any:
+    try:
+        return widget.cget(option)  # type: ignore[attr-defined]
+    except Exception:
+        return None
+
+
+def _widget_label(widget: tk.Misc) -> str:
+    parent = widget.master
+    if parent is None:
+        return ""
+    label = ""
+    try:
+        siblings = parent.winfo_children()
+    except Exception:
+        return ""
+    for sibling in siblings:
+        if sibling is widget:
+            break
+        text = _widget_option(sibling, "text")
+        if text:
+            label = str(text).strip()
+    return label
+
+
+def _widget_variable_key(
+    widget: tk.Misc,
+    var_keys: dict[str, str] | None,
+) -> str:
+    if not var_keys:
+        return ""
+    for option in ("textvariable", "variable"):
+        raw = _widget_option(widget, option)
+        key = var_keys.get(str(raw)) if raw else None
+        if key:
+            return key
+    return ""
+
+
+def _widget_value(widget: tk.Misc) -> Any:
+    try:
+        if hasattr(widget, "get"):
+            return widget.get()  # type: ignore[attr-defined]
+    except Exception:
+        return None
+    return None
+
+
+def _widget_controls(
+    widget: tk.Misc,
+    var_keys: dict[str, str] | None = None,
+) -> list[dict[str, Any]]:
+    controls: list[dict[str, Any]] = []
+    class_name = ""
+    try:
+        class_name = widget.winfo_class()
+    except Exception:
+        pass
+    text = _widget_option(widget, "text")
+    state = _widget_option(widget, "state")
+    values = _widget_option(widget, "values")
+    variable_key = _widget_variable_key(widget, var_keys)
+    role_by_class = {
+        "TButton": "button",
+        "Button": "button",
+        "TEntry": "input",
+        "Entry": "input",
+        "TSpinbox": "input",
+        "Spinbox": "input",
+        "TCombobox": "select",
+        "TCheckbutton": "checkbox",
+        "Checkbutton": "checkbox",
+        "TScale": "slider",
+        "Scale": "slider",
+        "Text": "text",
+    }
+    role = role_by_class.get(class_name, "")
+    if role or text or variable_key:
+        control: dict[str, Any] = {
+            "path": str(widget),
+            "class": class_name,
+            "role": role,
+            "text": str(text).strip() if text is not None else "",
+            "label": _widget_label(widget),
+            "state": str(state) if state is not None else "",
+            "value": _widget_value(widget),
+            "variable": variable_key,
+            "visible": bool(widget.winfo_viewable()),
+        }
+        if values is not None:
+            control["values"] = list(values) if isinstance(values, tuple) else values
+        controls.append(control)
+
+    for child in widget.winfo_children():
+        controls.extend(_widget_controls(child, var_keys))
+    return controls
+
+
+def _toplevels(
+    root: tk.Misc,
+    var_keys: dict[str, str] | None = None,
+) -> list[dict[str, Any]]:
+    windows: list[dict[str, Any]] = []
+    for widget in _iter_widgets(root):
+        if not isinstance(widget, tk.Toplevel):
+            continue
+        try:
+            exists = bool(widget.winfo_exists())
+            visible = bool(widget.winfo_viewable())
+            title = str(widget.title())
+        except Exception:
+            continue
+        if not exists:
+            continue
+        windows.append({
+            "title": title,
+            "visible": visible,
+            "texts": _widget_texts(widget),
+            "controls": _widget_controls(widget, var_keys),
+        })
+    return windows
+
+
+def _iter_widgets(widget: tk.Misc) -> list[tk.Misc]:
+    out = [widget]
+    for child in widget.winfo_children():
+        out.extend(_iter_widgets(child))
+    return out
+
+
+def _target_windows(root: tk.Misc, target: dict[str, Any]) -> list[tk.Misc]:
+    title = str(target.get("title", "")).lower()
+    if not title:
+        return [root]
+    windows: list[tk.Misc] = []
+    for widget in _iter_widgets(root):
+        if not isinstance(widget, tk.Toplevel):
+            continue
+        try:
+            widget_title = str(widget.title()).lower()
+        except Exception:
+            continue
+        if title in widget_title:
+            windows.append(widget)
+    return windows
+
+
+def _target_matches(
+    widget: tk.Misc,
+    target: dict[str, Any],
+    var_keys: dict[str, str],
+) -> bool:
+    path = target.get("path")
+    if path and str(widget) != str(path):
+        return False
+    class_name = target.get("class")
+    if class_name and widget.winfo_class() != str(class_name):
+        return False
+    role = target.get("role")
+    if role:
+        control = _widget_controls(widget, var_keys)
+        if not control or control[0].get("role") != role:
+            return False
+    text = target.get("text")
+    if text is not None and str(_widget_option(widget, "text")).strip() != str(text):
+        return False
+    label = target.get("label")
+    if label is not None and _widget_label(widget).lower() != str(label).lower():
+        return False
+    var_key = target.get("var_key") or target.get("variable")
+    if var_key and _widget_variable_key(widget, var_keys) != str(var_key):
+        return False
+    return True
+
+
+def _find_widget(
+    root: tk.Misc,
+    target: dict[str, Any],
+    var_keys: dict[str, str],
+) -> tk.Misc:
+    matches: list[tk.Misc] = []
+    for window in _target_windows(root, target):
+        for widget in _iter_widgets(window):
+            try:
+                if _target_matches(widget, target, var_keys):
+                    matches.append(widget)
+            except Exception:
+                continue
+    visible = [widget for widget in matches if widget.winfo_viewable()]
+    found = visible or matches
+    if not found:
+        raise RuntimeError(f"UI target not found: {target}")
+    index = int(target.get("index", 0) or 0)
+    try:
+        return found[index]
+    except IndexError as exc:
+        raise RuntimeError(f"UI target index out of range: {target}") from exc
+
+
+def _audio_chunks(paths: list[Any]) -> list[dict[str, Any]]:
+    chunks: list[dict[str, Any]] = []
+    for path in paths:
+        info: dict[str, Any] = {
+            "path": str(path),
+            "exists": False,
+            "size": 0,
+            "riff_wave": False,
+        }
+        try:
+            exists = path.exists()
+            info["exists"] = bool(exists)
+            if exists:
+                info["size"] = path.stat().st_size
+                with path.open("rb") as handle:
+                    header = handle.read(12)
+                info["riff_wave"] = header[:4] == b"RIFF" and header[8:12] == b"WAVE"
+        except OSError as exc:
+            info["error"] = str(exc)
+        chunks.append(info)
+    return chunks
+
+
+def _call_on_tk_thread(root: tk.Misc, fn: Callable[[], Any], timeout: float = 2.0) -> Any:
+    done = threading.Event()
+    result: dict[str, Any] = {}
+
+    def run() -> None:
+        try:
+            result["value"] = fn()
+        except BaseException as exc:
+            result["error"] = exc
+        finally:
+            done.set()
+
+    root.after(0, run)
+    if not done.wait(timeout):
+        raise RuntimeError("Tk thread did not answer in time")
+    if "error" in result:
+        raise result["error"]
+    return result.get("value")
 
 
 def _set_app_user_model_id() -> None:
@@ -111,9 +367,23 @@ def _show_already_running_message() -> None:
         pass
 
 
-def _require_command_server(engine: TTSEngine, root: tk.Tk | None = None) -> Any:
+def _require_command_server(
+    engine: TTSEngine,
+    root: tk.Tk | None = None,
+    commands: dict[str, Callable[[], None]] | None = None,
+    json_commands: dict[str, Callable[[dict[str, Any]], Any]] | None = None,
+    queries: dict[str, Callable[[], Any]] | None = None,
+) -> Any:
     """Start the local listener and treat it as the single-instance owner."""
-    server = start_command_server(engine)
+    if commands is None and json_commands is None and queries is None:
+        server = start_command_server(engine)
+    else:
+        server = start_command_server(
+            engine,
+            commands=commands,
+            json_commands=json_commands,
+            queries=queries,
+        )
     if server is not None:
         return server
 
@@ -168,7 +438,323 @@ def main() -> None:
     # Local IPC server for the right-click context-menu helper. The
     # listener also owns the single-instance gate: if the port cannot
     # be bound, exit before registering hotkeys or adding a tray icon.
-    _command_server = _require_command_server(engine, root)
+    settings_box: list[SettingsWindow | None] = [None]
+
+    def open_settings_command() -> None:
+        settings = settings_box[0]
+        if settings is None:
+            raise RuntimeError("settings window is not ready")
+        root.after(0, settings.open)
+
+    def runtime_snapshot() -> dict[str, Any]:
+        settings = settings_box[0]
+        overlay_current = overlay_box[0]
+        settings_open = bool(
+            settings is not None
+            and settings.win is not None
+            and settings.win.winfo_exists()
+        )
+        settings_texts = (
+            _widget_texts(settings.win)
+            if settings_open and settings is not None and settings.win is not None
+            else []
+        )
+        settings_vars = {
+            key: var.get()
+            for key, var in (settings.vars.items() if settings is not None else [])
+        }
+        var_keys = {
+            str(var): key
+            for key, var in (settings.vars.items() if settings is not None else [])
+        }
+        with engine.lock:
+            chunk_paths = list(engine._chunk_paths)
+            backend_cls = engine._backend_cls
+            playback_state = {
+                "backend_name": engine._backend_name,
+                "backend_class": backend_cls.__name__ if backend_cls is not None else None,
+                "chunks": list(engine._chunks),
+                "chunk_idx": engine._chunk_idx,
+                "chunk_paths": [str(path) for path in chunk_paths],
+                "is_speaking": bool(engine.is_speaking),
+                "is_paused": bool(engine._is_paused),
+                "queue_length": len(engine._queue),
+                "token": engine.token,
+            }
+        playback_state["audio_chunks"] = _audio_chunks(chunk_paths)
+        overlay_state: dict[str, Any] = {}
+        if overlay_current is not None:
+            try:
+                overlay_state = {
+                    "overlay_visible": bool(overlay_current.win.winfo_viewable()),
+                    "overlay_state": overlay_current.state,
+                    "overlay_buttons": sorted(overlay_current._btn_rects),
+                    "overlay_action_label": overlay_current.action_label,
+                    "overlay_message": overlay_current.message,
+                }
+            except Exception as exc:
+                overlay_state = {"overlay_error": str(exc)}
+        return {
+            "settings_open": settings_open,
+            "settings_texts": settings_texts,
+            "settings_vars": settings_vars,
+            "windows": _toplevels(root, var_keys),
+            "controls": _widget_controls(root, var_keys),
+            "config": dict(config),
+            "history": engine.get_history(),
+            **overlay_state,
+            **playback_state,
+            "engines": sorted(plugins.engines()),
+            "plugin_actions": sorted(plugins.plugin_actions()),
+            "hotkey_actions": [
+                action_id for action_id, _key, _label, _default in plugins.hotkey_actions()
+            ],
+            "settings_cards": [
+                f"{callback.__module__}.{getattr(callback, '__name__', '<callable>')}"
+                for callback in plugins.settings_cards()
+            ],
+            "tray_items": [
+                f"{callback.__module__}.{getattr(callback, '__name__', '<callable>')}"
+                for callback in plugins.tray_items()
+            ],
+        }
+
+    def state_query() -> dict[str, Any]:
+        return _call_on_tk_thread(root, runtime_snapshot)
+
+    def voice_manager_command() -> None:
+        settings = settings_box[0]
+        if settings is None:
+            raise RuntimeError("settings window is not ready")
+        root.after(0, lambda: (settings.open(), settings._open_voice_manager()))
+
+    def apply_settings_command(data: dict[str, Any]) -> dict[str, Any]:
+        values = data.get("values", {})
+        if not isinstance(values, dict):
+            raise RuntimeError("values must be an object")
+        close = bool(data.get("close", False))
+
+        def apply() -> dict[str, Any]:
+            settings = settings_box[0]
+            if settings is None:
+                raise RuntimeError("settings window is not ready")
+            settings.open()
+            missing: list[str] = []
+            pending_values = dict(values)
+            engine_value = pending_values.pop("engine", None)
+            if engine_value is not None:
+                var = settings.vars.get("engine")
+                if var is None:
+                    missing.append("engine")
+                else:
+                    var.set(engine_value)
+                    settings._on_engine_change()
+            for key, value in pending_values.items():
+                var = settings.vars.get(str(key))
+                if var is None:
+                    missing.append(str(key))
+                    continue
+                var.set(value)
+            if missing:
+                raise RuntimeError(f"unknown settings vars: {', '.join(missing)}")
+            settings._persist(close=close)
+            return runtime_snapshot()
+
+        return _call_on_tk_thread(root, apply, timeout=5.0)
+
+    def _settings_var_keys() -> dict[str, str]:
+        settings = settings_box[0]
+        if settings is None:
+            return {}
+        return {str(var): key for key, var in settings.vars.items()}
+
+    def _coerce_var_value(var: tk.Variable, value: Any) -> Any:
+        try:
+            current = var.get()
+        except Exception:
+            return value
+        if isinstance(current, bool):
+            return bool(value)
+        if isinstance(current, int) and not isinstance(current, bool):
+            return int(value)
+        if isinstance(current, float):
+            return float(value)
+        return str(value)
+
+    def _after_ui_var_change(settings: SettingsWindow | None, key: str) -> None:
+        if settings is None:
+            return
+        if key == "engine":
+            settings._on_engine_change()
+        elif key == "speed":
+            settings._update_speed_label()
+        elif key == "noise_scale":
+            settings._update_var_label()
+
+    def _with_dialog_defaults(fn: Callable[[], Any], *, confirm: bool = True) -> Any:
+        import webbrowser
+        from tkinter import messagebox
+
+        originals = {
+            "askyesno": messagebox.askyesno,
+            "showinfo": messagebox.showinfo,
+            "showwarning": messagebox.showwarning,
+            "showerror": messagebox.showerror,
+        }
+        opened_urls: list[str] = []
+        messagebox.askyesno = lambda *_a, **_kw: bool(confirm)  # type: ignore[method-assign]
+        messagebox.showinfo = lambda *_a, **_kw: "ok"  # type: ignore[method-assign]
+        messagebox.showwarning = lambda *_a, **_kw: "ok"  # type: ignore[method-assign]
+        messagebox.showerror = lambda *_a, **_kw: "ok"  # type: ignore[method-assign]
+        original_web_open = webbrowser.open
+        webbrowser.open = (  # type: ignore[assignment]
+            lambda url, *_a, **_kw: opened_urls.append(str(url)) or True
+        )
+        try:
+            payload = fn()
+            if isinstance(payload, dict) and opened_urls:
+                payload["opened_urls"] = opened_urls
+            return payload
+        finally:
+            messagebox.askyesno = originals["askyesno"]  # type: ignore[method-assign]
+            messagebox.showinfo = originals["showinfo"]  # type: ignore[method-assign]
+            messagebox.showwarning = originals["showwarning"]  # type: ignore[method-assign]
+            messagebox.showerror = originals["showerror"]  # type: ignore[method-assign]
+            webbrowser.open = original_web_open  # type: ignore[assignment]
+
+    def ui_click_command(data: dict[str, Any]) -> dict[str, Any]:
+        target = data.get("target", {})
+        if not isinstance(target, dict):
+            raise RuntimeError("target must be an object")
+        target = {"role": "button", **target}
+        confirm = bool(data.get("confirm", True))
+
+        def click() -> dict[str, Any]:
+            widget = _find_widget(root, target, _settings_var_keys())
+            def invoke_or_click() -> dict[str, Any]:
+                if hasattr(widget, "invoke"):
+                    widget.invoke()  # type: ignore[attr-defined]
+                else:
+                    widget.event_generate("<Button-1>", x=1, y=1)
+                root.update_idletasks()
+                return runtime_snapshot()
+
+            return _with_dialog_defaults(invoke_or_click, confirm=confirm)
+
+        return _call_on_tk_thread(root, click, timeout=5.0)
+
+    def ui_type_command(data: dict[str, Any]) -> dict[str, Any]:
+        target = data.get("target", {})
+        if not isinstance(target, dict):
+            raise RuntimeError("target must be an object")
+        text = str(data.get("text", ""))
+        clear = bool(data.get("clear", True))
+
+        def type_text() -> dict[str, Any]:
+            widget = _find_widget(root, target, _settings_var_keys())
+            if not (hasattr(widget, "delete") and hasattr(widget, "insert")):
+                raise RuntimeError(f"UI target is not a text input: {target}")
+            try:
+                widget.focus_set()
+            except Exception:
+                pass
+            if clear:
+                widget.delete(0, "end")  # type: ignore[attr-defined]
+            for ch in text:
+                widget.insert("end", ch)  # type: ignore[attr-defined]
+                root.update_idletasks()
+            key = str(target.get("var_key") or target.get("variable") or "")
+            _after_ui_var_change(settings_box[0], key)
+            return runtime_snapshot()
+
+        return _call_on_tk_thread(root, type_text, timeout=5.0)
+
+    def ui_set_command(data: dict[str, Any]) -> dict[str, Any]:
+        key = str(data.get("var_key") or data.get("variable") or "")
+        if not key:
+            raise RuntimeError("var_key is required")
+        value = data.get("value")
+
+        def set_value() -> dict[str, Any]:
+            settings = settings_box[0]
+            if settings is None:
+                raise RuntimeError("settings window is not ready")
+            var = settings.vars.get(key)
+            if var is None:
+                raise RuntimeError(f"unknown settings var: {key}")
+            var.set(_coerce_var_value(var, value))
+            _after_ui_var_change(settings, key)
+            root.update_idletasks()
+            return runtime_snapshot()
+
+        return _call_on_tk_thread(root, set_value, timeout=5.0)
+
+    def ui_select_command(data: dict[str, Any]) -> dict[str, Any]:
+        target = data.get("target", {})
+        if not isinstance(target, dict):
+            raise RuntimeError("target must be an object")
+        target = {"role": "select", **target}
+        value = str(data.get("value", ""))
+
+        def select_value() -> dict[str, Any]:
+            widget = _find_widget(root, target, _settings_var_keys())
+            if not hasattr(widget, "set"):
+                raise RuntimeError(f"UI target is not selectable: {target}")
+            widget.set(value)  # type: ignore[attr-defined]
+            try:
+                widget.event_generate("<<ComboboxSelected>>")
+            except Exception:
+                pass
+            key = str(target.get("var_key") or target.get("variable") or "")
+            _after_ui_var_change(settings_box[0], key)
+            root.update_idletasks()
+            return runtime_snapshot()
+
+        return _call_on_tk_thread(root, select_value, timeout=5.0)
+
+    def ui_overlay_click_command(data: dict[str, Any]) -> dict[str, Any]:
+        tag = str(data.get("tag", ""))
+        if tag not in {"close", "prev", "replay", "next"}:
+            raise RuntimeError("tag must be one of: close, prev, replay, next")
+
+        def click_overlay() -> dict[str, Any]:
+            overlay = overlay_box[0]
+            if overlay is None:
+                raise RuntimeError("overlay is not ready")
+            if tag == "close":
+                x1, y1, x2, y2 = overlay._CLOSE_BTN_RECT
+            else:
+                rect = overlay._btn_rects.get(tag)
+                if rect is None:
+                    raise RuntimeError(f"overlay button is not visible: {tag}")
+                x1, y1, x2, y2 = rect
+            overlay._on_click(SimpleNamespace(x=(x1 + x2) // 2, y=(y1 + y2) // 2))
+            root.update_idletasks()
+            return runtime_snapshot()
+
+        return _call_on_tk_thread(root, click_overlay, timeout=5.0)
+
+    command_callbacks = {
+        "settings": open_settings_command,
+        "stop": engine.stop,
+        "pause": engine.pause_toggle,
+        "prev": engine.prev_chunk,
+        "replay": engine.replay_chunk,
+        "next": engine.next_chunk,
+        "voice-manager": voice_manager_command,
+    }
+    json_command_callbacks = {
+        "settings.apply": apply_settings_command,
+        "ui.click": ui_click_command,
+        "ui.type": ui_type_command,
+        "ui.set": ui_set_command,
+        "ui.select": ui_select_command,
+        "ui.overlay_click": ui_overlay_click_command,
+    }
+    state_queries = {"state": state_query}
+    _command_server = _require_command_server(
+        engine, root, command_callbacks, json_command_callbacks, state_queries,
+    )
 
     # ----- Hotkeys -----
     # The action → handler mapping is composed from two sources:
@@ -262,6 +848,7 @@ def main() -> None:
         on_hotkey_change=bind_hotkeys,
         on_engine_change=engine.reset_backend,
     )
+    settings_box[0] = settings
 
     # ----- Tray -----
     tray: dict[str, Any] = {"icon": None}
@@ -308,9 +895,10 @@ def main() -> None:
     # Tray menu is composed from registered builders. Each builder
     # gets a context object (engine, config, overlay, settings, root,
     # quit_action, tray_action, save_config) and returns an iterable
-    # of pystray items. The core pippal package registers Recent,
-    # Settings and Quit; pippal_pro adds Mood. Order is controlled by
-    # the registered (zone, order) tuple — see plugins.tray_items().
+    # of pystray items. The core package registers Recent, Settings,
+    # and Quit; extension packages can add their own items. Order is
+    # controlled by the registered (zone, order) tuple — see
+    # plugins.tray_items().
     tray_ctx = SimpleNamespace(
         engine=engine,
         config=config,

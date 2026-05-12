@@ -11,19 +11,19 @@ Public API:
 """
 # ruff: noqa: E402
 # Import order is intentional: registries must be populated by
-# _register + load_pro_plugin BEFORE the app/engine modules are
+# _register + extension entry-point loading BEFORE the app/engine modules are
 # imported, in case a future change has them read the registry at
 # import time. Letting ruff re-sort would re-introduce the bug.
 
 from . import _register  # noqa: F401  (side-effect: built-in registration)
 from . import plugins as _plugins
 
-# Discover an optional Pro plugin. find_spec first so a partial Pro
-# install (broken dependency) is logged loudly rather than swallowed.
-_plugins.load_pro_plugin()
+# Discover optional extension plugins. Each entry point self-registers
+# through pippal.plugins; failures are logged loudly rather than swallowed.
+_plugins.load_extension_plugins()
 
 from .app import main
 from .engine import TTSEngine
 
 __all__ = ["TTSEngine", "main"]
-__version__ = "0.2.0"
+__version__ = "0.2.2"

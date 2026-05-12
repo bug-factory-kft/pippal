@@ -17,16 +17,9 @@ toward a 1.0 contract once an extension has shipped against it for a
 few releases. Third-party plugins should pin to a specific PipPal minor
 version until then.
 
-Discovery (`pippal/__init__.py`):
-
-    if importlib.util.find_spec("pippal_pro") is not None:
-        try:
-            import pippal_pro  # self-registers
-        except Exception as exc:
-            # Don't silently swallow: a partial install is worse
-            # than no install. Log and continue with built-in only.
-            print(f"[pippal] pippal_pro present but failed to load: {exc}",
-                  file=sys.stderr)
+Discovery (`pippal/__init__.py`) loads modules from the
+``pippal.plugins`` entry-point group. Each extension module is expected
+to self-register when loaded.
 
 There is no orthogonal license check. The presence of an extension
 package on the import path IS the gate.
@@ -368,30 +361,34 @@ def voice_card_persist_hooks() -> list[Callable[[Any, str, dict[str, Any]], None
 # Discovery
 # ---------------------------------------------------------------------------
 
-def load_pro_plugin() -> bool:
-    """Try to load `pippal_pro` if installed. Returns True on success.
+def load_extension_plugins(group: str = "pippal.plugins") -> int:
+    """Load installed extension entry points.
 
-    Uses `find_spec` first so an `ImportError` from inside the package
-    (broken extension dependency) doesn't get conflated with 'extension
-    not installed'. A partial install logs to stderr and we continue
-    with the built-in package only — the user shouldn't get a
-    half-extension experience silently.
+    The public package owns the registry contract, not any concrete
+    extension package name. A broken extension logs loudly and the app
+    keeps its built-in registration surface.
     """
-    import importlib
-    import importlib.util
+    from importlib import metadata
 
-    if importlib.util.find_spec("pippal_pro") is None:
-        return False
     try:
-        importlib.import_module("pippal_pro")
-        return True
+        entry_points = metadata.entry_points()
+        selected = entry_points.select(group=group)
     except Exception as exc:
-        print(
-            f"[pippal] pippal_pro is installed but failed to load: {exc}. "
-            "Continuing with built-in features only.",
-            file=sys.stderr,
-        )
-        return False
+        print(f"[pippal] could not inspect extension entry points: {exc}", file=sys.stderr)
+        return 0
+
+    loaded = 0
+    for entry_point in selected:
+        try:
+            entry_point.load()
+            loaded += 1
+        except Exception as exc:
+            print(
+                f"[pippal] extension entry point {entry_point.name!r} failed to load: "
+                f"{exc}. Continuing with built-in features only.",
+                file=sys.stderr,
+            )
+    return loaded
 
 
 # ---------------------------------------------------------------------------
