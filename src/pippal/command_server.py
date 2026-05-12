@@ -141,7 +141,7 @@ def start_command_server(
                 self.send_error(415, "looks binary")
                 return
             text = blob.decode("utf-8", errors="replace")
-            engine.replay_text(text)
+            engine.read_text_async(text)
             self._ok()
 
         def _handle_read(self, data: dict[str, Any]) -> None:
@@ -152,7 +152,7 @@ def start_command_server(
             if len(text.encode("utf-8")) > MAX_READ_TEXT_BYTES:
                 self.send_error(413, "text too large")
                 return
-            engine.replay_text(text)
+            engine.read_text_async(text)
             self._ok()
 
         def _handle_command(self, name: str) -> None:

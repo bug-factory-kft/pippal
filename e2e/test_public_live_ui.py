@@ -317,6 +317,7 @@ def test_public_piper_read_aloud_generates_playback_audio(running_public_app) ->
         assert_backend_class(state, "PiperBackend")
         assert state["config"]["engine"] == "piper"
         assert any("Public live Piper" in chunk for chunk in state["chunks"])
+        assert state["history"][0] == "Public live Piper read aloud verification."
         assert_audio_chunk_ready(state)
     finally:
         post_empty("/stop")
@@ -385,8 +386,9 @@ def test_public_command_server_validates_payloads_and_open_file_helper(
 
     before = int(get_runtime_state()["token"])
     run_source_open_file_helper(public_root, readable)
-    wait_for_state(
+    state = wait_for_state(
         lambda current: int(current["token"]) > before,
         description="source open_file dispatch",
     )
+    assert state["history"][0] == "Public command helper text."
     post_empty("/stop")

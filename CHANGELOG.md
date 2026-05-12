@@ -14,6 +14,8 @@ Categories:
 - Hotkeys and launch surface: rejects duplicate hotkey combinations,
   fixes context-menu helper import paths, portable launchers, package
   asset runtime paths, and setup default voice paths.
+- Recent history: command-server and file-open read requests now appear
+  in the Recent tray menu after successful playback starts.
 - QA: adds install-surface smoke coverage and regression tests for the
   release-critical startup, voice, context-menu, playback, settings,
   and launcher paths.

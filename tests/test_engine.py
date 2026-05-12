@@ -55,6 +55,33 @@ class TestHistory:
         engine._remember("  hello  ")
         assert engine.get_history() == ["hello"]
 
+    def test_read_text_impl_records_recent_history(self, engine: TTSEngine):
+        saves: list[list[str]] = []
+        engine.attach_history([], saves.append)
+        with patch.object(engine, "_maybe_play_onboarding", return_value=False), \
+             patch("pippal.engine.winsound.PlaySound"), \
+             patch("pippal.engine.playback.synthesize_and_play") as synth:
+            engine._read_text_impl("  recent text from command server  ")
+
+        assert engine.get_history() == ["recent text from command server"]
+        assert saves == [["recent text from command server"]]
+        assert engine.is_speaking is True
+        synth.assert_called_once()
+        assert synth.call_args.args[1] == "recent text from command server"
+
+    def test_replay_text_impl_does_not_create_new_history_item(
+        self, engine: TTSEngine,
+    ):
+        saves: list[list[str]] = []
+        engine.attach_history(["existing"], saves.append)
+        with patch.object(engine, "_maybe_play_onboarding", return_value=False), \
+             patch("pippal.engine.winsound.PlaySound"), \
+             patch("pippal.engine.playback.synthesize_and_play"):
+            engine._replay_text_impl("manual replay text")
+
+        assert engine.get_history() == ["existing"]
+        assert saves == []
+
 
 class TestQueue:
     def test_default_zero(self, engine: TTSEngine):

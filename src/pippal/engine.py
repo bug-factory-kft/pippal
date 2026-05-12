@@ -134,6 +134,15 @@ class TTSEngine:
     def replay_text(self, text: str) -> None:
         self._async(self._replay_text_impl, text)
 
+    def read_text_async(self, text: str) -> None:
+        """Read caller-provided text as a new user action.
+
+        Unlike `replay_text`, this records the text in Recent history.
+        Used by the command server and file-open helper where the text
+        did not come from an existing history entry.
+        """
+        self._async(self._read_text_impl, text)
+
     def stop(self) -> None:
         with self.lock:
             self.token += 1
@@ -452,6 +461,27 @@ class TTSEngine:
         ov = self._overlay()
         if ov is not None:
             ov.set_state("thinking")
+        playback.synthesize_and_play(self, text, my_token)
+
+    def _read_text_impl(self, text: str) -> None:
+        if self._maybe_play_onboarding():
+            return
+        text = (text or "").strip()
+        if not text:
+            return
+        with self.lock:
+            self.token += 1
+            my_token = self.token
+            self.is_speaking = True
+            self._queue = []
+        try:
+            winsound.PlaySound(None, winsound.SND_PURGE)
+        except Exception:
+            pass
+        ov = self._overlay()
+        if ov is not None:
+            ov.set_state("thinking")
+        self._remember(text)
         playback.synthesize_and_play(self, text, my_token)
 
     def _replay_text_impl(self, text: str) -> None:

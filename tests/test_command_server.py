@@ -27,9 +27,13 @@ class _FakeEngine:
 
     def __init__(self) -> None:
         self.calls: list[str] = []
+        self.replay_calls: list[str] = []
+
+    def read_text_async(self, text: str) -> None:
+        self.calls.append(text)
 
     def replay_text(self, text: str) -> None:
-        self.calls.append(text)
+        self.replay_calls.append(text)
 
 
 def _free_port() -> int:
@@ -93,6 +97,7 @@ class TestReadEndpoint:
         code, _ = _post(port, "/read", {"text": "hello"})
         assert code == 200
         assert engine.calls == ["hello"]
+        assert engine.replay_calls == []
 
     def test_read_strips_whitespace_and_rejects_empty(self, server):
         engine, port = server
@@ -116,6 +121,7 @@ class TestReadFileEndpoint:
         code, _ = _post(port, "/read-file", {"path": str(f)})
         assert code == 200
         assert engine.calls == ["hello from a file"]
+        assert engine.replay_calls == []
 
     def test_unknown_extension_rejected(self, tmp_path: Path, server):
         engine, port = server
