@@ -6,7 +6,7 @@ the core build provides:
 
 - the Piper engine
 - four selection-driven hotkey actions (read / queue / pause / stop)
-- six settings cards (Voice / Speech / Hotkeys / Panel / Integration / About)
+- seven settings cards (Voice / Speech / Hotkeys / Panel / Integration / Notices / About)
 - three tray-item builders (Recent submenu, Settings, Quit)
 - the core config defaults
 
@@ -103,12 +103,14 @@ def _register() -> None:
     # Imported lazily so this module can be imported even in test
     # contexts that don't have Tk available — the import only resolves
     # when _register() is actually invoked at package-import time.
+    from .ui import notices_card
     from .ui import settings_cards as cards
     plugins.register_settings_card(cards.build_voice_card,       zone=Zone.VOICE)
     plugins.register_settings_card(cards.build_speech_card,      zone=Zone.SPEECH)
     plugins.register_settings_card(cards.build_hotkeys_card,     zone=Zone.HOTKEYS)
     plugins.register_settings_card(cards.build_panel_card,       zone=Zone.PANEL)
     plugins.register_settings_card(cards.build_integration_card, zone=Zone.INTEGRATION)
+    plugins.register_settings_card(notices_card.build_notices_card, zone=Zone.ABOUT, order=-10)
     plugins.register_settings_card(cards.build_about_card,       zone=Zone.ABOUT)
 
     # ----- Hotkey actions (selection-driven, no AI) -----

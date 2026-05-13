@@ -52,6 +52,7 @@ SETTINGS_BUTTONS = [
     "Install",
     "Remove",
     "Reset to defaults",
+    "View licences…",
     "Save",
     "Apply",
     "Cancel",
@@ -89,7 +90,9 @@ def test_public_source_install_opens_settings(public_root, data_root) -> None:
                 "Hotkeys",
                 "Reader panel",
                 "Windows integration",
+                "Open-source notices",
                 "About",
+                "View licences…",
                 "Save",
             ],
         )
@@ -106,6 +109,20 @@ def test_public_runtime_registry_is_core_only(running_public_app) -> None:
     assert state["engines"] == ["piper"]
     assert state["plugin_actions"] == []
     assert state["hotkey_actions"] == ["speak", "queue", "pause", "stop"]
+    assert state["settings_cards"] == [
+        "pippal.ui.settings_cards.build_voice_card",
+        "pippal.ui.settings_cards.build_speech_card",
+        "pippal.ui.settings_cards.build_hotkeys_card",
+        "pippal.ui.settings_cards.build_panel_card",
+        "pippal.ui.settings_cards.build_integration_card",
+        "pippal.ui.notices_card.build_notices_card",
+        "pippal.ui.settings_cards.build_about_card",
+    ]
+    assert state["tray_items"] == [
+        "pippal._register._recent_tray_builder",
+        "pippal._register._settings_tray_builder",
+        "pippal._register._quit_tray_builder",
+    ]
     assert all(".ui.ai_" not in item for item in state["settings_cards"])
     assert all(".ui.mood_" not in item for item in state["tray_items"])
 
@@ -205,6 +222,19 @@ def test_public_settings_buttons_and_links_fire(running_public_app) -> None:
     assert any(window.get("title") == "Voices" for window in state["windows"])
     state = ui_click({"title": "Voices", "text": "✕"})
     assert all(window.get("title") != "Voices" for window in state["windows"])
+
+    state = ui_click({"text": "View licences…"})
+    viewer = next((w for w in state["windows"] if "Open-source licences" in str(w.get("title", ""))), None)
+    assert viewer is not None
+    viewer_texts = [str(text) for text in viewer.get("texts", [])]
+    assert "Open-source licences" in viewer_texts
+    assert "Bundled third-party notices" in viewer_texts
+    assert any(
+        control.get("role") == "button" and control.get("text") == "✕"
+        for control in viewer.get("controls", [])
+    )
+    state = ui_click({"title": "Open-source licences", "text": "✕"})
+    assert all("Open-source licences" not in str(w.get("title", "")) for w in state["windows"])
 
     state = ui_click({"text": "Website", "role": ""})
     assert state["opened_urls"] == ["https://pippal.bugfactory.hu"]
