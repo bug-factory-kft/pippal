@@ -134,7 +134,7 @@ class TestPluginActionRegistry:
 
 
 class TestPluginDiscovery:
-    def test_disable_env_skips_extension_entry_points(self, monkeypatch):
+    def test_loads_available_extension_entry_points(self, monkeypatch):
         calls: list[str] = []
 
         class _EntryPoint:
@@ -148,12 +148,6 @@ class TestPluginDiscovery:
                 return [_EntryPoint()] if group == "pippal.plugins" else []
 
         monkeypatch.setattr("importlib.metadata.entry_points", lambda: _EntryPoints())
-        monkeypatch.setenv("PIPPAL_DISABLE_EXTENSION_PLUGINS", "1")
-
-        assert plugins.load_extension_plugins() == 0
-        assert calls == []
-
-        monkeypatch.delenv("PIPPAL_DISABLE_EXTENSION_PLUGINS")
 
         assert plugins.load_extension_plugins() == 1
         assert calls == ["loaded"]

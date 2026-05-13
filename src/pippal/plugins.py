@@ -27,7 +27,6 @@ package on the import path IS the gate.
 
 from __future__ import annotations
 
-import os
 import sys
 from collections.abc import Callable
 from typing import Any
@@ -369,9 +368,6 @@ def load_extension_plugins(group: str = "pippal.plugins") -> int:
     extension package name. A broken extension logs loudly and the app
     keeps its built-in registration surface.
     """
-    if os.environ.get("PIPPAL_DISABLE_EXTENSION_PLUGINS"):
-        return 0
-
     from importlib import metadata
 
     try:
