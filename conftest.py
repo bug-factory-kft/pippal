@@ -29,6 +29,10 @@ _SRC = os.path.join(_HERE, "src")
 if os.path.isdir(_SRC) and _SRC not in sys.path:
     sys.path.insert(0, _SRC)
 
+# Unit tests must exercise the public core in isolation, even on a
+# developer machine where optional extension packages are installed.
+os.environ.setdefault("PIPPAL_DISABLE_EXTENSION_PLUGINS", "1")
+
 
 def _stub(name: str, **attrs: object) -> None:
     """Inject a module-shaped no-op into ``sys.modules`` if the real

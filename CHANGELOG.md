@@ -1,14 +1,16 @@
 # PipPal Changelog
 
-## 0.2.2 - 2026-05-12
+## 0.2.3 - 2026-05-13
 
-Release date: 2026-05-12
+Release date: 2026-05-13
 
 Categories:
 
 - Reliability: fixed atomic single-instance startup, isolated playback
   temporary chunks per session, and improved settings-window reopen
   behavior.
+- UI consistency: added the core open-source notices viewer to Settings
+  and stabilized chromeless dialog placement and dragging.
 - Voice readiness: validates configured Piper voice files before use,
   encodes Voice Manager download URLs, and caps unbroken text chunks.
 - Hotkeys and launch surface: rejects duplicate hotkey combinations,

@@ -133,6 +133,32 @@ class TestPluginActionRegistry:
         assert plugins.get_plugin_action("never-registered") is None
 
 
+class TestPluginDiscovery:
+    def test_disable_env_skips_extension_entry_points(self, monkeypatch):
+        calls: list[str] = []
+
+        class _EntryPoint:
+            name = "fake-extension"
+
+            def load(self) -> None:
+                calls.append("loaded")
+
+        class _EntryPoints:
+            def select(self, group: str) -> list[_EntryPoint]:
+                return [_EntryPoint()] if group == "pippal.plugins" else []
+
+        monkeypatch.setattr("importlib.metadata.entry_points", lambda: _EntryPoints())
+        monkeypatch.setenv("PIPPAL_DISABLE_EXTENSION_PLUGINS", "1")
+
+        assert plugins.load_extension_plugins() == 0
+        assert calls == []
+
+        monkeypatch.delenv("PIPPAL_DISABLE_EXTENSION_PLUGINS")
+
+        assert plugins.load_extension_plugins() == 1
+        assert calls == ["loaded"]
+
+
 class TestHotkeyRegistry:
     def test_register_seeds_default_into_defaults_registry(
         self, _isolated_registry,

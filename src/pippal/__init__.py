@@ -26,4 +26,4 @@ from .app import main
 from .engine import TTSEngine
 
 __all__ = ["TTSEngine", "main"]
-__version__ = "0.2.2"
+__version__ = "0.2.3"
