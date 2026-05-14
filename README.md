@@ -157,7 +157,10 @@ the same API. The contract is pinned by `tests/test_plugin_host.py`.
 [CHANGELOG.md](CHANGELOG.md) and the
 [GitHub release](https://github.com/bug-factory-kft/pippal/releases/tag/v0.2.3).
 Use `python -m pytest` and `python -m ruff check .` for the current
-local gate; fixed test counts live in command output, not this README.
+local logic gate. The live Windows UI release gate is
+`.\e2e\run-local.ps1 -SkipSetup`; it writes review evidence documented in
+[docs/LIVE_UI_E2E_RELEASE_GATE.md](docs/LIVE_UI_E2E_RELEASE_GATE.md).
+Fixed test counts live in command output, not this README.
 The historical multi-reviewer audit is in
 [docs/CODEREVIEW.md](docs/CODEREVIEW.md).
 

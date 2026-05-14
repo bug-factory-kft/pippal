@@ -154,7 +154,7 @@ built-in features.
 
 ## Tooling
 
-`pytest` and `ruff` are the blocking Core release gate:
+`pytest` and `ruff` are the blocking Core logic release gate:
 
 Run them yourself:
 
@@ -162,6 +162,17 @@ Run them yourself:
 python -m pytest -p no:cacheprovider
 python -m ruff check .
 ```
+
+The live Windows UI release gate is explicit and evidence-producing:
+
+```powershell
+pwsh -NoProfile -ExecutionPolicy Bypass -File .\e2e\run-local.ps1 -SkipSetup
+```
+
+Review the artifact bundle described in
+[LIVE_UI_E2E_RELEASE_GATE.md](LIVE_UI_E2E_RELEASE_GATE.md) before calling a
+public release ready. A skipped or unavailable live UI run is a blocker, not a
+pass, unless it is only being captured as diagnostic CI evidence.
 
 `mypy` remains configured for advisory type review, but this branch is
 not green enough to treat it as a release gate. Run it explicitly when
