@@ -68,6 +68,15 @@ multi-reviewer audit is tracked in [CODEREVIEW.md](CODEREVIEW.md).
 
 ---
 
+## Next release focus - Core v0.2.4
+
+- First-run activation: make a new Core user hear selected text within
+  60 seconds of first launch. The implementation contract, screen
+  copy, failure states and acceptance checks are in
+  [FIRST_RUN_ACTIVATION.md](FIRST_RUN_ACTIVATION.md).
+
+---
+
 ## Open Free roadmap
 
 Things the open-source Free build will pick up next, in roughly the
