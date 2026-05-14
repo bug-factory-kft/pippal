@@ -4,7 +4,8 @@ Multi-reviewer audit run before the original public release and
 refreshed for the Core v0.2.3 documentation pass. Reviewers:
 
 - **`ruff`** — full lint (`select = ["E","F","W","I","B","UP","RUF"]`)
-- **`mypy`** — static type-check (`--ignore-missing-imports`)
+- **`mypy`** — advisory static type-check, not a blocking release gate
+  until the current Core typing debt is closed
 - **`codex` CLI** — independent code-quality reviewer
 - **Independent Claude Code agent** — second pair of eyes on each
   proposed fix
@@ -17,7 +18,9 @@ Status legend:
 
 End-to-end smoke test of the live app on Windows 11: **green**.
 For current release-branch status, use the command output from
-`python -m pytest` and `python -m ruff check .`.
+`python -m pytest -p no:cacheprovider` and `python -m ruff check .`.
+Use `mypy` as an advisory type sweep, not as a go/no-go signal, until
+it is made green on the supported Python path.
 
 ---
 
@@ -151,12 +154,19 @@ built-in features.
 
 ## Tooling
 
-`pytest`, `ruff`, `mypy` configured in the repo:
+`pytest` and `ruff` are the blocking Core release gate:
 
 Run them yourself:
 
 ```bash
-python -m pytest -q
+python -m pytest -p no:cacheprovider
 python -m ruff check .
-python -m mypy
+```
+
+`mypy` remains configured for advisory type review, but this branch is
+not green enough to treat it as a release gate. Run it explicitly when
+checking type drift under the `src/` layout:
+
+```bash
+python -m mypy --ignore-missing-imports --cache-dir "${TMPDIR:-/tmp}/pippal-mypy" src/pippal
 ```

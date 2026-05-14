@@ -16,7 +16,7 @@ git clone https://github.com/bug-factory-kft/pippal.git
 cd pippal
 .\setup.ps1                       # one-shot: piper + default voice
 python -m pip install -e ".[dev]" # editable install + dev deps
-python -m pytest -q               # current unit suite should pass
+python -m pytest -p no:cacheprovider # current Core unit suite should pass
 python -m ruff check .
 ```
 
@@ -58,7 +58,7 @@ plugin host wires things up at runtime via registry lookups.
 ## Tests
 
 ```powershell
-python -m pytest -q
+python -m pytest -p no:cacheprovider
 ```
 
 Pytest only covers pure-logic modules (text utils, WAV utils, voices,
@@ -70,6 +70,10 @@ Add a test for any new pure-logic helper. The plugin-host contract
 tests (`tests/test_plugin_host.py`) pin the registry shape that
 third-party plugins code against — extend them when you change the
 public registry API.
+
+`pytest.ini` is the single pytest configuration source. Do not mirror
+the same options in `pyproject.toml`; pytest ignores that block when
+`pytest.ini` exists and prints a release-gate warning.
 
 ## Benchmarks
 
@@ -112,13 +116,18 @@ Coverage groups:
 ## Lint and type-check
 
 ```powershell
-python -m ruff check .        # zero errors expected
-python -m mypy                # uses the pyproject.toml target
+python -m pytest -p no:cacheprovider # zero failures and no pytest config warning expected
+python -m ruff check .              # zero errors expected
 ```
 
-`mypy` is an advisory static check for the Core package. Treat any
-new non-Tk-stub errors as review material before changing the release
-gate.
+`mypy` is advisory for the Core package on this branch, not a blocking
+release gate. The current typed surface still reports Tk/Pillow/UI
+attribute debt under Python 3.14. Use this command when reviewing type
+drift, and split a follow-up before promoting it to a release gate:
+
+```powershell
+python -m mypy --ignore-missing-imports --cache-dir "$env:TEMP\pippal-mypy" src\pippal
+```
 
 ## Commits
 
