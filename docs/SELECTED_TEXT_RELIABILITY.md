@@ -52,9 +52,61 @@ Commands run from `C:\Users\tigyi\pippal-public` on branch
 | Check | Result | Notes |
 | --- | --- | --- |
 | `python -m pytest tests\test_clipboard_capture.py tests\test_hotkey.py tests\test_command_server.py -q` | Pass: `66 passed in 19.07s` | Exact issue #43 validation command. Covers hotkey parsing/dispatch logic, clipboard capture helpers, and command-server tests. |
+| `python -m pytest tests\test_clipboard_capture.py tests\test_hotkey.py -q` | Pass: `31 passed in 0.53s` | Exact issue #57 validation command. Confirms the pure logic gate is still green while the Notepad repro below exercises real Windows copy behavior. |
 | `python -m pytest tests/test_clipboard_capture.py tests/test_hotkey.py tests/test_engine.py -q` | Pass: `50 passed in 0.56s` | Confirms engine capture path releases configured combo keys plus universal modifiers. |
 | `python -m pytest tests/benchmarks/test_bench_hotkey.py --benchmark-only -q` | Pass: `5 passed in 3.97s` | Hotkey dispatch benchmark only; not an app compatibility benchmark. Pass-through mean was about `414 ns`; match-and-suppress mean was about `89.7 us`, well under Windows' 1 s low-level hook timeout. |
 | `rg -n "pywinauto|playwright|selenium|uiautomation|keyboard.write|capture_selection|selected text|clipboard" e2e tests docs README.md pyproject.toml requirements-dev.txt` | Pass: no existing GUI automation harness found | The repo has logic and e2e infrastructure, but no app-driving selected-text compatibility harness for browsers, Office, chat apps, PDF readers, or terminals. |
+
+## Issue #57 Notepad Repro
+
+Worker P ran this on `release/0.2.4` on 2026-05-14.
+
+Environment:
+
+- Windows: Microsoft Windows 11 Pro `10.0.26100`, build `26100`, 64-bit.
+- Notepad: `C:\WINDOWS\System32\notepad.exe`,
+  product version `10.0.26100.8457`, file version
+  `10.0.26100.8457 (WinBuild.160101.0800)`.
+- Source Python used for the repro: `C:\Python314\python.exe`.
+- A live installed `PipPal` process was present at
+  `C:\Program Files\WindowsApps\BugFactory.pippal-pro_0.2.2.0_x64__km6tvv8cv49he\PipPal.exe`.
+  The release-branch hotkey was therefore not tested through the installed
+  app; the source capture helper and local hotkey-manager harness were tested
+  directly.
+
+Test text:
+
+```text
+PipPal issue 57 Notepad selected-text repro: Ctrl+C should copy this exact sentence.
+```
+
+Manual/UI repro steps and results:
+
+| Step | Command / action | Result |
+| --- | --- | --- |
+| Open focused Notepad fixture | Start `notepad.exe` with a temporary `.txt` file under `C:\WINDOWS\TEMP`, wait for `pippal_issue57_notepad_*.txt - Notepad`, then activate that title with `WScript.Shell.AppActivate`. | Pass. Example focused title: `pippal_issue57_notepad_sendkeys.txt - Notepad`; `AppActivate` returned `true`. |
+| Select text | Send `Ctrl+A` to Notepad with `[System.Windows.Forms.SendKeys]::SendWait('^a')`. | Pass enough for copy validation. |
+| Verify `Ctrl+C` outside PipPal | Set clipboard to `ISSUE57_SENDKEYS_SENTINEL`, send `[System.Windows.Forms.SendKeys]::SendWait('^c')`, then read `Get-Clipboard -Raw`. | Pass. Clipboard became the exact test text above. This proves Notepad exposes the selected text through normal copy semantics on this machine. |
+| Isolate the keyboard library copy path | With the same Notepad selection active, set clipboard to `ISSUE57_KEYBOARD_COPY_SENTINEL`, focus Notepad with `SetForegroundWindow`, then run `keyboard.press_and_release("ctrl+c")` from Python. | Fail. Clipboard stayed `ISSUE57_KEYBOARD_COPY_SENTINEL` for the 2 s polling window. |
+| Test PipPal source capture helper | With the same Notepad selection active, set previous clipboard to `ISSUE57_HYBRID_PREVIOUS_CLIPBOARD`, then call `pippal.clipboard_capture.capture_selection(DummyEngine(), "windows+shift+r")`. | Fail. `captured_text` was empty, `error` was `null`, and `clipboard_after_capture` was restored to `ISSUE57_HYBRID_PREVIOUS_CLIPBOARD`. |
+| Test local hotkey-manager dispatch harness | Register `HotkeyManager().register("windows+shift+r", handler)`, focus Notepad, then inject `keyboard.press_and_release("windows+shift+r")`. | Inconclusive. The handler was not called within 3 s. This does not prove the live human hotkey path because injected Win-key events and the already-running installed PipPal may affect the harness. |
+
+Conclusion:
+
+Notepad copy itself works outside PipPal, but the current source capture
+path fails before clipboard timing becomes relevant: the `keyboard` library
+copy injection did not deliver `Ctrl+C` to modern Notepad in this repro,
+so `capture_selection()` correctly restored the prior clipboard but returned
+empty selected text.
+
+Follow-up bug recommendation:
+
+Open a focused Core bug for Notepad selected-text capture failure with this
+expected behavior: when focused Notepad has selected text that normal `Ctrl+C`
+can copy, PipPal's read-selection path should capture the same text or surface
+a clear recoverable failure without disturbing the user's clipboard. The likely
+fix area is the copy-injection strategy inside `pippal.clipboard_capture`, not
+the clipboard polling deadline.
 
 ## Local App Inventory
 
@@ -93,7 +145,7 @@ Legend:
 | Core harness: clipboard + hotkey + command server | Mocked selection/copy behavior | n/a | Unit tests | Pass | `66 passed in 19.07s`. Validates internal capture helper behavior, not app compatibility. | None. Keep in release gate. |
 | Core harness: engine capture modifier release | Mocked selection/copy behavior | n/a | Unit tests | Pass | `50 passed in 0.56s`. Confirms configured combo keys and universal modifiers are released before copy. | None. Keep in release gate. |
 | Core benchmark: hotkey dispatch | Synthetic keyboard events | n/a | `pytest-benchmark` | Pass | `5 passed in 3.97s`; dispatch is far below hook timeout. | None. Keep as performance guard, not compatibility evidence. |
-| Notepad | Plain `.txt`, one sentence | `10.0.26100.8457` | Temporary file, focus window, `Ctrl+A`, then `capture_selection()` | Inconclusive / fail | Window was found (`... - Notepad`) but captured text was empty. The first PID-based attempt also failed to discover the spawned visible window. This needs manual repro or a stronger UI automation harness before calling it a product defect. | Candidate: add a reproducible Notepad selected-text smoke using WinAppDriver, pywinauto, or UI Automation, then file a product bug only if manual `Win+Shift+R` also fails. |
+| Notepad | Plain `.txt`, one sentence | `10.0.26100.8457` | Manual/UI repro: Windows Forms `Ctrl+A`/`Ctrl+C` sanity check, then source `capture_selection()` | Fail | Normal Notepad copy passed: `Ctrl+C` outside PipPal copied the exact selected sentence. PipPal source capture returned empty with no exception and restored the previous clipboard. Isolated `keyboard.press_and_release("ctrl+c")` also left the sentinel clipboard unchanged, so this is a copy-injection failure, not a Notepad copy-semantics failure. The injected local `Win+Shift+R` hotkey-manager harness did not call its handler, so the live human hotkey still needs a manual confirmation pass after the capture bug is fixed. | Open a focused Core bug for Notepad capture injection; add a reproducible Notepad selected-text smoke using WinAppDriver, pywinauto, or UI Automation. |
 | Edge webpage | Web paragraph text | `148.0.3967.54` | Manual hotkey on focused page | Not run | Browser was installed, but no browser-driving selected-text harness exists in this repo. | Candidate if manual run fails: browser webpage copy delay or focus loss after hotkey. |
 | Edge PDF | Selectable PDF text | `148.0.3967.54` | Manual hotkey on built-in PDF viewer | Not run | Needs PDF fixture and manual/browser automation. | Candidate if manual run fails: PDF viewer selection not copied within `0.6 s` deadline. |
 | Chrome webpage | Web paragraph text | `148.0.7778.98` | Manual hotkey on focused page | Not run | Browser installed; no harness. | Candidate if manual run fails: Chrome selection copy blocked or delayed. |
@@ -173,7 +225,7 @@ These are candidates only; no GitHub issues were opened in this pass.
 
 | Candidate | Why |
 | --- | --- |
-| Add reproducible Notepad selected-text smoke | The local attempt found a Notepad window but captured empty text. Need to separate focus/harness failure from a real product failure. |
+| Open Notepad capture-injection bug and add a reproducible smoke | Issue #57 separated the behavior: normal Notepad `Ctrl+C` copies selected text, but source `capture_selection()` returns empty because the `keyboard` library copy injection leaves the sentinel clipboard unchanged. |
 | Add browser selected-text harness for Edge or Chrome | Browser webpages are central to the product promise and cannot be covered by mocked clipboard tests alone. |
 | Add PDF selected-text fixture for Edge PDF and/or Acrobat | PDF selection is a named matrix row and often differs from webpage text copy. |
 | Decide elevation-boundary support policy | A normal user process may not reliably drive elevated windows; the product should state or handle that boundary. |
@@ -186,4 +238,3 @@ app-compatibility evidence is not complete. This document should be
 treated as a structured validation matrix and a release wording guard.
 Do not claim "anywhere" for Core v0.2.4 unless the manual/common-app
 matrix is completed and meets the threshold above.
-
