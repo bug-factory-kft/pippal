@@ -44,6 +44,30 @@ custom canvases, elevated/non-elevated boundaries, remote sessions, and
 apps that delay clipboard writes can legitimately fail or need separate
 handling.
 
+## Common-App Matrix Contract
+
+Every compatibility row should answer four practical questions:
+
+1. What exact surface had focus?
+2. What text was selected, and how was it selected?
+3. What should normal `Ctrl+C` copy from that surface?
+4. If capture fails, is the blocker an app limitation, a focus/automation
+   problem, a timing problem, an integrity-level boundary, or a PipPal bug?
+
+Expected semantics and blocker handling for the release matrix:
+
+| Surface category | Fixture to use | Expected copy semantics | Blocker handling |
+| --- | --- | --- | --- |
+| Notepad / plain text | Temporary `.txt` with one unique sentence | `Ctrl+C` copies exactly the selected sentence as plain text. | If normal `Ctrl+C` works but PipPal captures empty text, treat as a Core capture bug. If normal copy fails, record the app/selection setup as invalid. |
+| Browser webpage | Local HTML page or stable webpage paragraph | `Ctrl+C` copies the visible selected paragraph text, ignoring hidden markup. | If capture fails, first separate focus/selection loss from browser copy delay. Repeat with Edge and one non-Edge browser before generalizing. |
+| Browser PDF viewer | Local selectable PDF fixture in Edge/Chrome | `Ctrl+C` copies selected PDF text in reading order. | If empty or delayed, record whether the PDF text is selectable outside PipPal and whether the `0.6 s` deadline is too short. |
+| Dedicated PDF reader | Local selectable PDF fixture in Acrobat or equivalent | `Ctrl+C` copies selected PDF text without OCR-only assumptions. | If normal copy fails, classify as document/app protection. If normal copy works but PipPal fails, open an app-specific capture issue. |
+| Editor / IDE | VS Code or similar editor with one selected line | `Ctrl+C` copies exact selected editor text, preserving line breaks. | If capture fails, check Electron focus and clipboard latency before changing Core behavior. |
+| Office/RichEdit app | Word, WordPad/RichEdit substitute, or editable email draft | `Ctrl+C` copies selected rich text as usable plain text for TTS. | If formatting or hidden text leaks into the clipboard text, document normalization expectations separately from capture reliability. |
+| Terminal | Windows Terminal or console selected buffer text | `Ctrl+C` copies the highlighted buffer text according to terminal settings. | Treat copy-on-select and terminal shortcut settings as part of the fixture; do not call this green without recording them. |
+| Communication app | Teams, Slack, Discord, Outlook message body, or webmail | `Ctrl+C` copies user-visible selected message text. | If the surface blocks selection/copy, document it as unsupported or needs app-specific guidance; do not convert it into a broad product claim. |
+| Elevated/admin app | Plain selected text in an elevated process | Same-integrity `Ctrl+C` copies selected text; normal PipPal may not reach elevated windows. | If normal-process PipPal cannot drive the app, classify the integrity-level boundary explicitly instead of treating it as a generic failure. |
+
 ## Automated Validation Run
 
 Commands run from `C:\Users\tigyi\pippal-public` on branch
@@ -137,6 +161,55 @@ in this local smoke while still restoring the previous clipboard. The
 remaining gap is a maintained automated UI smoke and a live installed-app
 human-hotkey confirmation.
 
+## Issue #43 Edge Browser Smoke
+
+Worker AE ran this on `release/0.2.4` on 2026-05-14.
+
+Environment:
+
+- Edge:
+  `C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe`,
+  product version `148.0.3967.54`.
+- Temporary fixture:
+  `C:\WINDOWS\TEMP\pippal_issue43_edge_20260514_220108\edge-selected-text-smoke.html`.
+- Source helper path:
+  `PYTHONPATH=C:\Users\tigyi\pippal-public\src`.
+
+Test text:
+
+```text
+PipPal issue 43 Edge browser selected-text smoke: Ctrl+C should copy this exact browser sentence.
+```
+
+Manual/UI smoke shape:
+
+1. Create a local HTML page with one paragraph containing the test text.
+2. On page load, select that paragraph with `window.getSelection()` and a
+   DOM range.
+3. Launch Edge with a temporary profile and the local fixture.
+4. Focus the Edge window titled `PipPal Issue 43 Browser Smoke - Profile 1 - Microsoft Edge`.
+5. Set the previous clipboard to `ISSUE43_EDGE_PREVIOUS_CLIPBOARD`.
+6. Run source `pippal.clipboard_capture.capture_selection(...)` with hotkey
+   combo `windows+shift+r`.
+
+Result:
+
+```json
+{
+  "expected_text": "PipPal issue 43 Edge browser selected-text smoke: Ctrl+C should copy this exact browser sentence.",
+  "captured_text": "PipPal issue 43 Edge browser selected-text smoke: Ctrl+C should copy this exact browser sentence.",
+  "matched_expected": true,
+  "clipboard_after_capture": "ISSUE43_EDGE_PREVIOUS_CLIPBOARD",
+  "clipboard_restored": true
+}
+```
+
+Conclusion: the source capture helper copied a selected Edge webpage
+paragraph exactly and restored the previous clipboard. This proves one
+browser-webpage row for the source helper, not all browser surfaces. It
+does not cover Chrome, Firefox, complex web apps, browser PDF viewers,
+or the live installed-app human-hotkey path.
+
 ## Local App Inventory
 
 This inventory proves app binaries were discoverable locally. It does
@@ -175,7 +248,7 @@ Legend:
 | Core harness: engine capture modifier release | Mocked selection/copy behavior | n/a | Unit tests | Pass | `50 passed in 0.56s`. Confirms configured combo keys and universal modifiers are released before copy. | None. Keep in release gate. |
 | Core benchmark: hotkey dispatch | Synthetic keyboard events | n/a | `pytest-benchmark` | Pass | `5 passed in 3.97s`; dispatch is far below hook timeout. | None. Keep as performance guard, not compatibility evidence. |
 | Notepad | Plain `.txt`, one sentence | `10.0.26100.8457` | Manual/UI repro: Windows Forms `Ctrl+A` selection, then source `capture_selection()` | Pass for source capture helper | Issue #57 established that normal Notepad copy worked while the old source capture path failed. Issue #58 fixed the pre-copy modifier release path; the patched smoke captured the exact selected sentence and restored `ISSUE58_PATCHED_PREVIOUS_CLIPBOARD`. The live installed-app human hotkey still needs confirmation because the old injected `Win+Shift+R` hotkey-manager harness was inconclusive. | Add a maintained reproducible Notepad selected-text smoke using WinAppDriver, pywinauto, or UI Automation; run a live installed-app human-hotkey confirmation. |
-| Edge webpage | Web paragraph text | `148.0.3967.54` | Manual hotkey on focused page | Not run | Browser was installed, but no browser-driving selected-text harness exists in this repo. | Candidate if manual run fails: browser webpage copy delay or focus loss after hotkey. |
+| Edge webpage | Local HTML paragraph selected with DOM range | `148.0.3967.54` | Manual/UI smoke with temporary Edge profile, focused page, then source `capture_selection()` | Pass for source capture helper | Worker AE's issue #43 smoke captured the exact selected sentence and restored `ISSUE43_EDGE_PREVIOUS_CLIPBOARD`. This proves one simple Edge webpage paragraph, not browser PDFs, complex web apps, Chrome, Firefox, or the live installed-app human hotkey. | Add maintained browser automation; repeat in Chrome or Firefox; run live installed-app human-hotkey confirmation. |
 | Edge PDF | Selectable PDF text | `148.0.3967.54` | Manual hotkey on built-in PDF viewer | Not run | Needs PDF fixture and manual/browser automation. | Candidate if manual run fails: PDF viewer selection not copied within `0.6 s` deadline. |
 | Chrome webpage | Web paragraph text | `148.0.7778.98` | Manual hotkey on focused page | Not run | Browser installed; no harness. | Candidate if manual run fails: Chrome selection copy blocked or delayed. |
 | Firefox webpage | Web paragraph text | `150.0.3` | Manual hotkey on focused page | Not run | Browser installed; no harness. | Candidate if manual run fails: Firefox selection copy blocked or delayed. |
@@ -190,6 +263,10 @@ Legend:
 
 The app-by-app matrix has 10 required compatibility categories from
 issue #43. Harness-only passes do not count toward these app thresholds.
+
+Current 2026-05-14 status after Worker AE: two app categories have direct
+source-helper smoke evidence, Notepad and Edge webpage. This is still below
+the v0.2.4 threshold and still does not justify broad "anywhere" wording.
 
 ### v0.2.4 release threshold
 
@@ -257,15 +334,16 @@ These are candidates only; no GitHub issues were opened in this pass.
 | Candidate | Why |
 | --- | --- |
 | Add Notepad source and live-hotkey UI smokes | Issue #58 fixed the source helper's Notepad capture path locally, but the repo still needs maintained UI automation plus a live installed-app human-hotkey confirmation before this row is release-grade. |
-| Add browser selected-text harness for Edge or Chrome | Browser webpages are central to the product promise and cannot be covered by mocked clipboard tests alone. |
+| Promote the Edge webpage smoke into a maintained browser selected-text harness | Worker AE proved one simple Edge paragraph through the source helper, but browser webpages are central to the product promise and still need repeatable automation plus Chrome/Firefox coverage. |
 | Add PDF selected-text fixture for Edge PDF and/or Acrobat | PDF selection is a named matrix row and often differs from webpage text copy. |
 | Decide elevation-boundary support policy | A normal user process may not reliably drive elevated windows; the product should state or handle that boundary. |
 | Add terminal selection guidance | Windows Terminal copy behavior depends on terminal settings and selection mode. If it fails, docs should explain the expected copy setting or fallback. |
 
 ## Release Decision
 
-For issue #43, the repo-side logic gate is green, but broad
-app-compatibility evidence is not complete. This document should be
-treated as a structured validation matrix and a release wording guard.
-Do not claim "anywhere" for Core v0.2.4 unless the manual/common-app
-matrix is completed and meets the threshold above.
+For issue #43, the repo-side logic gate is green, and Notepad plus one
+Edge webpage source-helper smoke are now proven. Broad app-compatibility
+evidence is still incomplete. This document should be treated as a
+structured validation matrix and a release wording guard. Do not claim
+"anywhere" for Core v0.2.4 unless the manual/common-app matrix is
+completed and meets the threshold above.
