@@ -21,10 +21,12 @@ from .command_server import start_command_server
 from .config import load_config, save_config
 from .engine import TTSEngine
 from .history import load_history, save_history
+from .onboarding import should_show_activation_panel
 from .paths import PIPER_EXE, ensure_dirs
 from .timing import TRAY_POLL_MS
 from .tray import make_tray_icon
 from .ui import Overlay, SettingsWindow
+from .ui.activation_panel import FirstRunActivationPanel
 
 # Keep a hard reference to the Tk PhotoImage so the GC doesn't collect
 # it out from under the title bars. tk.PhotoImage objects have to
@@ -453,6 +455,7 @@ def main() -> None:
     # listener also owns the single-instance gate: if the port cannot
     # be bound, exit before registering hotkeys or adding a tray icon.
     settings_box: list[SettingsWindow | None] = [None]
+    activation_panel_box: list[FirstRunActivationPanel | None] = [None]
 
     def open_settings_command() -> None:
         settings = settings_box[0]
@@ -541,6 +544,34 @@ def main() -> None:
         if settings is None:
             raise RuntimeError("settings window is not ready")
         root.after(0, lambda: (settings.open(), settings._open_voice_manager()))
+
+    def open_setup_instructions() -> None:
+        import webbrowser
+
+        webbrowser.open("https://github.com/bug-factory-kft/pippal#readme")
+
+    def open_activation_panel() -> None:
+        def _open() -> None:
+            settings = settings_box[0]
+            if settings is None:
+                raise RuntimeError("settings window is not ready")
+            panel = activation_panel_box[0]
+            if panel is None:
+                panel = FirstRunActivationPanel(
+                    root,
+                    config,
+                    on_play_sample=engine.read_text_async,
+                    on_open_settings=settings.open,
+                    on_open_voice_manager=lambda: (
+                        settings.open(),
+                        settings._open_voice_manager(),
+                    ),
+                    on_open_setup=open_setup_instructions,
+                )
+                activation_panel_box[0] = panel
+            panel.open()
+
+        root.after(0, _open)
 
     def apply_settings_command(data: dict[str, Any]) -> dict[str, Any]:
         values = data.get("values", {})
@@ -756,6 +787,7 @@ def main() -> None:
         "replay": engine.replay_chunk,
         "next": engine.next_chunk,
         "voice-manager": voice_manager_command,
+        "first-run-check": open_activation_panel,
     }
     json_command_callbacks = {
         "settings.apply": apply_settings_command,
@@ -934,6 +966,16 @@ def main() -> None:
     composed: list[Any] = []
     for builder in plugins.tray_items():
         composed.extend(builder(tray_ctx))
+    activation_item = pystray.MenuItem(
+        "First-run check",
+        lambda _i, _it: open_activation_panel(),
+    )
+    insert_at = len(composed)
+    for idx, item in enumerate(composed):
+        if str(getattr(item, "text", "")).startswith("Settings"):
+            insert_at = idx
+            break
+    composed.insert(insert_at, activation_item)
 
     icon = pystray.Icon(
         "pippal",
@@ -943,6 +985,8 @@ def main() -> None:
     )
     tray["icon"] = icon
     icon.run_detached()
+    if should_show_activation_panel():
+        root.after(500, open_activation_panel)
 
     try:
         root.mainloop()
