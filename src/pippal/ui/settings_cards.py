@@ -199,8 +199,13 @@ def _spinbox_row(
     sw.vars[key] = tk.IntVar(value=int(sw.config.get(key, default)))
     ttk.Spinbox(row, from_=from_, to=to, increment=increment, width=8,
                 textvariable=sw.vars[key]).pack(side="left")
-    ttk.Label(row, text=unit, style="CardHint.TLabel").pack(
-        side="left", padx=(6, 0))
+    ttk.Label(
+        row,
+        text=unit,
+        style="CardHint.TLabel",
+        wraplength=180,
+        justify="left",
+    ).pack(side="left", padx=(6, 0), fill="x", expand=True)
 
 
 def build_integration_card(sw: SettingsWindow, body: ttk.Frame) -> None:

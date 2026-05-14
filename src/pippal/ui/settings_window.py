@@ -245,17 +245,52 @@ class SettingsWindow:
         footer.pack(fill="x", side="bottom")
         sep = tk.Frame(w, bg=UI["border"], height=1)
         sep.pack(fill="x", side="bottom", before=footer)
-        # Reset on the left, action buttons on the right — Windows
-        # Control Panel-style. Save (Primary) is the rightmost so the
-        # Enter key picks it up by visual convention.
-        ttk.Button(footer, text="Reset to defaults",
-                   command=self._reset_to_defaults).pack(side="left")
-        ttk.Button(footer, text="Save", style="Primary.TButton",
-                   command=self._save).pack(side="right")
-        ttk.Button(footer, text="Apply",
-                   command=self._apply).pack(side="right", padx=(0, 8))
-        ttk.Button(footer, text="Cancel",
-                   command=self._close).pack(side="right", padx=(0, 8))
+        # Reset stays separate from the commit buttons. At high DPI the
+        # four-button row can exceed the minimum window width, so the
+        # Configure handler stacks Reset above the action row when needed.
+        footer.columnconfigure(0, weight=1)
+        reset_btn = ttk.Button(footer, text="Reset to defaults",
+                               command=self._reset_to_defaults)
+        cancel_btn = ttk.Button(footer, text="Cancel",
+                                command=self._close)
+        apply_btn = ttk.Button(footer, text="Apply",
+                               command=self._apply)
+        save_btn = ttk.Button(footer, text="Save", style="Primary.TButton",
+                              command=self._save)
+
+        def _place_footer(stacked: bool) -> None:
+            for btn in (reset_btn, cancel_btn, apply_btn, save_btn):
+                btn.grid_forget()
+            if stacked:
+                reset_btn.grid(row=0, column=0, columnspan=4, sticky="w")
+                cancel_btn.grid(row=1, column=1, sticky="e", pady=(8, 0), padx=(0, 8))
+                apply_btn.grid(row=1, column=2, sticky="e", pady=(8, 0), padx=(0, 8))
+                save_btn.grid(row=1, column=3, sticky="e", pady=(8, 0))
+            else:
+                reset_btn.grid(row=0, column=0, sticky="w")
+                cancel_btn.grid(row=0, column=1, sticky="e", padx=(0, 8))
+                apply_btn.grid(row=0, column=2, sticky="e", padx=(0, 8))
+                save_btn.grid(row=0, column=3, sticky="e")
+
+        footer_state = {"stacked": False}
+
+        def _relayout_footer(event: tk.Event | None = None) -> None:
+            width = int(getattr(event, "width", footer.winfo_width()))
+            required = (
+                reset_btn.winfo_reqwidth()
+                + cancel_btn.winfo_reqwidth()
+                + apply_btn.winfo_reqwidth()
+                + save_btn.winfo_reqwidth()
+                + 16
+            )
+            stacked = width < required
+            if stacked != footer_state["stacked"]:
+                footer_state["stacked"] = stacked
+                _place_footer(stacked)
+
+        _place_footer(False)
+        footer.bind("<Configure>", _relayout_footer)
+        footer.after_idle(_relayout_footer)
 
     # ------------------------------------------------------------------
     # Live UI updates
