@@ -74,6 +74,10 @@ multi-reviewer audit is tracked in [CODEREVIEW.md](CODEREVIEW.md).
   60 seconds of first launch. The implementation contract, screen
   copy, failure states and acceptance checks are in
   [FIRST_RUN_ACTIVATION.md](FIRST_RUN_ACTIVATION.md).
+- Selected-text reliability evidence: keep the common Windows app
+  compatibility matrix and release wording constraints in
+  [SELECTED_TEXT_RELIABILITY.md](SELECTED_TEXT_RELIABILITY.md) before
+  broadening "anywhere" claims.
 
 ---
 
