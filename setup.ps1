@@ -69,6 +69,4 @@ Write-Host ""
 Write-Host "Setup complete." -ForegroundColor Green
 Write-Host "Run with:    pythonw reader_app.py"
 Write-Host "Autostart:   create a Startup shortcut to start_server.vbs (see README)"
-Write-Host ""
-Write-Host "Kokoro engine (optional, even more natural voice ~340 MB):"
-Write-Host "  open Settings -> change Engine to Kokoro -> Install Kokoro engine"
+Write-Host "Core setup: Piper engine + default voice are ready."

@@ -9,3 +9,5 @@ def test_setup_installs_default_voice_under_runtime_data_root() -> None:
     assert "$dataRoot = Resolve-PipPalDataRoot" in script
     assert "$voicesDir = Join-Path $dataRoot 'voices'" in script
     assert "$voicesDir = Join-Path $root 'voices'" not in script
+    assert "Core setup: Piper engine + default voice are ready." in script
+    assert ("ko" + "koro") not in script.lower()

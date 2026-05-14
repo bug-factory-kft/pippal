@@ -11,33 +11,40 @@ A/B framework, no cloud sync, and no remote logging.
 
 ## What stays on your machine
 
+By default, runtime data lives under `%LOCALAPPDATA%\PipPal`:
+
 - Configuration (`config.json`) — your preferred voice, hotkeys,
   panel options, etc.
 - Recent-readings history (`history.json`) — the last ~10 selections
   you read, used to populate the tray's *Recent* submenu. Never
   uploaded.
-- Temporary WAV files (`temp/`) — the audio chunks PipPal renders
+- Downloaded Piper voices (`voices\`) — voice models installed by the
+  setup script or Voice Manager.
+- Temporary WAV files (`temp\`) — the audio chunks PipPal renders
   while reading. Deleted as each chunk plays.
 
-All three live under your PipPal install directory and are visible
-to you. Delete them and PipPal forgets.
+If `PIPPAL_DATA_DIR` is set, PipPal uses that directory instead of
+`%LOCALAPPDATA%\PipPal` for the same runtime files. Delete the runtime
+directory and PipPal forgets that local state. The source/install
+directory holds app code and, when installed by `setup.ps1`, the Piper
+binary under `piper\`.
 
 ## Network access
 
-PipPal makes outbound network requests in only three situations:
+PipPal Core makes outbound network requests in only two situations:
 
-1. **Voice Manager / setup script** — downloads Piper voice models
-   from `huggingface.co/rhasspy/piper-voices` when you click
-   *Install*. Standard HTTPS file fetch; no account needed; no data
-   sent beyond the request URL.
+1. **Voice Manager / setup script** — Voice Manager downloads Piper
+   voice models from `huggingface.co/rhasspy/piper-voices` when you
+   click *Install*. `setup.ps1` downloads the default voice and the
+   Piper binary from upstream project releases. Standard HTTPS file
+   fetch; no account needed; no data sent beyond the request URL.
 2. **Right-click integration helper** — sends a localhost-only
    HTTP request (`127.0.0.1:51677`) from `pippal_open.py` to the
    running PipPal instance. Never leaves your machine.
-3. *(Paid edition only)* **Local LLM** — extra plugin actions are
-   dispatched to a locally-running language-model daemon on your
-   machine. Local-only; no data leaves your computer.
 
-PipPal never contacts a server controlled by us.
+PipPal Core never contacts a server controlled by us. Paid or
+third-party extensions are owned by their package and Store terms; do
+not infer their behavior from this Core policy.
 
 ## Third-party software bundled or downloaded
 
@@ -65,4 +72,4 @@ remain visible in the repository's git history.
 
 ---
 
-*Last updated: 2026-05-03*
+*Last updated: 2026-05-14*

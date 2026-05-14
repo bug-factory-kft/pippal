@@ -14,7 +14,7 @@ project's roadmap.
 
 ---
 
-## Current state — v0.2.0 (public release)
+## Current state — Core v0.2.3 (public release, 2026-05-13)
 
 - Tray app (`pythonw reader_app.py`) with autostart on login.
 - Plugin-host architecture (`pippal.plugins`) — engines, settings
@@ -61,9 +61,10 @@ project's roadmap.
   cleans up chunk WAVs before exiting; tray icon flips to idle
   authoritatively.
 
-140 tests pass; ruff clean; multi-reviewer code-quality audit closed
-all HIGH and MEDIUM findings before this release (see
-[CODEREVIEW.md](CODEREVIEW.md)).
+Current validation should be checked from command output with
+`python -m pytest` and `python -m ruff check .`; fixed test counts are
+kept out of this roadmap so they do not drift. The historical
+multi-reviewer audit is tracked in [CODEREVIEW.md](CODEREVIEW.md).
 
 ---
 

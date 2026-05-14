@@ -16,8 +16,8 @@ git clone https://github.com/bug-factory-kft/pippal.git
 cd pippal
 .\setup.ps1                       # one-shot: piper + default voice
 python -m pip install -e ".[dev]" # editable install + dev deps
-python -m pytest -q               # 140+ tests should pass
-ruff check pippal tests
+python -m pytest -q               # current unit suite should pass
+python -m ruff check .
 ```
 
 Run the app from a working tree:
@@ -112,12 +112,13 @@ Coverage groups:
 ## Lint and type-check
 
 ```powershell
-ruff check pippal tests        # zero errors expected
-mypy --ignore-missing-imports pippal
+python -m ruff check .        # zero errors expected
+python -m mypy                # uses the pyproject.toml target
 ```
 
-`mypy` will report ~12 Tk-overload mismatches — those are noise from
-the third-party stubs and intentionally left.
+`mypy` is an advisory static check for the Core package. Treat any
+new non-Tk-stub errors as review material before changing the release
+gate.
 
 ## Commits
 

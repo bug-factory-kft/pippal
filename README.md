@@ -10,11 +10,6 @@
   Published by <a href="https://pippal.bugfactory.hu"><b>Bug Factory Kft.</b></a>
 </p>
 
-<p align="center">
-  <video src="https://github.com/bug-factory-kft/pippal/releases/download/v0.2.0-assets/pippal_intro.mp4"
-         width="480" autoplay loop muted playsinline></video>
-</p>
-
 ---
 
 A tray-resident Windows app that reads any selected text aloud with a
@@ -119,12 +114,12 @@ can extend on import. The hooks an extension can target:
 | `register_tray_item(builder, zone=…, order=…)` | One or more items in the tray menu |
 | `register_defaults(d)` | Config defaults the extension owns |
 
-The Community package self-registers Piper + four selection-driven
+The Core package self-registers Piper + four selection-driven
 hotkeys + six settings cards (Voice / Speech / Hotkeys / Panel /
 Integration / About) in `src/pippal/_register.py`. Optional extension
-packages plug into these same hooks at import time — the core has no
-name-awareness of any specific extension beyond a single
-`importlib.import_module("pippal_pro")` in the discovery path.
+packages plug into these same hooks through Python entry points in the
+`pippal.plugins` group; the core has no package-name awareness of any
+specific extension.
 
 A third-party plugin (e.g. `pippal-elevenlabs`, `pippal-edge-tts`)
 could ship today by registering its engine + voice provider through
@@ -158,11 +153,13 @@ the same API. The contract is pinned by `tests/test_plugin_host.py`.
 
 ## Status
 
-**v0.2.0 — public release.** 140 tests, ruff clean. End-to-end smoke
-test of the live app on Windows 11: green. See
-[docs/CODEREVIEW.md](docs/CODEREVIEW.md) for the multi-reviewer audit
-(codex CLI + independent Claude agent + ruff + mypy) that closed
-every HIGH and MEDIUM finding before this release.
+**Core v0.2.3 — public release (2026-05-13).** See
+[CHANGELOG.md](CHANGELOG.md) and the
+[GitHub release](https://github.com/bug-factory-kft/pippal/releases/tag/v0.2.3).
+Use `python -m pytest` and `python -m ruff check .` for the current
+local gate; fixed test counts live in command output, not this README.
+The historical multi-reviewer audit is in
+[docs/CODEREVIEW.md](docs/CODEREVIEW.md).
 
 ## Licence
 
