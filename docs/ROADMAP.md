@@ -2,10 +2,11 @@
 
 > Your little offline reading buddy.
 
-PipPal is a tray-resident Windows app that reads selected text aloud,
-anywhere in Windows, using a local neural TTS engine. Press a hotkey,
-get a clean reader panel with karaoke-style highlighting. No cloud,
-no API keys, no telemetry.
+PipPal is a tray-resident Windows app that reads selected text aloud
+from Windows apps that expose selection through normal copy/clipboard
+behavior, using a local neural TTS engine. Press a hotkey, get a clean
+reader panel with karaoke-style highlighting. No cloud, no API keys, no
+telemetry.
 
 This document tracks the **public Free** roadmap. The paid
 Microsoft Store edition adds extra features through a separate
@@ -78,6 +79,9 @@ multi-reviewer audit is tracked in [CODEREVIEW.md](CODEREVIEW.md).
   compatibility matrix and release wording constraints in
   [SELECTED_TEXT_RELIABILITY.md](SELECTED_TEXT_RELIABILITY.md) before
   broadening "anywhere" claims.
+- Competitor matrix evidence: keep dated source facts and unknowns in
+  [CORE_COMPETITOR_MATRIX_EVIDENCE_2026-05-14.md](CORE_COMPETITOR_MATRIX_EVIDENCE_2026-05-14.md)
+  before making Core positioning claims against named alternatives.
 
 ---
 

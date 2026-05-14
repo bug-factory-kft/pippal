@@ -12,9 +12,9 @@
 
 ---
 
-A tray-resident Windows app that reads any selected text aloud with a
-local neural TTS. Press a hotkey in **any** program (browser, PDF
-reader, Word, terminal — anywhere) and a clean floating panel shows
+A tray-resident Windows app that reads selected text aloud with local
+neural TTS. Press a hotkey in Windows apps that expose selected text
+through normal copy/clipboard behavior, and a clean floating panel shows
 the sentence with a karaoke-style highlight that follows the voice.
 
 **No cloud. No API keys. No telemetry.** The text never leaves your
@@ -24,7 +24,8 @@ machine.
 
 ## Features
 
-- 🔊 Reads any selected text via a global hotkey, layout-independent.
+- 🔊 Reads selected text from apps that expose selection through normal
+  copy/clipboard behavior via a global hotkey, layout-independent.
 - 🎙 Local neural TTS via [Piper](https://github.com/rhasspy/piper).
   A built-in Voice Manager installs curated voices from the
   [piper-voices](https://huggingface.co/rhasspy/piper-voices)
@@ -49,6 +50,9 @@ proprietary plugin. The Community edition stays fully usable on its
 own — Piper + the floating reader panel + the right-click integration
 are the backbone, and the paid edition layers convenience on top
 without changing how the core works.
+
+For the factual Core trust boundary, local/offline proof, upgrade path,
+and claim-review guardrails, see [docs/CORE_TRUST.md](docs/CORE_TRUST.md).
 
 ## Install (Windows, build from source)
 

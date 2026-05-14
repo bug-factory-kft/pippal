@@ -52,7 +52,7 @@ The fast path is:
 2. See: local-only promise and ready checks.
 3. Hear a sample sentence from the installed default voice.
 4. See the active hotkey.
-5. Select any text and press the hotkey.
+5. Select text that the focused app can copy and press the hotkey.
 6. Hear the selected text.
 
 ## Screens And Copy
@@ -123,7 +123,7 @@ Title: `You should hear this now`
 Sample text:
 
 ```text
-PipPal is reading locally. Select text anywhere, then press Win+Shift+R.
+PipPal is reading locally. Select text in an app that can copy it, then press Win+Shift+R.
 ```
 
 During playback:
@@ -144,12 +144,12 @@ Secondary button: `No sound`
 
 ### Screen 4: Try Real Text
 
-Title: `Try it in any app`
+Title: `Try real selected text`
 
 Body:
 
 ```text
-Select text in a browser, PDF, document, or this box.
+Select text in a browser, document, or this box where normal Ctrl+C works.
 Then press Win+Shift+R.
 ```
 

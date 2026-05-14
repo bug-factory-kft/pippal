@@ -239,14 +239,16 @@ Avoid until the matrix passes:
 - "Always reads selected text."
 - "Universal selected-text reader."
 
-Existing broad-claim surfaces found by `rg`:
+Original broad-claim surfaces found by the 2026-05-14 `rg` scan:
 
 - `README.md`: "any selected text", "any program", and "anywhere".
 - `docs/ROADMAP.md`: "anywhere in Windows".
 - `docs/FIRST_RUN_ACTIVATION.md`: "Try it in any app" and selected-text
-  success copy. The activation flow may keep aspirational user copy,
-  but release notes should not treat it as proven compatibility until
-  this matrix is green.
+  success copy.
+
+These entries are retained as wording-guard context. Future public copy
+should stay within the allowed wording above unless this matrix becomes
+green enough to support broader compatibility claims.
 
 ## Follow-Up Issue Candidates
 
