@@ -189,6 +189,14 @@ class TestActivationState:
         )
         completions: list[str] = []
         played: list[str] = []
+        readiness = onboarding.FirstRunReadiness(
+            status=onboarding.READINESS_READY,
+            engine_label="Piper engine: ready",
+            voice_label="en_US-ryan-high",
+            hotkey_label="Win+Shift+R",
+            can_play_sample=True,
+            message="Local voice check is ready.",
+        )
 
         def mark_complete(completed_with: str) -> onboarding.FirstRunActivationState:
             completions.append(completed_with)
@@ -204,6 +212,7 @@ class TestActivationState:
             lambda *_: "selected text",
         )
         monkeypatch.setattr("pippal.engine.should_show_activation_panel", lambda: True)
+        monkeypatch.setattr("pippal.engine.build_activation_readiness", lambda _config: readiness)
         monkeypatch.setattr("pippal.engine.mark_activation_complete", mark_complete)
         monkeypatch.setattr(
             "pippal.engine.playback.synthesize_and_play",
