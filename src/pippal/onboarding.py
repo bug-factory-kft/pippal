@@ -53,6 +53,7 @@ READINESS_MISSING_VOICE = "missing_voice"
 SAMPLE_TEXT_TEMPLATE = (
     "PipPal is reading locally. Select text anywhere, then press {hotkey}."
 )
+SELECTED_TEXT_CAPTURE_FAILURE = "No selected text was captured."
 
 
 @dataclass(frozen=True)
@@ -214,6 +215,21 @@ def activation_sample_text(hotkey_label: str) -> str:
     return SAMPLE_TEXT_TEMPLATE.format(hotkey=hotkey_label or "the read hotkey")
 
 
+def activation_failure_recovery_message(
+    failure: str | None,
+    hotkey_label: str,
+) -> str | None:
+    failure = str(failure or "").strip()
+    if not failure:
+        return None
+    hotkey = hotkey_label or "the read hotkey"
+    return (
+        f"{failure} To retry, select text and press {hotkey} again. "
+        "If that app blocks copying, try a browser, document, or text field, "
+        "or use Play sample."
+    )
+
+
 def _display_voice_name(filename: str | None) -> str:
     name = Path(filename or "").name
     if name.endswith(".onnx"):
@@ -265,7 +281,8 @@ def build_activation_readiness(
             can_play_sample=False,
             message=(
                 "The local Piper engine is missing. Run setup.ps1 from this "
-                "checkout, then open PipPal again."
+                "checkout, or switch to another engine in Settings. Reading "
+                "is paused until a local engine is ready."
             ),
         )
 
@@ -292,12 +309,18 @@ def build_activation_readiness(
     )
 
 
-def is_default_engine_ready() -> bool:
-    """True when the always-available Piper backend has at least one
-    voice on disk. Plugin-registered engines make their own readiness
-    call via ``backend.is_available()``; this helper only covers the
-    public package's own engine."""
-    return bool(installed_voices())
+def is_default_engine_ready(
+    *,
+    piper_exe: Path = PIPER_EXE,
+    voices_dir: Path = VOICES_DIR,
+) -> bool:
+    """True when Piper can synthesize with at least one local voice.
+
+    Plugin-registered engines make their own readiness call via
+    ``backend.is_available()``; this helper only covers the public
+    package's own engine.
+    """
+    return Path(piper_exe).exists() and bool(installed_voices(voices_dir=voices_dir))
 
 
 def _wav_duration_s(path) -> float:

@@ -11,6 +11,7 @@ import sys
 import threading
 import tkinter as tk
 from collections.abc import Callable
+from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
@@ -37,6 +38,12 @@ _E2E_COMMAND_SERVER_ENV = "PIPPAL_E2E_COMMAND_SERVER"
 
 def _e2e_command_server_enabled() -> bool:
     return os.environ.get(_E2E_COMMAND_SERVER_ENV) == "1"
+
+
+def _selected_piper_missing(config: dict[str, Any], piper_exe: Path | None = None) -> bool:
+    engine_name = str(config.get("engine") or "piper").lower()
+    piper_path = piper_exe or PIPER_EXE
+    return engine_name == "piper" and not piper_path.exists()
 
 
 def _widget_texts(widget: tk.Misc) -> list[str]:
@@ -417,17 +424,13 @@ def main() -> None:
     ensure_dirs()
     config = load_config()
 
-    # piper.exe is only required when Piper is actually selected;
-    # users on a non-Piper engine (extension-supplied) can run with
-    # the Piper binary absent.
-    engine_name = (config.get("engine") or "piper").lower()
-    if engine_name == "piper" and not PIPER_EXE.exists():
+    missing_selected_piper = _selected_piper_missing(config)
+    if missing_selected_piper:
         print(
             f"piper.exe missing at {PIPER_EXE}; run setup.ps1 or "
-            "switch engine in Settings.",
+            "switch engine in Settings. Starting repair state.",
             file=sys.stderr,
         )
-        sys.exit(1)
 
     _set_app_user_model_id()  # must run BEFORE the first Tk window
     root = tk.Tk()
@@ -985,7 +988,7 @@ def main() -> None:
     )
     tray["icon"] = icon
     icon.run_detached()
-    if should_show_activation_panel():
+    if missing_selected_piper or should_show_activation_panel():
         root.after(500, open_activation_panel)
 
     try:

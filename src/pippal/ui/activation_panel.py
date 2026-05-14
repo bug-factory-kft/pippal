@@ -11,10 +11,13 @@ from typing import Any
 from ..onboarding import (
     READINESS_MISSING_PIPER,
     READINESS_MISSING_VOICE,
+    READINESS_READY,
     FirstRunReadiness,
+    activation_failure_recovery_message,
     activation_sample_text,
     build_activation_readiness,
     default_piper_voice,
+    load_activation_state,
     mark_activation_complete,
 )
 from .theme import UI, apply_dark_theme, make_card
@@ -43,6 +46,7 @@ class FirstRunActivationPanel:
         self._status_var = tk.StringVar(master=root, value="")
         self._sample_started = False
         self._installing_default_voice = False
+        self._state_poll_after_id: str | None = None
 
     def open(self) -> None:
         if self.win is not None and self.win.winfo_exists():
@@ -63,6 +67,7 @@ class FirstRunActivationPanel:
         frame.pack(fill="both", expand=True)
         self._frame = frame
         self._render()
+        self._schedule_activation_state_poll()
         self._fit_to_content()
         w.deiconify()
         w.lift()
@@ -76,6 +81,8 @@ class FirstRunActivationPanel:
             child.destroy()
 
         status_text = status_override or readiness.message
+        if status_override is None:
+            status_text = self._activation_status_text(readiness, status_text)
         if self._installing_default_voice and readiness.status == READINESS_MISSING_VOICE:
             status_text = (
                 "Installing default English voice for offline reading... "
@@ -83,18 +90,28 @@ class FirstRunActivationPanel:
             )
         self._status_var.set(status_text)
 
+        title = (
+            "PipPal needs a local reading engine"
+            if readiness.status == READINESS_MISSING_PIPER
+            else "PipPal is ready to read locally"
+        )
+        subtitle = (
+            "The tray app is running so you can repair setup or switch engines."
+            if readiness.status == READINESS_MISSING_PIPER
+            else (
+                "PipPal reads selected text aloud on this PC.\n"
+                "No account. No telemetry. No cloud TTS.\n"
+                "Let's make sure you can hear it now."
+            )
+        )
         ttk.Label(
             frame,
-            text="PipPal is ready to read locally",
+            text=title,
             style="Title.TLabel",
         ).pack(anchor="w")
         ttk.Label(
             frame,
-            text=(
-                "PipPal reads selected text aloud on this PC.\n"
-                "No account. No telemetry. No cloud TTS.\n"
-                "Let's make sure you can hear it now."
-            ),
+            text=subtitle,
             style="Sub.TLabel",
             justify="left",
         ).pack(anchor="w", pady=(6, 16))
@@ -103,6 +120,55 @@ class FirstRunActivationPanel:
         self._build_practice_card(frame, readiness)
         self._build_actions(frame, readiness)
         return readiness
+
+    def _activation_status_text(
+        self,
+        readiness: FirstRunReadiness,
+        fallback: str,
+    ) -> str:
+        if readiness.status != READINESS_READY:
+            return fallback
+        state = load_activation_state()
+        if state.is_complete:
+            return "Done. PipPal can read selected text on this PC."
+        recovery = activation_failure_recovery_message(
+            state.last_failure,
+            readiness.hotkey_label,
+        )
+        return recovery or fallback
+
+    def _schedule_activation_state_poll(self) -> None:
+        if self.win is None or not self.win.winfo_exists():
+            return
+        self._state_poll_after_id = self.root.after(
+            750,
+            self._refresh_activation_state,
+        )
+
+    def _refresh_activation_state(self) -> None:
+        self._state_poll_after_id = None
+        if self.win is None or not self.win.winfo_exists():
+            return
+        readiness = build_activation_readiness(self.config)
+        if self._installing_default_voice and readiness.status == READINESS_MISSING_VOICE:
+            self._status_var.set(
+                "Installing default English voice for offline reading... "
+                "Downloading the model and metadata."
+            )
+            self._schedule_activation_state_poll()
+            return
+        if readiness.status == READINESS_READY:
+            state = load_activation_state()
+            if state.is_complete:
+                self._status_var.set("Done. PipPal can read selected text on this PC.")
+            else:
+                recovery = activation_failure_recovery_message(
+                    state.last_failure,
+                    readiness.hotkey_label,
+                )
+                if recovery is not None:
+                    self._status_var.set(recovery)
+        self._schedule_activation_state_poll()
 
     def _fit_to_content(self) -> None:
         if self.win is None or not self.win.winfo_exists():
@@ -181,7 +247,12 @@ class FirstRunActivationPanel:
                 style="Primary.TButton",
                 command=self._open_setup,
             ).pack(side="right")
-            ttk.Button(row, text="Quit", command=self._close).pack(
+            ttk.Button(
+                row,
+                text="Open Settings",
+                command=self.on_open_settings,
+            ).pack(side="right", padx=(0, 8))
+            ttk.Button(row, text="Close", command=self._close).pack(
                 side="right",
                 padx=(0, 8),
             )
@@ -312,9 +383,17 @@ class FirstRunActivationPanel:
     def _open_setup(self) -> None:
         if self.on_open_setup is not None:
             self.on_open_setup()
-        self._status_var.set("Run setup.ps1 from this checkout, then open PipPal again.")
+        self._status_var.set(
+            "Run setup.ps1 from this checkout, then use First-run check again."
+        )
 
     def _close(self) -> None:
+        if self._state_poll_after_id is not None:
+            try:
+                self.root.after_cancel(self._state_poll_after_id)
+            except tk.TclError:
+                pass
+            self._state_poll_after_id = None
         if self.win is not None and self.win.winfo_exists():
             self.win.destroy()
         self.win = None
