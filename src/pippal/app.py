@@ -6,6 +6,7 @@ the local IPC server, run the Tk mainloop."""
 
 from __future__ import annotations
 
+import os
 import sys
 import threading
 import tkinter as tk
@@ -29,6 +30,11 @@ from .ui import Overlay, SettingsWindow
 # it out from under the title bars. tk.PhotoImage objects have to
 # outlive the window that uses them.
 _ICON_PHOTO_REF: Any = None
+_E2E_COMMAND_SERVER_ENV = "PIPPAL_E2E_COMMAND_SERVER"
+
+
+def _e2e_command_server_enabled() -> bool:
+    return os.environ.get(_E2E_COMMAND_SERVER_ENV) == "1"
 
 
 def _widget_texts(widget: tk.Misc) -> list[str]:
@@ -373,16 +379,24 @@ def _require_command_server(
     commands: dict[str, Callable[[], None]] | None = None,
     json_commands: dict[str, Callable[[dict[str, Any]], Any]] | None = None,
     queries: dict[str, Callable[[], Any]] | None = None,
+    control_routes_enabled: bool = False,
 ) -> Any:
     """Start the local listener and treat it as the single-instance owner."""
     if commands is None and json_commands is None and queries is None:
-        server = start_command_server(engine)
+        if control_routes_enabled:
+            server = start_command_server(
+                engine,
+                control_routes_enabled=control_routes_enabled,
+            )
+        else:
+            server = start_command_server(engine)
     else:
         server = start_command_server(
             engine,
             commands=commands,
             json_commands=json_commands,
             queries=queries,
+            control_routes_enabled=control_routes_enabled,
         )
     if server is not None:
         return server
@@ -753,7 +767,12 @@ def main() -> None:
     }
     state_queries = {"state": state_query}
     _command_server = _require_command_server(
-        engine, root, command_callbacks, json_command_callbacks, state_queries,
+        engine,
+        root,
+        command_callbacks,
+        json_command_callbacks,
+        state_queries,
+        control_routes_enabled=_e2e_command_server_enabled(),
     )
 
     # ----- Hotkeys -----

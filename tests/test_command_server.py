@@ -167,6 +167,36 @@ class TestServerWiring:
         code, _ = _post(port, "/nope", {})
         assert code == 404
 
+    def test_control_routes_are_404_by_default_even_with_callbacks(self):
+        engine = _FakeEngine()
+        port = _free_port()
+        calls: list[str] = []
+        srv = start_command_server(
+            engine,
+            port=port,
+            commands={
+                "settings": lambda: calls.append("settings"),
+                "stop": lambda: calls.append("stop"),
+            },
+            json_commands={
+                "settings.apply": lambda _data: calls.append("settings.apply"),
+                "ui.click": lambda _data: calls.append("ui.click"),
+            },
+            queries={"state": lambda: calls.append("state") or {"ok": True}},
+        )
+        assert srv is not None
+        time.sleep(0.05)
+        try:
+            assert _get(port, "/state")[0] == 404
+            assert _post_empty(port, "/settings")[0] == 404
+            assert _post_empty(port, "/stop")[0] == 404
+            assert _post(port, "/settings/apply", {"values": {}})[0] == 404
+            assert _post(port, "/ui/click", {"target": "x"})[0] == 404
+            assert calls == []
+        finally:
+            srv.shutdown()
+            srv.server_close()
+
     def test_settings_command_routes_to_callback(self):
         engine = _FakeEngine()
         port = _free_port()
@@ -175,6 +205,7 @@ class TestServerWiring:
             engine,
             port=port,
             commands={"settings": lambda: calls.append("settings")},
+            control_routes_enabled=True,
         )
         assert srv is not None
         time.sleep(0.05)
@@ -194,6 +225,7 @@ class TestServerWiring:
             engine,
             port=port,
             commands={"voice-manager": lambda: calls.append("voice-manager")},
+            control_routes_enabled=True,
         )
         assert srv is not None
         time.sleep(0.05)
@@ -215,6 +247,7 @@ class TestServerWiring:
             engine,
             port=port,
             commands={name: lambda n=name: calls.append(n)},
+            control_routes_enabled=True,
         )
         assert srv is not None
         time.sleep(0.05)
@@ -226,10 +259,22 @@ class TestServerWiring:
             srv.shutdown()
             srv.server_close()
 
-    def test_settings_command_is_404_without_callback(self, server):
-        _, port = server
-        code, _ = _post_empty(port, "/settings")
-        assert code == 404
+    def test_settings_command_is_404_without_callback(self):
+        engine = _FakeEngine()
+        port = _free_port()
+        srv = start_command_server(
+            engine,
+            port=port,
+            control_routes_enabled=True,
+        )
+        assert srv is not None
+        time.sleep(0.05)
+        try:
+            code, _ = _post_empty(port, "/settings")
+            assert code == 404
+        finally:
+            srv.shutdown()
+            srv.server_close()
 
     def test_json_settings_apply_command_routes_payload(self):
         engine = _FakeEngine()
@@ -241,6 +286,7 @@ class TestServerWiring:
             json_commands={
                 "settings.apply": lambda data: calls.append(data) or {"ok": True}
             },
+            control_routes_enabled=True,
         )
         assert srv is not None
         time.sleep(0.05)
@@ -253,10 +299,22 @@ class TestServerWiring:
             srv.shutdown()
             srv.server_close()
 
-    def test_json_settings_apply_is_404_without_callback(self, server):
-        _, port = server
-        code, _ = _post(port, "/settings/apply", {"values": {}})
-        assert code == 404
+    def test_json_settings_apply_is_404_without_callback(self):
+        engine = _FakeEngine()
+        port = _free_port()
+        srv = start_command_server(
+            engine,
+            port=port,
+            control_routes_enabled=True,
+        )
+        assert srv is not None
+        time.sleep(0.05)
+        try:
+            code, _ = _post(port, "/settings/apply", {"values": {}})
+            assert code == 404
+        finally:
+            srv.shutdown()
+            srv.server_close()
 
     @pytest.mark.parametrize(
         ("path", "name"),
@@ -278,6 +336,7 @@ class TestServerWiring:
             json_commands={
                 name: lambda data, n=name: calls.append((n, data)) or {"ok": True}
             },
+            control_routes_enabled=True,
         )
         assert srv is not None
         time.sleep(0.05)
@@ -294,10 +353,22 @@ class TestServerWiring:
         "path",
         ["/ui/click", "/ui/type", "/ui/set", "/ui/select", "/ui/overlay-click"],
     )
-    def test_ui_json_commands_are_404_without_callback(self, path: str, server):
-        _, port = server
-        code, _ = _post(port, path, {"target": "x"})
-        assert code == 404
+    def test_ui_json_commands_are_404_without_callback(self, path: str):
+        engine = _FakeEngine()
+        port = _free_port()
+        srv = start_command_server(
+            engine,
+            port=port,
+            control_routes_enabled=True,
+        )
+        assert srv is not None
+        time.sleep(0.05)
+        try:
+            code, _ = _post(port, path, {"target": "x"})
+            assert code == 404
+        finally:
+            srv.shutdown()
+            srv.server_close()
 
     def test_state_query_returns_json_payload(self):
         engine = _FakeEngine()
@@ -306,6 +377,7 @@ class TestServerWiring:
             engine,
             port=port,
             queries={"state": lambda: {"settings_open": True}},
+            control_routes_enabled=True,
         )
         assert srv is not None
         time.sleep(0.05)
@@ -317,10 +389,22 @@ class TestServerWiring:
             srv.shutdown()
             srv.server_close()
 
-    def test_state_query_is_404_without_callback(self, server):
-        _, port = server
-        code, _ = _get(port, "/state")
-        assert code == 404
+    def test_state_query_is_404_without_callback(self):
+        engine = _FakeEngine()
+        port = _free_port()
+        srv = start_command_server(
+            engine,
+            port=port,
+            control_routes_enabled=True,
+        )
+        assert srv is not None
+        time.sleep(0.05)
+        try:
+            code, _ = _get(port, "/state")
+            assert code == 404
+        finally:
+            srv.shutdown()
+            srv.server_close()
 
     def test_allowed_extensions_constant(self):
         # Sanity check the constant is in sync with the docstring.
