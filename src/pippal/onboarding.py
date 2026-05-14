@@ -27,7 +27,7 @@ from typing import TYPE_CHECKING, Any
 
 from .config import DEFAULT_CONFIG
 from .paths import ASSET_NO_VOICE_WAV, DATA_ROOT, PIPER_EXE, VOICES_DIR
-from .voices import installed_voices
+from .voices import KNOWN_VOICES, PiperVoice, installed_voices, voice_filename
 
 if TYPE_CHECKING:  # pragma: no cover
     from .ui import Overlay
@@ -221,6 +221,15 @@ def _display_voice_name(filename: str | None) -> str:
     return name or "not installed"
 
 
+def default_piper_voice() -> PiperVoice:
+    """Return the curated Piper voice that matches the Core default config."""
+    configured_voice = str(DEFAULT_CONFIG["voice"])
+    for voice in KNOWN_VOICES:
+        if voice_filename(voice) == configured_voice:
+            return voice
+    raise RuntimeError(f"Default Piper voice is not in the curated catalogue: {configured_voice}")
+
+
 def build_activation_readiness(
     config: dict[str, Any],
     *,
@@ -269,7 +278,7 @@ def build_activation_readiness(
             can_play_sample=False,
             message=(
                 "No local voice is installed yet. Install the default English "
-                "voice so PipPal can speak offline."
+                "voice so PipPal can speak offline. Download size: about 120 MB."
             ),
         )
 

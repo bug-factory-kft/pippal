@@ -38,6 +38,57 @@ def _encode_download_url(url: str) -> str:
     return urllib.parse.urlunsplit(parts._replace(path=safe_path))
 
 
+def _streaming_download(
+    url: str,
+    dest: Path,
+    timeout: float = DOWNLOAD_TIMEOUT_S,
+    chunk: int = 1 << 16,
+) -> None:
+    """Download ``url`` to ``dest`` and fail if the response is empty."""
+    encoded_url = _encode_download_url(url)
+    with urllib.request.urlopen(encoded_url, timeout=timeout) as resp, dest.open("wb") as f:
+        while True:
+            buf = resp.read(chunk)
+            if not buf:
+                break
+            f.write(buf)
+    if dest.stat().st_size == 0:
+        raise RuntimeError("empty response")
+
+
+def install_piper_voice(
+    v: PiperVoice,
+    *,
+    voices_dir: Path = VOICES_DIR,
+    streaming_download: Callable[[str, Path], None] | None = None,
+) -> str:
+    """Install a curated Piper voice and return the installed model filename."""
+    download = streaming_download or _streaming_download
+    voices_dir.mkdir(parents=True, exist_ok=True)
+
+    filename = voice_filename(v)
+    onnx = voices_dir / filename
+    meta = voices_dir / f"{filename}.json"
+    part_onnx = onnx.with_suffix(onnx.suffix + ".part")
+    part_meta = meta.with_suffix(meta.suffix + ".part")
+    base = voice_url_base(v)
+
+    try:
+        download(base + filename, part_onnx)
+        download(base + f"{filename}.json", part_meta)
+        os.replace(str(part_onnx), str(onnx))
+        os.replace(str(part_meta), str(meta))
+    except Exception:
+        for partial in (part_onnx, part_meta):
+            try:
+                if partial.exists():
+                    partial.unlink(missing_ok=True)
+            except Exception:
+                pass
+        raise
+    return filename
+
+
 class VoiceManagerDialog:
     """Modal dialog listing registered Piper voices with install /
     remove buttons. The catalogue comes from `plugins.voices()` —
@@ -376,48 +427,29 @@ class VoiceManagerDialog:
         threading.Thread(target=self._download_thread, args=(v,), daemon=True).start()
 
     def _download_thread(self, v: PiperVoice) -> None:
-        base = voice_url_base(v)
-        onnx = VOICES_DIR / f"{v['id']}.onnx"
-        meta = VOICES_DIR / f"{v['id']}.onnx.json"
-        part_onnx = onnx.with_suffix(onnx.suffix + ".part")
-        part_meta = meta.with_suffix(meta.suffix + ".part")
         try:
-            self._streaming_download(base + f"{v['id']}.onnx", part_onnx)
-            self._streaming_download(base + f"{v['id']}.onnx.json", part_meta)
-            os.replace(str(part_onnx), str(onnx))
-            os.replace(str(part_meta), str(meta))
+            install_piper_voice(v)
             # Window may have been destroyed mid-download — schedule
             # the UI hop only if the dialog is still alive.
             if self._alive():
                 self.win.after(0, lambda: self._download_done(v, ok=True))
         except Exception as e:
             err_msg = str(e)
-            for partial in (part_onnx, part_meta):
-                try:
-                    if partial.exists():
-                        partial.unlink(missing_ok=True)
-                except Exception:
-                    pass
             if self._alive():
-                self.win.after(0,
-                               lambda msg=err_msg: self._download_done(v, ok=False, err=msg))
+                self.win.after(
+                    0,
+                    lambda msg=err_msg: self._download_done(v, ok=False, err=msg),
+                )
 
     @staticmethod
-    def _streaming_download(url: str, dest: Path,
-                             timeout: float = DOWNLOAD_TIMEOUT_S,
-                             chunk: int = 1 << 16) -> None:
-        """Download `url` to `dest` with a connect/read timeout. Raises
-        if the request hangs or the response is empty."""
-        encoded_url = _encode_download_url(url)
-        with urllib.request.urlopen(encoded_url, timeout=timeout) as resp, \
-             dest.open("wb") as f:
-            while True:
-                buf = resp.read(chunk)
-                if not buf:
-                    break
-                f.write(buf)
-        if dest.stat().st_size == 0:
-            raise RuntimeError("empty response")
+    def _streaming_download(
+        url: str,
+        dest: Path,
+        timeout: float = DOWNLOAD_TIMEOUT_S,
+        chunk: int = 1 << 16,
+    ) -> None:
+        """Download `url` to `dest` with a connect/read timeout."""
+        _streaming_download(url, dest, timeout=timeout, chunk=chunk)
 
     def _download_done(self, v: PiperVoice, ok: bool, err: Any = None) -> None:
         # The schedule was guarded by `_alive()`, but the dialog could

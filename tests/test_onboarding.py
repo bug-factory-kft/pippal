@@ -68,6 +68,12 @@ def test_format_hotkey_uses_user_facing_names() -> None:
     assert onboarding.format_hotkey("") == "Not configured"
 
 
+def test_default_piper_voice_matches_core_default_config() -> None:
+    voice = onboarding.default_piper_voice()
+
+    assert f"{voice['id']}.onnx" == onboarding.DEFAULT_CONFIG["voice"]
+
+
 def test_readiness_reports_missing_piper(tmp_path: Path) -> None:
     voices_dir = tmp_path / "voices"
 
