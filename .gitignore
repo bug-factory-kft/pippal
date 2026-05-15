@@ -4,6 +4,7 @@ __pycache__/
 *.pyo
 
 # Local user state
+.e2e/
 config.json
 history.json
 temp/

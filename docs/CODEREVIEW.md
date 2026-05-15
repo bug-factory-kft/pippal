@@ -1,9 +1,11 @@
-# PipPal — Code Review (resolved 2026-05-03)
+# PipPal — Code Review (resolved 2026-05-03; refreshed for Core 0.2.3)
 
-Multi-reviewer audit run before the v0.2.0 public release. Reviewers:
+Multi-reviewer audit run before the original public release and
+refreshed for the Core v0.2.3 documentation pass. Reviewers:
 
 - **`ruff`** — full lint (`select = ["E","F","W","I","B","UP","RUF"]`)
-- **`mypy`** — static type-check (`--ignore-missing-imports`)
+- **`mypy`** — advisory static type-check, not a blocking release gate
+  until the current Core typing debt is closed
 - **`codex` CLI** — independent code-quality reviewer
 - **Independent Claude Code agent** — second pair of eyes on each
   proposed fix
@@ -15,7 +17,10 @@ Status legend:
   fix an open bug)
 
 End-to-end smoke test of the live app on Windows 11: **green**.
-Tests: **142 passing** (Free build only). `ruff`: **0 errors**.
+For current release-branch status, use the command output from
+`python -m pytest -p no:cacheprovider` and `python -m ruff check .`.
+Use `mypy` as an advisory type sweep, not as a go/no-go signal, until
+it is made green on the supported Python path.
 
 ---
 
@@ -137,33 +142,42 @@ Tests: **142 passing** (Free build only). `ruff`: **0 errors**.
     plugin API third-party plugins code against (engine /
     ai_action / hotkey / settings card / tray item registries).
 
-## Deferred (architectural)
+## Architecture notes
 
-⏳ **Ecosystem-grade entry-point discovery** — `pippal_pro` is loaded
-via a single `try: importlib.import_module("pippal_pro")` in
-`pippal/__init__.py`. Codex' review noted that for a real third-party
-plugin ecosystem we'd want Python `entry_points` (group
-`pippal.plugins`) so multiple plugin packages get discovered without
-listing them. Deferred until there's evidence anyone wants to ship a
-non-`pippal_pro` plugin — the registries are stable enough to switch
-discovery mechanisms later without breaking consumers.
+✅ **Ecosystem-grade entry-point discovery** — optional extensions are
+loaded through Python entry points in the `pippal.plugins` group. The
+public package owns the registry contract, not any concrete extension
+package name; a broken extension logs loudly and Core continues with
+built-in features.
 
 ---
 
 ## Tooling
 
-`pytest`, `ruff`, `mypy` configured in the repo:
-
-```text
-pytest          142 passed in 6 s
-ruff            0 errors
-mypy            ~12 errors remaining (all Tk overload noise)
-```
+`pytest` and `ruff` are the blocking Core logic release gate:
 
 Run them yourself:
 
 ```bash
-python -m pytest -q
-python -m ruff check pippal tests
-python -m mypy --ignore-missing-imports pippal
+python -m pytest -p no:cacheprovider
+python -m ruff check .
+```
+
+The live Windows UI release gate is explicit and evidence-producing:
+
+```powershell
+pwsh -NoProfile -ExecutionPolicy Bypass -File .\e2e\run-local.ps1 -SkipSetup
+```
+
+Review the artifact bundle described in
+[LIVE_UI_E2E_RELEASE_GATE.md](LIVE_UI_E2E_RELEASE_GATE.md) before calling a
+public release ready. A skipped or unavailable live UI run is a blocker, not a
+pass, unless it is only being captured as diagnostic CI evidence.
+
+`mypy` remains configured for advisory type review, but this branch is
+not green enough to treat it as a release gate. Run it explicitly when
+checking type drift under the `src/` layout:
+
+```bash
+python -m mypy --ignore-missing-imports --cache-dir "${TMPDIR:-/tmp}/pippal-mypy" src/pippal
 ```

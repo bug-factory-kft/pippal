@@ -37,6 +37,19 @@ def _venv_python(venv_dir: Path) -> Path:
     return venv_dir / "bin" / "python"
 
 
+def _copy_build_source(tmp_path: Path) -> Path:
+    source_root = tmp_path / "source"
+    source_root.mkdir()
+    for filename in ("pyproject.toml", "README.md", "LICENSE.md"):
+        shutil.copy2(ROOT / filename, source_root / filename)
+    shutil.copytree(
+        ROOT / "src",
+        source_root / "src",
+        ignore=shutil.ignore_patterns("__pycache__", "*.pyc", "*.pyo"),
+    )
+    return source_root
+
+
 def test_setup_and_launcher_contracts_are_shippable() -> None:
     setup = (ROOT / "setup.ps1").read_text(encoding="utf-8")
     console = (ROOT / "start_console.bat").read_text(encoding="utf-8")
@@ -79,10 +92,11 @@ def test_source_explorer_helper_runs_without_editable_install() -> None:
 
 
 def test_non_editable_wheel_exposes_runtime_assets_and_helper(tmp_path: Path) -> None:
+    source_root = _copy_build_source(tmp_path)
     wheelhouse = tmp_path / "wheelhouse"
     wheelhouse.mkdir()
     _run(
-        [sys.executable, "-m", "pip", "wheel", str(ROOT), "--no-deps", "-w", str(wheelhouse)],
+        [sys.executable, "-m", "pip", "wheel", str(source_root), "--no-deps", "-w", str(wheelhouse)],
         cwd=tmp_path,
     )
 

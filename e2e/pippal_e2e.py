@@ -18,6 +18,7 @@ except ModuleNotFoundError:  # pragma: no cover - setup error path
     psutil = None  # type: ignore[assignment]
 
 CMD_SERVER_PORT = 51677
+E2E_COMMAND_SERVER_ENV = "PIPPAL_E2E_COMMAND_SERVER"
 
 
 class CommandEndpointUnavailable(AssertionError):
@@ -76,6 +77,7 @@ def launch_public_app(public_root: Path, data_root: Path) -> subprocess.Popen[st
 
     env = os.environ.copy()
     env["PIPPAL_DATA_DIR"] = str(data_root)
+    env[E2E_COMMAND_SERVER_ENV] = "1"
     return subprocess.Popen(
         [sys.executable, str(public_root / "reader_app.py")],
         cwd=public_root,

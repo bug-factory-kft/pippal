@@ -35,6 +35,7 @@ if TYPE_CHECKING:  # pragma: no cover
     from .engine import TTSEngine
 
 CLIPBOARD_PROBE_TOKEN: str = "__pippal_no_selection__"
+UNIVERSAL_MODIFIER_KEYS: set[str] = {"ctrl", "shift", "alt", "super", "windows"}
 
 __all__ = ["CLIPBOARD_PROBE_TOKEN",
            "capture_for_action", "capture_selection"]
@@ -55,6 +56,35 @@ def _hotkey_keys(combo: str) -> set[str]:
     return {p.strip().lower() for p in (combo or "").split("+") if p.strip()}
 
 
+def _keyboard_key_is_pressed(key: str) -> bool:
+    if keyboard is None:
+        return False
+    try:
+        return bool(keyboard.is_pressed(key))
+    except Exception:
+        return False
+
+
+def _release_keyboard_key(key: str) -> None:
+    if keyboard is None:
+        return
+    try:
+        keyboard.release(key)
+    except Exception:
+        pass
+
+
+def _release_copy_hotkey_keys(hotkey_combo: str) -> None:
+    combo_keys = _hotkey_keys(hotkey_combo)
+    release_keys = set(combo_keys)
+    release_keys.update(
+        key for key in UNIVERSAL_MODIFIER_KEYS
+        if key not in combo_keys and _keyboard_key_is_pressed(key)
+    )
+    for key in release_keys:
+        _release_keyboard_key(key)
+
+
 def capture_selection(engine: TTSEngine, hotkey_combo: str = "") -> str:
     """Save clipboard, send Ctrl+C, read clipboard, restore. Serialised
     across hotkey actions via `engine._capture_lock`."""
@@ -70,13 +100,8 @@ def capture_selection(engine: TTSEngine, hotkey_combo: str = "") -> str:
             pass
 
         # Release the actual configured combo plus the universal modifier
-        # set so a held-down shortcut doesn't garble Ctrl+C.
-        release_keys = _hotkey_keys(hotkey_combo) | {"ctrl", "shift", "alt", "super"}
-        for k in release_keys:
-            try:
-                keyboard.release(k)
-            except Exception:
-                pass
+        # keys that are truly down so a held shortcut doesn't garble Ctrl+C.
+        _release_copy_hotkey_keys(hotkey_combo)
         time.sleep(CLIPBOARD_RELEASE_GAP_S)
         try:
             keyboard.send("ctrl+c")

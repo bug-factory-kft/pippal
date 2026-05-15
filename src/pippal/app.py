@@ -6,10 +6,12 @@ the local IPC server, run the Tk mainloop."""
 
 from __future__ import annotations
 
+import os
 import sys
 import threading
 import tkinter as tk
 from collections.abc import Callable
+from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
@@ -20,15 +22,28 @@ from .command_server import start_command_server
 from .config import load_config, save_config
 from .engine import TTSEngine
 from .history import load_history, save_history
+from .onboarding import should_show_activation_panel
 from .paths import PIPER_EXE, ensure_dirs
 from .timing import TRAY_POLL_MS
 from .tray import make_tray_icon
 from .ui import Overlay, SettingsWindow
+from .ui.activation_panel import FirstRunActivationPanel
 
 # Keep a hard reference to the Tk PhotoImage so the GC doesn't collect
 # it out from under the title bars. tk.PhotoImage objects have to
 # outlive the window that uses them.
 _ICON_PHOTO_REF: Any = None
+_E2E_COMMAND_SERVER_ENV = "PIPPAL_E2E_COMMAND_SERVER"
+
+
+def _e2e_command_server_enabled() -> bool:
+    return os.environ.get(_E2E_COMMAND_SERVER_ENV) == "1"
+
+
+def _selected_piper_missing(config: dict[str, Any], piper_exe: Path | None = None) -> bool:
+    engine_name = str(config.get("engine") or "piper").lower()
+    piper_path = piper_exe or PIPER_EXE
+    return engine_name == "piper" and not piper_path.exists()
 
 
 def _widget_texts(widget: tk.Misc) -> list[str]:
@@ -158,9 +173,21 @@ def _toplevels(
             continue
         if not exists:
             continue
+        geometry = ""
+        x = y = width = height = 0
+        try:
+            geometry = str(widget.geometry())
+            x = int(widget.winfo_rootx())
+            y = int(widget.winfo_rooty())
+            width = int(widget.winfo_width())
+            height = int(widget.winfo_height())
+        except Exception:
+            pass
         windows.append({
             "title": title,
             "visible": visible,
+            "geometry": geometry,
+            "rect": [x, y, x + width, y + height],
             "texts": _widget_texts(widget),
             "controls": _widget_controls(widget, var_keys),
         })
@@ -373,16 +400,24 @@ def _require_command_server(
     commands: dict[str, Callable[[], None]] | None = None,
     json_commands: dict[str, Callable[[dict[str, Any]], Any]] | None = None,
     queries: dict[str, Callable[[], Any]] | None = None,
+    control_routes_enabled: bool = False,
 ) -> Any:
     """Start the local listener and treat it as the single-instance owner."""
     if commands is None and json_commands is None and queries is None:
-        server = start_command_server(engine)
+        if control_routes_enabled:
+            server = start_command_server(
+                engine,
+                control_routes_enabled=control_routes_enabled,
+            )
+        else:
+            server = start_command_server(engine)
     else:
         server = start_command_server(
             engine,
             commands=commands,
             json_commands=json_commands,
             queries=queries,
+            control_routes_enabled=control_routes_enabled,
         )
     if server is not None:
         return server
@@ -401,17 +436,13 @@ def main() -> None:
     ensure_dirs()
     config = load_config()
 
-    # piper.exe is only required when Piper is actually selected;
-    # users on a non-Piper engine (extension-supplied) can run with
-    # the Piper binary absent.
-    engine_name = (config.get("engine") or "piper").lower()
-    if engine_name == "piper" and not PIPER_EXE.exists():
+    missing_selected_piper = _selected_piper_missing(config)
+    if missing_selected_piper:
         print(
             f"piper.exe missing at {PIPER_EXE}; run setup.ps1 or "
-            "switch engine in Settings.",
+            "switch engine in Settings. Starting repair state.",
             file=sys.stderr,
         )
-        sys.exit(1)
 
     _set_app_user_model_id()  # must run BEFORE the first Tk window
     root = tk.Tk()
@@ -439,6 +470,7 @@ def main() -> None:
     # listener also owns the single-instance gate: if the port cannot
     # be bound, exit before registering hotkeys or adding a tray icon.
     settings_box: list[SettingsWindow | None] = [None]
+    activation_panel_box: list[FirstRunActivationPanel | None] = [None]
 
     def open_settings_command() -> None:
         settings = settings_box[0]
@@ -527,6 +559,43 @@ def main() -> None:
         if settings is None:
             raise RuntimeError("settings window is not ready")
         root.after(0, lambda: (settings.open(), settings._open_voice_manager()))
+
+    def open_setup_instructions() -> None:
+        import webbrowser
+
+        webbrowser.open("https://github.com/bug-factory-kft/pippal#readme")
+
+    def open_activation_panel() -> None:
+        def _open() -> None:
+            settings = settings_box[0]
+            if settings is None:
+                raise RuntimeError("settings window is not ready")
+
+            def _open_voice_manager_from_first_run() -> None:
+                settings.open()
+                current_panel = activation_panel_box[0]
+                settings._open_voice_manager(
+                    on_installed=(
+                        current_panel.apply_installed_voice
+                        if current_panel is not None
+                        else None
+                    ),
+                )
+
+            panel = activation_panel_box[0]
+            if panel is None:
+                panel = FirstRunActivationPanel(
+                    root,
+                    config,
+                    on_play_sample=engine.read_text_async,
+                    on_open_settings=settings.open,
+                    on_open_voice_manager=_open_voice_manager_from_first_run,
+                    on_open_setup=open_setup_instructions,
+                )
+                activation_panel_box[0] = panel
+            panel.open()
+
+        root.after(0, _open)
 
     def apply_settings_command(data: dict[str, Any]) -> dict[str, Any]:
         values = data.get("values", {})
@@ -734,6 +803,49 @@ def main() -> None:
 
         return _call_on_tk_thread(root, click_overlay, timeout=5.0)
 
+    def ui_window_move_command(data: dict[str, Any]) -> dict[str, Any]:
+        target = data.get("target", {})
+        if not isinstance(target, dict):
+            raise RuntimeError("target must be an object")
+        if not target.get("title"):
+            raise RuntimeError("target.title is required")
+        dx = int(data.get("dx", 0) or 0)
+        dy = int(data.get("dy", 0) or 0)
+        absolute_x = data.get("x")
+        absolute_y = data.get("y")
+
+        def move_window() -> dict[str, Any]:
+            windows = _target_windows(root, target)
+            if not windows:
+                raise RuntimeError(f"UI window target not found: {target}")
+            index = int(target.get("index", 0) or 0)
+            try:
+                window = windows[index]
+            except IndexError as exc:
+                raise RuntimeError(
+                    f"UI window target index out of range: {target}"
+                ) from exc
+
+            try:
+                current_x = int(window.winfo_rootx())
+                current_y = int(window.winfo_rooty())
+            except Exception:
+                try:
+                    current_x = int(window.winfo_x())
+                    current_y = int(window.winfo_y())
+                except Exception as exc:
+                    raise RuntimeError(
+                        f"UI window geometry unavailable: {target}"
+                    ) from exc
+
+            next_x = int(absolute_x) if absolute_x is not None else current_x + dx
+            next_y = int(absolute_y) if absolute_y is not None else current_y + dy
+            window.geometry(f"+{next_x}+{next_y}")
+            root.update_idletasks()
+            return runtime_snapshot()
+
+        return _call_on_tk_thread(root, move_window, timeout=5.0)
+
     command_callbacks = {
         "settings": open_settings_command,
         "stop": engine.stop,
@@ -742,6 +854,7 @@ def main() -> None:
         "replay": engine.replay_chunk,
         "next": engine.next_chunk,
         "voice-manager": voice_manager_command,
+        "first-run-check": open_activation_panel,
     }
     json_command_callbacks = {
         "settings.apply": apply_settings_command,
@@ -749,11 +862,17 @@ def main() -> None:
         "ui.type": ui_type_command,
         "ui.set": ui_set_command,
         "ui.select": ui_select_command,
+        "ui.window_move": ui_window_move_command,
         "ui.overlay_click": ui_overlay_click_command,
     }
     state_queries = {"state": state_query}
     _command_server = _require_command_server(
-        engine, root, command_callbacks, json_command_callbacks, state_queries,
+        engine,
+        root,
+        command_callbacks,
+        json_command_callbacks,
+        state_queries,
+        control_routes_enabled=_e2e_command_server_enabled(),
     )
 
     # ----- Hotkeys -----
@@ -915,6 +1034,16 @@ def main() -> None:
     composed: list[Any] = []
     for builder in plugins.tray_items():
         composed.extend(builder(tray_ctx))
+    activation_item = pystray.MenuItem(
+        "First-run check",
+        lambda _i, _it: open_activation_panel(),
+    )
+    insert_at = len(composed)
+    for idx, item in enumerate(composed):
+        if str(getattr(item, "text", "")).startswith("Settings"):
+            insert_at = idx
+            break
+    composed.insert(insert_at, activation_item)
 
     icon = pystray.Icon(
         "pippal",
@@ -924,6 +1053,8 @@ def main() -> None:
     )
     tray["icon"] = icon
     icon.run_detached()
+    if missing_selected_piper or should_show_activation_panel():
+        root.after(500, open_activation_panel)
 
     try:
         root.mainloop()

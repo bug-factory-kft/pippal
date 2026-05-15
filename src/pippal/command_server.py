@@ -20,6 +20,26 @@ from .paths import CMD_SERVER_PORT
 MAX_READ_FILE_BYTES = 200 * 1024     # 200 KB
 MAX_READ_TEXT_BYTES = 200 * 1024
 ALLOWED_EXTENSIONS = (".txt", ".md", ".log", ".csv", ".json", ".html", ".xml")
+_CONTROL_COMMAND_ROUTES = {
+    "/settings": "settings",
+    "/voice-manager": "voice-manager",
+    "/first-run-check": "first-run-check",
+    "/stop": "stop",
+    "/pause": "pause",
+    "/prev": "prev",
+    "/replay": "replay",
+    "/next": "next",
+}
+_CONTROL_QUERY_ROUTES = {"/state": "state"}
+_CONTROL_JSON_COMMAND_ROUTES = {
+    "/settings/apply": "settings.apply",
+    "/ui/click": "ui.click",
+    "/ui/type": "ui.type",
+    "/ui/set": "ui.set",
+    "/ui/select": "ui.select",
+    "/ui/window-move": "ui.window_move",
+    "/ui/overlay-click": "ui.overlay_click",
+}
 
 
 def _looks_binary(sample: bytes) -> bool:
@@ -33,9 +53,15 @@ def start_command_server(
     commands: Mapping[str, Callable[[], None]] | None = None,
     json_commands: Mapping[str, Callable[[dict[str, Any]], Any]] | None = None,
     queries: Mapping[str, Callable[[], Any]] | None = None,
+    control_routes_enabled: bool = False,
 ) -> ThreadingHTTPServer | None:
     """Spin up the listener on a daemon thread. Returns the server (or
-    None if the port couldn't be bound)."""
+    None if the port couldn't be bound).
+
+    Production callers get the documented public IPC surface by default.
+    UI/state automation routes are available only when an explicit E2E
+    harness opts in with ``control_routes_enabled``.
+    """
 
     class CmdHandler(BaseHTTPRequestHandler):
         def _ok(self) -> None:
@@ -53,32 +79,26 @@ def start_command_server(
         def do_GET(self) -> None:
             if self.path == "/ping":
                 self._ok()
-            elif self.path == "/state":
-                self._handle_query("state")
+            elif self.path in _CONTROL_QUERY_ROUTES:
+                if not control_routes_enabled:
+                    self.send_error(404)
+                    return
+                self._handle_query(_CONTROL_QUERY_ROUTES[self.path])
             else:
                 self.send_error(404)
 
         def do_POST(self) -> None:
-            if self.path == "/settings":
-                self._handle_command("settings")
+            command = _CONTROL_COMMAND_ROUTES.get(self.path)
+            if command is not None:
+                if not control_routes_enabled:
+                    self.send_error(404)
+                    return
+                self._handle_command(command)
                 return
-            if self.path == "/voice-manager":
-                self._handle_command("voice-manager")
-                return
-            if self.path == "/stop":
-                self._handle_command("stop")
-                return
-            if self.path == "/pause":
-                self._handle_command("pause")
-                return
-            if self.path == "/prev":
-                self._handle_command("prev")
-                return
-            if self.path == "/replay":
-                self._handle_command("replay")
-                return
-            if self.path == "/next":
-                self._handle_command("next")
+
+            json_command = _CONTROL_JSON_COMMAND_ROUTES.get(self.path)
+            if json_command is not None and not control_routes_enabled:
+                self.send_error(404)
                 return
 
             length = int(self.headers.get("Content-Length", 0) or 0)
@@ -95,18 +115,8 @@ def start_command_server(
                 self._handle_read_file(data)
             elif self.path == "/read":
                 self._handle_read(data)
-            elif self.path == "/settings/apply":
-                self._handle_json_command("settings.apply", data)
-            elif self.path == "/ui/click":
-                self._handle_json_command("ui.click", data)
-            elif self.path == "/ui/type":
-                self._handle_json_command("ui.type", data)
-            elif self.path == "/ui/set":
-                self._handle_json_command("ui.set", data)
-            elif self.path == "/ui/select":
-                self._handle_json_command("ui.select", data)
-            elif self.path == "/ui/overlay-click":
-                self._handle_json_command("ui.overlay_click", data)
+            elif json_command is not None:
+                self._handle_json_command(json_command, data)
             else:
                 self.send_error(404)
 

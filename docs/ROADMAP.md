@@ -2,10 +2,11 @@
 
 > Your little offline reading buddy.
 
-PipPal is a tray-resident Windows app that reads selected text aloud,
-anywhere in Windows, using a local neural TTS engine. Press a hotkey,
-get a clean reader panel with karaoke-style highlighting. No cloud,
-no API keys, no telemetry.
+PipPal is a tray-resident Windows app that reads selected text aloud
+from Windows apps that expose selection through normal copy/clipboard
+behavior, using a local neural TTS engine. Press a hotkey, get a clean
+reader panel with karaoke-style highlighting. No cloud, no API keys, no
+telemetry.
 
 This document tracks the **public Free** roadmap. The paid
 Microsoft Store edition adds extra features through a separate
@@ -14,7 +15,7 @@ project's roadmap.
 
 ---
 
-## Current state — v0.2.0 (public release)
+## Current state — Core v0.2.4 (release branch, 2026-05-15)
 
 - Tray app (`pythonw reader_app.py`) with autostart on login.
 - Plugin-host architecture (`pippal.plugins`) — engines, settings
@@ -51,7 +52,12 @@ project's roadmap.
 - Voice Manager: one-click install/remove of curated Piper voices
   from huggingface.co/rhasspy/piper-voices. 18 voices across 9
   languages (English US/UK, German, Spanish, French, Italian,
-  Hungarian, Polish, Dutch, Portuguese).
+  Hungarian, Polish, Dutch, Portuguese). First-run can open this manager
+  on the recommended Ryan voice and the list remains scrollable while
+  the pointer is over voice rows.
+- First-run activation panel: new users get a repairable setup path,
+  one-click default voice install, sample playback, and a disabled
+  Finish action until playback has actually been tried.
 - Layered config: only user overrides land in `config.json`; plugin
   defaults overlay at runtime. Uninstalling a plugin doesn't strand
   its defaults on disk.
@@ -61,9 +67,25 @@ project's roadmap.
   cleans up chunk WAVs before exiting; tray icon flips to idle
   authoritatively.
 
-140 tests pass; ruff clean; multi-reviewer code-quality audit closed
-all HIGH and MEDIUM findings before this release (see
-[CODEREVIEW.md](CODEREVIEW.md)).
+Current validation should be checked from command output with
+`python -m pytest` and `python -m ruff check .`; fixed test counts are
+kept out of this roadmap so they do not drift. The historical
+multi-reviewer audit is tracked in [CODEREVIEW.md](CODEREVIEW.md).
+
+---
+
+## Next release focus - Core v0.2.5
+
+- Keep the release confidence loop honest: repeat the live UI evidence
+  gate, docs-truth review, and branch hygiene before broadening user
+  claims.
+- Selected-text reliability evidence: keep the common Windows app
+  compatibility matrix and release wording constraints in
+  [SELECTED_TEXT_RELIABILITY.md](SELECTED_TEXT_RELIABILITY.md) before
+  broadening "anywhere" claims.
+- Competitor matrix evidence: keep dated source facts and unknowns in
+  [CORE_COMPETITOR_MATRIX_EVIDENCE_2026-05-14.md](CORE_COMPETITOR_MATRIX_EVIDENCE_2026-05-14.md)
+  before making Core positioning claims against named alternatives.
 
 ---
 

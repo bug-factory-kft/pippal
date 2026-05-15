@@ -8,6 +8,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from pippal import onboarding
 from pippal.engine import TTSEngine
 from pippal.engines.piper import PiperBackend
 
@@ -144,6 +145,128 @@ class TestTokenCancellation:
         engine.is_speaking = True
         engine.stop()
         assert engine.is_speaking is False
+
+
+class TestActivationState:
+    def test_empty_selected_text_records_first_run_failure(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        overlay = MagicMock()
+        engine = TTSEngine(
+            MagicMock(),
+            {"engine": "piper"},
+            overlay_ref=lambda: overlay,
+        )
+        failures: list[str] = []
+
+        def record_failure(failure: str) -> onboarding.FirstRunActivationState:
+            failures.append(failure)
+            return onboarding.FirstRunActivationState(last_failure=failure)
+
+        monkeypatch.setattr(engine, "_maybe_play_onboarding", lambda: False)
+        monkeypatch.setattr("pippal.engine.winsound.PlaySound", lambda *_: None)
+        monkeypatch.setattr(
+            "pippal.engine.clipboard_capture.capture_for_action",
+            lambda *_: "",
+        )
+        monkeypatch.setattr("pippal.engine.should_show_activation_panel", lambda: True)
+        monkeypatch.setattr("pippal.engine.record_activation_failure", record_failure)
+
+        engine._speak_selection_impl()
+
+        assert failures == [onboarding.SELECTED_TEXT_CAPTURE_FAILURE]
+        overlay.show_message.assert_called_once_with("No text selected")
+
+    def test_selected_text_read_marks_first_run_complete(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        engine = TTSEngine(
+            MagicMock(),
+            {"engine": "piper"},
+            overlay_ref=lambda: None,
+        )
+        completions: list[str] = []
+        played: list[str] = []
+        readiness = onboarding.FirstRunReadiness(
+            status=onboarding.READINESS_READY,
+            engine_label="Piper engine: ready",
+            voice_label="en_US-ryan-high",
+            hotkey_label="Win+Shift+R",
+            can_play_sample=True,
+            message="Local voice check is ready.",
+        )
+
+        def mark_complete(completed_with: str) -> onboarding.FirstRunActivationState:
+            completions.append(completed_with)
+            return onboarding.FirstRunActivationState(
+                completed_at="2026-05-14T18:05:00Z",
+                completed_with=completed_with,
+            )
+
+        monkeypatch.setattr(engine, "_maybe_play_onboarding", lambda: False)
+        monkeypatch.setattr("pippal.engine.winsound.PlaySound", lambda *_: None)
+        monkeypatch.setattr(
+            "pippal.engine.clipboard_capture.capture_for_action",
+            lambda *_: "selected text",
+        )
+        monkeypatch.setattr("pippal.engine.should_show_activation_panel", lambda: True)
+        monkeypatch.setattr("pippal.engine.build_activation_readiness", lambda _config: readiness)
+        monkeypatch.setattr("pippal.engine.mark_activation_complete", mark_complete)
+        monkeypatch.setattr(
+            "pippal.engine.playback.synthesize_and_play",
+            lambda _engine, text, _token: played.append(text),
+        )
+
+        engine._speak_selection_impl()
+
+        assert completions == ["selected_text"]
+        assert played == ["selected text"]
+        assert engine.is_speaking is True
+
+    def test_selected_text_read_waits_for_ready_first_run_state(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        engine = TTSEngine(
+            MagicMock(),
+            {"engine": "piper"},
+            overlay_ref=lambda: None,
+        )
+        completions: list[str] = []
+        played: list[str] = []
+
+        readiness = onboarding.FirstRunReadiness(
+            status=onboarding.READINESS_MISSING_VOICE,
+            engine_label="Piper engine: ready",
+            voice_label="not installed",
+            hotkey_label="Win+Shift+R",
+            can_play_sample=False,
+            message="No local voice is installed yet.",
+        )
+
+        monkeypatch.setattr(engine, "_maybe_play_onboarding", lambda: False)
+        monkeypatch.setattr("pippal.engine.winsound.PlaySound", lambda *_: None)
+        monkeypatch.setattr(
+            "pippal.engine.clipboard_capture.capture_for_action",
+            lambda *_: "selected text",
+        )
+        monkeypatch.setattr("pippal.engine.should_show_activation_panel", lambda: True)
+        monkeypatch.setattr("pippal.engine.build_activation_readiness", lambda _config: readiness)
+        monkeypatch.setattr(
+            "pippal.engine.mark_activation_complete",
+            lambda completed_with: completions.append(completed_with),
+        )
+        monkeypatch.setattr(
+            "pippal.engine.playback.synthesize_and_play",
+            lambda _engine, text, _token: played.append(text),
+        )
+
+        engine._speak_selection_impl()
+
+        assert completions == []
+        assert played == ["selected text"]
 
 
 class TestBackendCacheRequestedName:

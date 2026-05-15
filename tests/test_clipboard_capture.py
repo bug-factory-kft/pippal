@@ -8,7 +8,47 @@ registry-lookup helpers that don't need any of that mocking."""
 
 from __future__ import annotations
 
+import threading
+
 from pippal import clipboard_capture, plugins
+
+
+class _FakeClipboard:
+    def __init__(self, initial: str):
+        self.value = initial
+        self.copied: list[str] = []
+
+    def paste(self) -> str:
+        return self.value
+
+    def copy(self, value: str) -> None:
+        self.copied.append(value)
+        self.value = value
+
+
+class _FakeKeyboard:
+    def __init__(self, pressed: set[str] | None = None, copied_text: str = ""):
+        self.pressed = pressed or set()
+        self.copied_text = copied_text
+        self.clipboard: _FakeClipboard | None = None
+        self.released: list[str] = []
+        self.sent: list[str] = []
+
+    def is_pressed(self, key: str) -> bool:
+        return key in self.pressed
+
+    def release(self, key: str) -> None:
+        self.released.append(key)
+
+    def send(self, hotkey: str) -> None:
+        self.sent.append(hotkey)
+        if self.clipboard is not None and hotkey == "ctrl+c":
+            self.clipboard.value = self.copied_text
+
+
+class _DummyEngine:
+    def __init__(self):
+        self._capture_lock = threading.Lock()
 
 
 class TestHotkeyKeys:
@@ -35,6 +75,54 @@ class TestHotkeyKeys:
         # Stray double-pluses or trailing pluses shouldn't yield "" keys.
         assert clipboard_capture._hotkey_keys("ctrl++x") == {"ctrl", "x"}
         assert clipboard_capture._hotkey_keys("ctrl+") == {"ctrl"}
+
+
+class TestReleaseCopyHotkeyKeys:
+    def test_releases_configured_combo_keys(self, monkeypatch):
+        keyboard = _FakeKeyboard()
+        monkeypatch.setattr(clipboard_capture, "keyboard", keyboard)
+
+        clipboard_capture._release_copy_hotkey_keys("windows+shift+r")
+
+        assert {"windows", "shift", "r"} <= set(keyboard.released)
+
+    def test_does_not_release_inactive_universal_alt(self, monkeypatch):
+        keyboard = _FakeKeyboard()
+        monkeypatch.setattr(clipboard_capture, "keyboard", keyboard)
+
+        clipboard_capture._release_copy_hotkey_keys("windows+shift+r")
+
+        assert "alt" not in keyboard.released
+
+    def test_releases_active_universal_modifier_missing_from_combo(self, monkeypatch):
+        keyboard = _FakeKeyboard(pressed={"alt"})
+        monkeypatch.setattr(clipboard_capture, "keyboard", keyboard)
+
+        clipboard_capture._release_copy_hotkey_keys("windows+shift+r")
+
+        assert "alt" in keyboard.released
+
+
+class TestCaptureSelectionCopyInjection:
+    def test_injects_ctrl_c_without_inactive_alt_release_and_restores_clipboard(
+        self, monkeypatch,
+    ):
+        clipboard = _FakeClipboard("previous clipboard")
+        keyboard = _FakeKeyboard(copied_text=" selected text ")
+        keyboard.clipboard = clipboard
+        monkeypatch.setattr(clipboard_capture, "pyperclip", clipboard)
+        monkeypatch.setattr(clipboard_capture, "keyboard", keyboard)
+        monkeypatch.setattr(clipboard_capture.time, "sleep", lambda _delay: None)
+
+        captured = clipboard_capture.capture_selection(
+            _DummyEngine(), "windows+shift+r",
+        )
+
+        assert captured == "selected text"
+        assert keyboard.sent == ["ctrl+c"]
+        assert "alt" not in keyboard.released
+        assert clipboard.value == "previous clipboard"
+        assert clipboard.copied[-1] == "previous clipboard"
 
 
 class TestConfigKeyFor:

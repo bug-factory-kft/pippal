@@ -40,6 +40,12 @@ speaker output; that requires a machine-level loopback capture device.
 
 ## Run
 
+Release reviewers should use the checklist in
+[docs/LIVE_UI_E2E_RELEASE_GATE.md](../docs/LIVE_UI_E2E_RELEASE_GATE.md).
+The runner writes a log, JUnit XML, command record, and JSON summary for every
+run under `.e2e\evidence\live-ui-<UTC timestamp>\` unless `-EvidenceDir` is
+provided.
+
 ```powershell
 .\e2e\run-local.ps1
 ```
@@ -50,11 +56,19 @@ Reuse an already prepared `.e2e\data\public` voice setup:
 .\e2e\run-local.ps1 -SkipSetup
 ```
 
+Write artifacts to an explicit CI upload directory:
+
+```powershell
+.\e2e\run-local.ps1 -SkipSetup -EvidenceDir "$env:RUNNER_TEMP\pippal-live-ui-e2e"
+```
+
 ## Safety Notes
 
 - The runner sets `PIPPAL_E2E_LIVE=1`; direct `pytest e2e` calls skip
   unless you set this yourself.
 - The test data lives under `.e2e\data\public`.
+- The release-gate runner treats zero collected tests or skipped live UI tests
+  as `blocked` unless `-AllowUnavailable` is passed for diagnostic CI evidence.
 - The Windows integration button test temporarily writes the current
   user's Explorer context-menu registry keys, then removes them.
 - Close other PipPal instances before running. The suite fails fast if

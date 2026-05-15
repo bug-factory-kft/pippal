@@ -12,57 +12,74 @@ from pippal.ui.settings_window import SettingsWindow
 class _FakeWindow:
     def __init__(self, name: str) -> None:
         self.name = name
-        self.map_callback: Callable[[Any], None] | None = None
-        self.after_callback: Callable[[Any], None] | None = None
+        self.after_idle_callback: Callable[[], None] | None = None
 
-    def bind(self, sequence: str, callback: Callable[[Any], None]) -> None:
-        if sequence == "<Map>":
-            self.map_callback = callback
+    def after_idle(self, callback: Callable[[], None]) -> None:
+        self.after_idle_callback = callback
 
-    def after(self, _delay_ms: int, callback: Callable[[Any], None]) -> None:
-        self.after_callback = callback
+    def winfo_exists(self) -> bool:
+        return True
 
-    def fire_map(self) -> None:
-        assert self.map_callback is not None
-        self.map_callback(None)
-
-    def fire_after(self) -> None:
-        assert self.after_callback is not None
-        self.after_callback(None)
+    def fire_after_idle(self) -> None:
+        assert self.after_idle_callback is not None
+        self.after_idle_callback()
 
 
-def test_settings_chromeless_guard_is_per_toplevel(
+def test_native_dialog_frame_refreshes_rounded_corners_without_chromeless(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    calls: list[tuple[str, str]] = []
-    monkeypatch.setattr(
-        settings_window.theme,
-        "make_chromeless_keep_taskbar",
-        lambda window: calls.append(("chromeless", window.name)),
-    )
+    calls: list[str] = []
     monkeypatch.setattr(
         settings_window.theme,
         "apply_rounded_corners",
-        lambda window: calls.append(("rounded", window.name)),
+        lambda window: calls.append(window.name),
     )
 
-    sw = object.__new__(SettingsWindow)
-    first = _FakeWindow("first")
-    second = _FakeWindow("second")
+    window = _FakeWindow("settings")
 
-    sw._install_chromeless_handlers(cast(Any, first))
-    first.fire_map()
-    first.fire_after()
-    first.fire_map()
+    settings_window.theme.apply_native_dialog_frame(window)
+    window.fire_after_idle()
 
-    sw._install_chromeless_handlers(cast(Any, second))
-    second.fire_after()
-    second.fire_map()
+    assert calls == ["settings", "settings"]
 
-    assert calls == [
-        ("chromeless", "first"),
-        ("rounded", "first"),
-        ("chromeless", "second"),
-        ("rounded", "second"),
-    ]
-    assert not hasattr(sw, "_did_chromeless")
+
+def test_open_voice_manager_passes_first_run_install_callback_without_filter(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, Any] = {}
+
+    class FakeVoiceManagerDialog:
+        def __init__(
+            self,
+            parent: object,
+            *,
+            on_changed: Callable[[], None],
+            on_installed: Callable[[str], None] | None = None,
+        ) -> None:
+            captured["parent"] = parent
+            captured["on_changed"] = on_changed
+            captured["on_installed"] = on_installed
+
+    monkeypatch.setattr(settings_window, "VoiceManagerDialog", FakeVoiceManagerDialog)
+
+    class VoiceManagerParent:
+        def after(self, delay_ms: int, callback: Callable[[], None]) -> None:
+            captured["delay_ms"] = delay_ms
+            callback()
+
+        def winfo_exists(self) -> bool:
+            return True
+
+    settings = cast(Any, object.__new__(SettingsWindow))
+    settings.win = VoiceManagerParent()
+    settings._refresh_voice_list = lambda: captured.setdefault("refreshed", True)
+    installed: list[str] = []
+
+    settings._open_voice_manager(on_installed=installed.append)
+
+    assert captured["parent"] is settings.win
+    assert captured["delay_ms"] == 120
+    captured["on_changed"]()
+    captured["on_installed"]("en_US-ryan-high.onnx")
+    assert captured["refreshed"] is True
+    assert installed == ["en_US-ryan-high.onnx"]

@@ -24,6 +24,13 @@ from typing import Any, Protocol
 from . import clipboard_capture, playback, plugins
 from .engines import TTSBackend, make_backend
 from .history import add_history
+from .onboarding import (
+    SELECTED_TEXT_CAPTURE_FAILURE,
+    build_activation_readiness,
+    mark_activation_complete,
+    record_activation_failure,
+    should_show_activation_panel,
+)
 
 
 class _OverlayProto(Protocol):
@@ -71,6 +78,7 @@ class TTSEngine:
         # auto-hide timer when the user stops mid-clip.
         self._onboarding_active: bool = False
         self._onboarding_timer: threading.Timer | None = None
+        self._activation_completion_seen: bool = False
 
         self._backend: TTSBackend | None = None
         self._backend_name: str | None = None  # name we cached FOR
@@ -359,6 +367,41 @@ class TTSEngine:
         self._onboarding_timer.daemon = True
         self._onboarding_timer.start()
 
+    def _activation_is_pending(self) -> bool:
+        if self._activation_completion_seen:
+            return False
+        try:
+            pending = should_show_activation_panel()
+        except Exception:
+            return False
+        if not pending:
+            self._activation_completion_seen = True
+        return pending
+
+    def _record_activation_capture_failure(self) -> None:
+        if not self._activation_is_pending():
+            return
+        try:
+            state = record_activation_failure(SELECTED_TEXT_CAPTURE_FAILURE)
+        except Exception:
+            return
+        self._activation_completion_seen = state.is_complete
+
+    def _mark_activation_selected_text_complete(self) -> None:
+        if not self._activation_is_pending():
+            return
+        try:
+            readiness = build_activation_readiness(self.config)
+        except Exception:
+            return
+        if not readiness.is_ready:
+            return
+        try:
+            state = mark_activation_complete("selected_text")
+        except Exception:
+            return
+        self._activation_completion_seen = state.is_complete
+
     def _get_backend(self) -> TTSBackend:
         # Cache key is the *requested* engine name, NOT the concrete
         # class — when an extension-supplied engine is requested but
@@ -424,10 +467,12 @@ class TTSEngine:
         if self._is_cancelled(my_token):
             return
         if not text:
+            self._record_activation_capture_failure()
             if ov is not None:
                 ov.show_message("No text selected")
             return
 
+        self._mark_activation_selected_text_complete()
         self._remember(text)
         with self.lock:
             self.is_speaking = True
