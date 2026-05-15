@@ -63,17 +63,34 @@ exception path.
 ### Gate 3 — Foreign-app selected-text smokes (`e2e\run-ui-smokes.ps1`)
 
 - Command: `pwsh -NoProfile -ExecutionPolicy Bypass -File .\e2e\run-ui-smokes.ps1`
-- Scope: drives Notepad and Edge directly and asserts
+- Scope: drives Notepad, Edge (webpage and built-in PDF viewer), and
+  Acrobat / Adobe Reader (when installed) directly and asserts
   `pippal.clipboard_capture.capture_selection` captures the expected
   text and restores the prior clipboard. Does **not** launch the PipPal
   desktop app — this gate exclusively answers "did this release regress
-  selected-text capture in the two highest-value foreign apps?".
+  selected-text capture in the highest-value foreign apps?". Surfaces
+  proven by the smokes (see `ui-smokes-summary.json:surfaces_proven`):
+  Notepad happy + recovery (#62), Edge webpage happy (#62), Edge
+  built-in PDF viewer happy + image-only recovery (#63), Acrobat /
+  Adobe Reader happy or `unavailable` (#63).
 - Pass criteria: `ui-smokes-summary.json` reports `status=pass`,
   `exit_code=0`, `tests>0`, `failures=0`, `errors=0`, `skipped=0`.
 - Evidence directory: `.e2e\evidence\ui-smokes-<UTC>\` (see
   [Evidence Convention](#evidence-convention)).
-- Environment assumptions to record: Notepad and Edge executable paths
-  and versions as printed by the per-smoke JSON evidence.
+- Environment assumptions to record: Notepad, Edge, and Acrobat
+  executable paths and versions as printed by the per-smoke JSON
+  evidence. If Acrobat is absent on the gate machine, the run is
+  expected to record `acrobat_pdf_selected_text_unavailable.json`
+  alongside the other smokes' evidence files.
+- Waiver policy delta for PDF surfaces: an Edge PDF smoke failure is
+  non-waivable (Edge ships with Windows; capture regression here
+  blocks release). Acrobat unavailability is `unavailable`-waivable
+  per the standard [Waiver Policy](#waiver-policy) with a follow-up
+  issue against the next release. An image-only PDF returning
+  non-empty text is treated as a `fail`, not an unsupported-surface
+  pass — protected/scanned/image-only PDFs remain unsupported until
+  OCR work lands (tracked in
+  [SELECTED_TEXT_RELIABILITY.md](SELECTED_TEXT_RELIABILITY.md)).
 
 ## Evidence Convention
 

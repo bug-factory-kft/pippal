@@ -207,6 +207,105 @@ Out of scope for #62 and tracked elsewhere:
 - Live installed-app human-hotkey confirmation (`e2e/run-local.ps1`
   release gate, #42).
 
+## Issue #63 PDF Selected-Text Smokes
+
+Issue: [#63](https://github.com/bug-factory-kft/pippal/issues/63)
+
+Target release branch: `release/0.2.5`
+
+What it adds:
+
+- `tests/ui_smokes/test_pdf_smokes.py` extends the maintained UI smoke
+  harness to PDF surfaces: Edge's built-in PDF viewer with a
+  selectable-text fixture, Edge's built-in PDF viewer with an
+  image-only fixture (no text content layer), and Acrobat / Adobe
+  Reader with the same selectable-text fixture (or a structured
+  `blocked` / `unavailable` outcome when Acrobat is absent or
+  unhealthy on the gate machine).
+- PDF fixtures are synthesised at test time via `pypdf` (Helvetica
+  Type 1 font + hand-stitched `BT ... Tj ... ET` content stream).
+  No binary PDFs are checked into the repo. This matches the issue
+  #62 strategy that avoids checked-in fixture binaries.
+- The Edge PDF viewer runs in `--inprivate` mode with `--disable-sync`
+  so an already-signed-in Edge profile cannot inject a sync infobar
+  that intercepts focus before `Ctrl+A` reaches the PDF.js iframe.
+
+Surfaces covered today:
+
+| Smoke | Surface | What it asserts |
+| --- | --- | --- |
+| `test_edge_pdf_selected_text_happy_path` | Edge built-in PDF viewer, selectable text | After `Ctrl+A` in the document iframe, `capture_selection` returns the exact fixture body (after line-ending normalisation) AND restores the previous clipboard sentinel. |
+| `test_edge_pdf_image_only_records_unsupported` | Edge built-in PDF viewer, no text content layer | `capture_selection` returns the empty string AND the previous clipboard sentinel is preserved. A non-empty result here would catch a future viewer change that started returning OCR-derived text — the matrix and contract would then need to be revisited together. |
+| `test_acrobat_pdf_selected_text_or_blocked` | Acrobat / Adobe Reader, selectable text | If Acrobat is installed and reaches a titled document window, the same exact-capture / clipboard-restoration contract as the Edge happy path. If Acrobat is absent, `pytest.skip` with a structured evidence file naming the searched paths; the runner then reports `unavailable` (with `-AllowUnavailable`) or `blocked` (without). If Acrobat is present but stuck on a sign-in / EULA modal that prevents the document window from being titled, the smoke records the same `blocked` outcome with `failure_symptom` and `candidate_fix` fields. |
+
+Focus mechanism delta vs. issue #62:
+
+The original `WScript.Shell.AppActivate` focus primitive is too fuzzy
+for PDF smokes — its title matching is substring-based but does not
+require a unique match, so on a gate machine with many similarly
+titled windows it can latch onto the wrong window while still
+reporting success. PDF smokes need exact targeting because driving
+`Ctrl+A` into the wrong window would silently corrupt the user's
+clipboard. `tests/ui_smokes/_harness.py` now exposes
+`activate_window_by_exact_title_substring`, which uses
+`Get-Process` + `SetForegroundWindow` with an Alt-key
+foreground-lock bypass and then verifies `GetForegroundWindow`
+matches the target handle. The legacy
+`activate_window_by_title_fragment` now delegates to this primitive.
+
+Key-injection delta vs. issue #62:
+
+Edge's built-in PDF viewer is a Chromium PDF.js iframe and does not
+pick up `^a` / `^c` from
+`System.Windows.Forms.SendKeys.SendWait`, even when the document
+iframe has the foreground. PDF smokes use the `keyboard` Python lib
+(HID-level injection) via `send_hotkey_via_keyboard_lib` for the
+selection-driving Ctrl+A; SendKeys remains the default for non-PDF
+surfaces.
+
+Gate-machine 5-cold-run results (2026-05-15, Worker C):
+
+Environment:
+
+- Windows: Microsoft Windows 11 Pro `10.0.26100`.
+- Python: `3.14.0`.
+- Edge: `C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe`,
+  product version `148.0.3967.54`.
+- Acrobat: `C:\Program Files\Adobe\Acrobat DC\Acrobat\Acrobat.exe`,
+  product version `26.1.21529.0`. Installed but the document window
+  never published a title across 5 cold runs — likely a stuck sign-in
+  / EULA modal on this gate machine. Recorded as `blocked` with a
+  structured `candidate_fix` ("manually launch Acrobat once on the
+  gate machine, dismiss any sign-in / update prompt, then re-run").
+
+| Smoke | Run 1 | Run 2 | Run 3 | Run 4 | Run 5 |
+| --- | --- | --- | --- | --- | --- |
+| `test_edge_pdf_selected_text_happy_path` | pass | pass | pass | pass | pass |
+| `test_edge_pdf_image_only_records_unsupported` | pass | pass | pass | pass | pass |
+| `test_acrobat_pdf_selected_text_or_blocked` | blocked | blocked | blocked | blocked | blocked |
+| Existing #62 smokes (Notepad happy + recovery, Edge webpage) | pass | pass | pass | pass | pass |
+
+Edge PDF happy-path reliability: **5 / 5** cold runs green
+(threshold: ≥ 4 / 5, matching the #62 bar). Acrobat outcome stable
+across runs (always `blocked` on this gate machine).
+
+Unsupported PDF surfaces (until OCR work lands):
+
+The image-only smoke documents the current contract: PDFs with no
+text content layer (scanned documents, image-only exports,
+camera-captured PDFs) produce an empty capture. The clipboard
+sentinel is preserved, so PipPal does not destroy the user's
+clipboard when the foreground PDF has no selectable text. Protected
+PDFs that restrict text extraction are expected to behave the same
+way and are likewise unsupported until OCR work lands.
+
+OCR is out of scope for issue #63. The reliability matrix may grow
+an OCR-fed row once a Core OCR ticket lands; the open-question
+direction is tracked separately under the broader compatibility
+roadmap. The image-only smoke is the regression guard that prevents
+a viewer change from silently broadening the supported surface
+before OCR is implemented and validated.
+
 ## Issue #43 Edge Browser Smoke
 
 Worker AE ran this on `release/0.2.4` on 2026-05-14.
@@ -295,7 +394,9 @@ Legend:
 | Core benchmark: hotkey dispatch | Synthetic keyboard events | n/a | `pytest-benchmark` | Pass | `5 passed in 3.97s`; dispatch is far below hook timeout. | None. Keep as performance guard, not compatibility evidence. |
 | Notepad | Plain `.txt`, one sentence | `10.0.26100.8457` | Manual/UI repro: Windows Forms `Ctrl+A` selection, then source `capture_selection()` | Pass for source capture helper | Issue #57 established that normal Notepad copy worked while the old source capture path failed. Issue #58 fixed the pre-copy modifier release path; the patched smoke captured the exact selected sentence and restored `ISSUE58_PATCHED_PREVIOUS_CLIPBOARD`. The live installed-app human hotkey still needs confirmation because the old injected `Win+Shift+R` hotkey-manager harness was inconclusive. | Add a maintained reproducible Notepad selected-text smoke using WinAppDriver, pywinauto, or UI Automation; run a live installed-app human-hotkey confirmation. |
 | Edge webpage | Local HTML paragraph selected with DOM range | `148.0.3967.54` | Manual/UI smoke with temporary Edge profile, focused page, then source `capture_selection()` | Pass for source capture helper | Worker AE's issue #43 smoke captured the exact selected sentence and restored `ISSUE43_EDGE_PREVIOUS_CLIPBOARD`. This proves one simple Edge webpage paragraph, not browser PDFs, complex web apps, Chrome, Firefox, or the live installed-app human hotkey. | Add maintained browser automation; repeat in Chrome or Firefox; run live installed-app human-hotkey confirmation. |
-| Edge PDF | Selectable PDF text | `148.0.3967.54` | Manual hotkey on built-in PDF viewer | Not run | Needs PDF fixture and manual/browser automation. | Candidate if manual run fails: PDF viewer selection not copied within `0.6 s` deadline. |
+| Edge PDF | Selectable PDF text (issue #63) | `148.0.3967.54` | Maintained `tests/ui_smokes/test_pdf_smokes.py::test_edge_pdf_selected_text_happy_path` via `e2e/run-ui-smokes.ps1` | Pass for source capture helper | 5 / 5 cold runs green on the gate machine. PDF fixture synthesised in-test via `pypdf`. The Edge built-in PDF viewer needs HID-level Ctrl+A injection (`keyboard.send`) instead of `SendKeys` because the PDF.js iframe ignores `^a` from the SendKeys path. | None for now. Keep in release gate. |
+| Edge PDF (image-only) | PDF with no text content layer (issue #63) | `148.0.3967.54` | Maintained `tests/ui_smokes/test_pdf_smokes.py::test_edge_pdf_image_only_records_unsupported` | Pass for empty-capture contract | 5 / 5 cold runs green. Image-only / scanned PDFs return empty captured text and preserve the previous clipboard. Marketing copy must not imply PipPal can read scanned PDFs until OCR work lands. | Open Core OCR ticket to broaden coverage; until then this row is the "unsupported" guard. |
+| Acrobat / Adobe Reader | Selectable PDF text (issue #63) | `26.1.21529.0` | Maintained `tests/ui_smokes/test_pdf_smokes.py::test_acrobat_pdf_selected_text_or_blocked` | Blocked on the 2026-05-15 gate machine | Acrobat is installed but its document window never published a title across 5 cold runs — likely a stuck sign-in / EULA modal that the smoke cannot dismiss without UI Automation. The smoke records `blocked` with structured `failure_symptom` and `candidate_fix` evidence; `e2e/run-ui-smokes.ps1 -AllowUnavailable` promotes this to `unavailable`. | Manually launch Acrobat once on the gate machine, dismiss any sign-in / update prompt, then re-run the gate. If the prompt cannot be dismissed, file a follow-up issue per `docs/RELEASE_CHECKLIST.md` waiver policy. |
 | Chrome webpage | Web paragraph text | `148.0.7778.98` | Manual hotkey on focused page | Not run | Browser installed; no harness. | Candidate if manual run fails: Chrome selection copy blocked or delayed. |
 | Firefox webpage | Web paragraph text | `150.0.3` | Manual hotkey on focused page | Not run | Browser installed; no harness. | Candidate if manual run fails: Firefox selection copy blocked or delayed. |
 | Word / RichEdit substitute | Document paragraph text | `16.0.19929.20136` | Manual hotkey in editable document | Not run | Word installed; no Office automation run in this pass. | Candidate if manual run fails: Office selection copy requires longer deadline or focus recovery. |

@@ -23,7 +23,10 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=7", "pytest-benchmark>=4", "ruff>=0.5", "mypy>=1.8"]
+# ``pypdf`` is a test-only dep used by ``tests/ui_smokes`` to synthesise
+# PDF fixtures for the issue #63 PDF selected-text smokes. It is not
+# imported by ``src/pippal/*`` at runtime.
+dev = ["pytest>=7", "pytest-benchmark>=4", "ruff>=0.5", "mypy>=1.8", "pypdf>=4"]
 
 [project.scripts]
 pippal = "pippal.app:main"

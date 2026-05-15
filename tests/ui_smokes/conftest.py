@@ -98,3 +98,24 @@ def edge_exe() -> Path:
         f"msedge.exe not found in {[str(c) for c in candidates]}; "
         "Edge browser UI smoke is unavailable on this machine"
     )
+
+
+@pytest.fixture(scope="session")
+def acrobat_exe() -> Path | None:
+    """Resolve an Acrobat / Adobe Reader executable, or ``None``.
+
+    Unlike the Notepad/Edge fixtures this returns ``None`` rather than
+    skipping when no Acrobat install is found. Issue #63 requires
+    Acrobat absence to surface as an ``unavailable`` smoke result with
+    structured evidence, not as a pytest skip — the smoke itself
+    records the "Acrobat not installed" outcome via pytest.skip with a
+    machine-readable reason. Returning ``None`` here lets the smoke
+    distinguish "no Acrobat" from "Acrobat present but broken".
+    """
+
+    # Imported lazily because conftest must remain importable on
+    # non-Windows CI where the harness module pulls Windows-only
+    # subprocess assumptions when its helpers are called.
+    from . import _harness as harness
+
+    return harness.find_acrobat_exe()

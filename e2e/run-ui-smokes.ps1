@@ -3,9 +3,11 @@
 # Authoritative release-gate contract: docs/RELEASE_CHECKLIST.md
 # (this runner is Gate 3 of the Core release checklist).
 #
-# Maintained release-gate runner for issue #62. Drives Notepad and Edge
-# directly to validate `pippal.clipboard_capture.capture_selection` on
-# a real Windows desktop session.
+# Maintained release-gate runner for issues #62 and #63. Drives
+# Notepad, Edge (webpage + built-in PDF viewer), and Acrobat (when
+# installed) directly to validate
+# `pippal.clipboard_capture.capture_selection` on a real Windows
+# desktop session.
 #
 # Unlike e2e\run-local.ps1, this runner does NOT launch the PipPal
 # desktop app. It exercises only the selected-text capture helper
@@ -112,7 +114,7 @@ $pytestArgs = @(
 )
 
 @(
-    'PipPal public selected-text UI smokes (issue #62)',
+    'PipPal public selected-text UI smokes (issues #62, #63)',
     "Started: $($startedAt.ToString('o'))",
     "Command: `"$pythonExe`" $($pytestArgs -join ' ')",
     "EvidenceDir: $EvidenceDir",
@@ -144,7 +146,7 @@ try {
     }
 
     $summary = [ordered]@{
-        gate = 'pippal-public-ui-smokes-issue-62'
+        gate = 'pippal-public-ui-smokes-issues-62-63'
         status = $status
         exit_code = $finalExitCode
         pytest_exit_code = $pytestExitCode
@@ -165,7 +167,10 @@ try {
         surfaces_proven = @(
             'Notepad selected-text happy path',
             'Notepad no-selection clipboard-restoration recovery',
-            'Edge webpage selected-text happy path'
+            'Edge webpage selected-text happy path',
+            'Edge built-in PDF viewer selected-text happy path (issue #63)',
+            'Edge built-in PDF viewer image-only unsupported recovery (issue #63)',
+            'Acrobat / Adobe Reader selected-text happy path or unavailable (issue #63)'
         )
     }
     $summary | ConvertTo-Json -Depth 4 | Set-Content -Encoding utf8 -Path $summaryJson
