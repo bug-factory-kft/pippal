@@ -572,15 +572,14 @@ def main() -> None:
                 raise RuntimeError("settings window is not ready")
 
             def _open_voice_manager_from_first_run() -> None:
+                # Thin wrapper: bring the Settings window forward and
+                # delegate to its consolidated voice-manager opener.
+                # ``SettingsWindow`` auto-discovers the open first-run
+                # panel via the ``active_first_run_panel`` provider, so
+                # ``apply_installed_voice`` fires synchronously on
+                # install for every entry point.
                 settings.open()
-                current_panel = activation_panel_box[0]
-                settings._open_voice_manager(
-                    on_installed=(
-                        current_panel.apply_installed_voice
-                        if current_panel is not None
-                        else None
-                    ),
-                )
+                settings._open_voice_manager()
 
             panel = activation_panel_box[0]
             if panel is None:
@@ -966,6 +965,7 @@ def main() -> None:
         on_save=save_config,
         on_hotkey_change=bind_hotkeys,
         on_engine_change=engine.reset_backend,
+        active_first_run_panel=lambda: activation_panel_box[0],
     )
     settings_box[0] = settings
 

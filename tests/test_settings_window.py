@@ -83,3 +83,93 @@ def test_open_voice_manager_passes_first_run_install_callback_without_filter(
     captured["on_installed"]("en_US-ryan-high.onnx")
     assert captured["refreshed"] is True
     assert installed == ["en_US-ryan-high.onnx"]
+
+
+
+def test_open_voice_manager_auto_wires_open_first_run_panel_callback(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Settings-card "Manage…" path (no explicit ``on_installed``) must
+    notify any open first-run activation panel synchronously via the
+    ``active_first_run_panel`` provider — not via the 750ms readiness
+    poll added in #67. Regression for #69.
+    """
+
+    captured: dict[str, Any] = {}
+
+    class FakeVoiceManagerDialog:
+        def __init__(
+            self,
+            parent: object,
+            *,
+            on_changed: Callable[[], None],
+            on_installed: Callable[[str], None] | None = None,
+        ) -> None:
+            captured["on_installed"] = on_installed
+
+    monkeypatch.setattr(settings_window, "VoiceManagerDialog", FakeVoiceManagerDialog)
+
+    class VoiceManagerParent:
+        def after(self, delay_ms: int, callback: Callable[[], None]) -> None:
+            callback()
+
+        def winfo_exists(self) -> bool:
+            return True
+
+    applied: list[str] = []
+
+    class FakeFirstRunPanel:
+        def apply_installed_voice(self, installed_filename: str) -> None:
+            applied.append(installed_filename)
+
+    panel = FakeFirstRunPanel()
+
+    settings = cast(Any, object.__new__(SettingsWindow))
+    settings.win = VoiceManagerParent()
+    settings._refresh_voice_list = lambda: None
+    settings._active_first_run_panel = lambda: panel
+
+    # Settings card calls this with no ``on_installed`` argument.
+    settings._open_voice_manager()
+
+    assert captured["on_installed"] is not None
+    captured["on_installed"]("en_US-ryan-high.onnx")
+    assert applied == ["en_US-ryan-high.onnx"]
+
+
+def test_open_voice_manager_skips_callback_when_no_first_run_panel_open(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """When no first-run panel is open, the Settings-card path must
+    still work and pass ``on_installed=None`` to the dialog.
+    """
+
+    captured: dict[str, Any] = {}
+
+    class FakeVoiceManagerDialog:
+        def __init__(
+            self,
+            parent: object,
+            *,
+            on_changed: Callable[[], None],
+            on_installed: Callable[[str], None] | None = None,
+        ) -> None:
+            captured["on_installed"] = on_installed
+
+    monkeypatch.setattr(settings_window, "VoiceManagerDialog", FakeVoiceManagerDialog)
+
+    class VoiceManagerParent:
+        def after(self, delay_ms: int, callback: Callable[[], None]) -> None:
+            callback()
+
+        def winfo_exists(self) -> bool:
+            return True
+
+    settings = cast(Any, object.__new__(SettingsWindow))
+    settings.win = VoiceManagerParent()
+    settings._refresh_voice_list = lambda: None
+    settings._active_first_run_panel = lambda: None
+
+    settings._open_voice_manager()
+
+    assert captured["on_installed"] is None
