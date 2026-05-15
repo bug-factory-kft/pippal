@@ -50,6 +50,8 @@ class FirstRunActivationPanel:
         self._state_poll_after_id: str | None = None
         self._complete_close_after_id: str | None = None
         self._confirm_button: ttk.Button | None = None
+        self._last_rendered_status: str | None = None
+        self._last_rendered_voice_label: str | None = None
 
     def open(self) -> None:
         if self.win is not None and self.win.winfo_exists():
@@ -131,6 +133,8 @@ class FirstRunActivationPanel:
         self._build_readiness_card(frame, readiness)
         self._build_practice_card(frame, readiness)
         self._build_actions(frame, readiness)
+        self._last_rendered_status = readiness.status
+        self._last_rendered_voice_label = readiness.voice_label
         return readiness
 
     def _activation_status_text(
@@ -169,6 +173,13 @@ class FirstRunActivationPanel:
             )
             self._schedule_activation_state_poll()
             return
+        if self._readiness_changed_since_render(readiness):
+            self._sample_started = False
+            override = self._refresh_status_override(readiness)
+            self._render(override)
+            self._fit_to_content()
+            self._schedule_activation_state_poll()
+            return
         if readiness.status == READINESS_READY:
             state = load_activation_state()
             if state.is_complete:
@@ -181,6 +192,33 @@ class FirstRunActivationPanel:
                 if recovery is not None:
                     self._status_var.set(recovery)
         self._schedule_activation_state_poll()
+
+    def _readiness_changed_since_render(
+        self,
+        readiness: FirstRunReadiness,
+    ) -> bool:
+        if self._last_rendered_status is None:
+            return False
+        if readiness.status != self._last_rendered_status:
+            return True
+        if (
+            self._last_rendered_voice_label is not None
+            and readiness.voice_label != self._last_rendered_voice_label
+        ):
+            return True
+        return False
+
+    def _refresh_status_override(
+        self,
+        readiness: FirstRunReadiness,
+    ) -> str | None:
+        if readiness.status != READINESS_READY:
+            return None
+        if load_activation_state().is_complete:
+            return "Done. PipPal can read selected text on this PC."
+        return (
+            "Local voice is ready. Play the sample to finish activation."
+        )
 
     def _fit_to_content(self) -> None:
         if self.win is None or not self.win.winfo_exists():
