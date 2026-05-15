@@ -1,3 +1,9 @@
+# PipPal Public Live UI E2E Release Gate Runner
+#
+# Authoritative release-gate contract: docs/RELEASE_CHECKLIST.md
+# (this runner is Gate 2 of the Core release checklist).
+# Reviewer rule for this gate: docs/LIVE_UI_E2E_RELEASE_GATE.md
+
 [CmdletBinding()]
 param(
     [switch] $SkipSetup,

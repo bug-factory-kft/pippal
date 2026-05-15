@@ -160,9 +160,13 @@ the same API. The contract is pinned by `tests/test_plugin_host.py`.
 **Core v0.2.4 — release branch (2026-05-15).** See
 [CHANGELOG.md](CHANGELOG.md) and the
 [GitHub releases](https://github.com/bug-factory-kft/pippal/releases).
-Use `python -m pytest` and `python -m ruff check .` for the current
-local logic gate. The live Windows UI release gate is
-`.\e2e\run-local.ps1 -SkipSetup`; it writes review evidence documented in
+The authoritative Core release-gate contract for 0.2.5+ is
+[docs/RELEASE_CHECKLIST.md](docs/RELEASE_CHECKLIST.md): it names the three
+non-waivable gates (headless `python -m pytest` + ruff, live UI E2E
+`.\e2e\run-local.ps1`, foreign-app selected-text smokes
+`.\e2e\run-ui-smokes.ps1`), the evidence each must produce under
+`.e2e\evidence\<gate>-<UTC>\`, and the narrow waiver policy. The reviewer
+rule for the live UI gate is in
 [docs/LIVE_UI_E2E_RELEASE_GATE.md](docs/LIVE_UI_E2E_RELEASE_GATE.md).
 Fixed test counts live in command output, not this README.
 The historical multi-reviewer audit is in

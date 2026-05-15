@@ -1,5 +1,8 @@
 # PipPal Public Selected-Text UI Smokes Runner
 #
+# Authoritative release-gate contract: docs/RELEASE_CHECKLIST.md
+# (this runner is Gate 3 of the Core release checklist).
+#
 # Maintained release-gate runner for issue #62. Drives Notepad and Edge
 # directly to validate `pippal.clipboard_capture.capture_selection` on
 # a real Windows desktop session.
