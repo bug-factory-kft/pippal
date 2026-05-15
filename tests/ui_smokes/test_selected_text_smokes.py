@@ -230,28 +230,56 @@ def test_edge_webpage_selected_text_happy_path(
         edge_exe,
         fixture_html,
         user_data_dir=user_data_dir,
-        title=EDGE_TITLE,
     )
     started = time.monotonic()
     try:
-        # Edge is slower to start than Notepad; allow more focus attempts
-        # before failing. The fixture's <script> auto-selects the paragraph
-        # on `load`, so once we can focus the window the selection is ready.
-        focused = harness.activate_window_by_title_fragment(
-            harness.edge_window_title(EDGE_TITLE),
-            attempts=60,
+        # Wait for the fixture's JS to publish a selection-ready marker
+        # by appending ``EDGE_READY_SUFFIX`` to ``document.title``. The
+        # poll uses the msedge.exe ``MainWindowTitle``, so it does not
+        # depend on the window being focused. This replaces the prior
+        # ``time.sleep(0.6)`` settle that was the root cause of cold-
+        # start flakiness in QA.
+        ready = harness.wait_for_edge_selection_ready(EDGE_TITLE)
+        assert ready, (
+            f"Edge fixture did not publish selection-ready marker "
+            f"{harness.EDGE_READY_SUFFIX!r} on document title "
+            f"{EDGE_TITLE!r} within timeout; the renderer may have "
+            "stalled or first-run UI may be covering the page"
         )
-        assert focused, (
+
+        # Focus the Edge window after readiness, then drive the
+        # capture. If Ctrl+C raced the renderer's focus event (cold-
+        # start window where the omnibox momentarily holds focus
+        # before the page content does), re-focus and retry. The
+        # fixture's 50 ms JS interval keeps the selection range live
+        # across the focus juggling, so each retry only needs to win
+        # the focus event before the clipboard read.
+        captured = ""
+        clipboard_after = ""
+        last_focused = False
+        for attempt in range(5):
+            last_focused = harness.activate_window_by_title_fragment(
+                harness.edge_window_title(EDGE_TITLE),
+                attempts=60,
+            )
+            if not last_focused:
+                continue
+            if attempt > 0:
+                # On retry: Ctrl+F6 cycles Edge's focus into the web
+                # content area, which is where Ctrl+C must land for the
+                # selection to be copied. The fixture's 50 ms JS
+                # interval re-asserts the selection range immediately
+                # after, so this is a deterministic recovery from a
+                # stuck-on-omnibox cold start rather than a sleep.
+                harness.send_keys_to_foreground("^{F6}")
+            captured, clipboard_after = harness.capture_with_sentinel_clipboard(
+                sentinel=EDGE_SENTINEL,
+            )
+            if captured == EDGE_TEXT:
+                break
+        assert last_focused, (
             f"Edge window titled {EDGE_TITLE!r} did not accept focus; "
             "Edge may have shown a sign-in / first-run prompt over the page"
-        )
-
-        # Give Edge's renderer a moment to actually paint and run the
-        # selection script — the AppActivate hit may race the load event.
-        time.sleep(0.6)
-
-        captured, clipboard_after = harness.capture_with_sentinel_clipboard(
-            sentinel=EDGE_SENTINEL,
         )
 
         evidence = harness.SmokeEvidence(
@@ -268,8 +296,12 @@ def test_edge_webpage_selected_text_happy_path(
             clipboard_restored=(clipboard_after == EDGE_SENTINEL),
             duration_s=time.monotonic() - started,
             extra={
-                "selection_method": "window.getSelection() + DOM range on load",
-                "focus_method": "AppActivate",
+                "selection_method": (
+                    "window.getSelection() + DOM range on load, "
+                    "re-applied by 50 ms interval"
+                ),
+                "selection_ready_signal": "document.title suffix poll",
+                "focus_method": "AppActivate + focus-retry capture loop",
                 "user_data_dir": str(user_data_dir),
             },
         )

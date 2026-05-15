@@ -27,7 +27,6 @@ from __future__ import annotations
 import os
 import platform
 import shutil
-import sys
 from pathlib import Path
 
 import pytest
@@ -99,8 +98,3 @@ def edge_exe() -> Path:
         f"msedge.exe not found in {[str(c) for c in candidates]}; "
         "Edge browser UI smoke is unavailable on this machine"
     )
-
-
-@pytest.fixture(scope="session")
-def python_executable() -> str:
-    return sys.executable

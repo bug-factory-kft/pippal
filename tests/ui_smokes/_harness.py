@@ -195,6 +195,9 @@ def notepad_window_title(fixture_path: Path) -> str:
 # ---------------------------------------------------------------------------
 
 
+EDGE_READY_SUFFIX = " [PIPPAL_SELECTION_READY]"
+
+
 EDGE_HTML_TEMPLATE = """<!doctype html>
 <html lang="en">
 <head>
@@ -205,18 +208,59 @@ body {{ font: 16px/1.5 system-ui, sans-serif; margin: 2em; }}
 #smoke {{ background: #ffe; padding: 0.5em 1em; border: 1px solid #cc9; }}
 </style>
 </head>
-<body>
+<body tabindex="-1">
 <h1>{title}</h1>
-<p id="smoke">{sentence}</p>
+<p id="smoke" tabindex="-1">{sentence}</p>
 <script>
-window.addEventListener('load', function () {{
-  var node = document.getElementById('smoke');
-  var range = document.createRange();
-  range.selectNodeContents(node);
-  var sel = window.getSelection();
-  sel.removeAllRanges();
-  sel.addRange(range);
-}});
+(function () {{
+  var BASE_TITLE = {title_json};
+  var EXPECTED = {sentence_json};
+  var READY_SUFFIX = {ready_suffix_json};
+  var ready = false;
+
+  function applySelection() {{
+    var node = document.getElementById('smoke');
+    if (!node) {{ return false; }}
+    // Pull keyboard focus into the body so ``Ctrl+C`` lands on the
+    // document context (not the omnibox) when Edge's window is just
+    // brought to the foreground. Without this, AppActivate may leave
+    // focus on a chrome widget on cold start.
+    try {{ window.focus(); }} catch (e) {{ /* ignore */ }}
+    try {{ document.body.focus(); }} catch (e) {{ /* ignore */ }}
+    var sel = window.getSelection();
+    if (!sel) {{ return false; }}
+    if (sel.toString() === EXPECTED) {{ return true; }}
+    var range = document.createRange();
+    range.selectNodeContents(node);
+    sel.removeAllRanges();
+    sel.addRange(range);
+    return sel.toString() === EXPECTED;
+  }}
+
+  function markReady() {{
+    if (ready) {{ return; }}
+    ready = true;
+    document.body.setAttribute('data-selection-ready', 'true');
+    window.__pippalSelectionReady = true;
+    document.title = BASE_TITLE + READY_SUFFIX;
+  }}
+
+  function tick() {{
+    if (applySelection()) {{ markReady(); }}
+  }}
+
+  // Re-apply the selection forever at a low cadence so the page is
+  // ready for ``Ctrl+C`` even after Edge's omnibox <-> page focus
+  // juggling on cold start.
+  if (document.readyState === 'complete') {{
+    tick();
+  }} else {{
+    window.addEventListener('load', tick);
+  }}
+  window.addEventListener('focus', tick, true);
+  document.addEventListener('visibilitychange', tick);
+  window.setInterval(tick, 50);
+}})();
 </script>
 </body>
 </html>
@@ -224,12 +268,32 @@ window.addEventListener('load', function () {{
 
 
 def write_edge_fixture(fixture_dir: Path, title: str, sentence: str) -> Path:
-    """Write a self-selecting local HTML fixture and return its path."""
+    """Write a self-selecting local HTML fixture and return its path.
+
+    The fixture's inline script re-tries ``window.getSelection()`` until
+    the selection matches the expected sentence, then publishes a
+    readiness marker by:
+
+    - setting ``document.body[data-selection-ready="true"]``;
+    - setting ``window.__pippalSelectionReady = true``;
+    - appending ``EDGE_READY_SUFFIX`` to ``document.title``.
+
+    The Python harness polls the window title (via
+    ``wait_for_edge_selection_ready``) instead of sleeping, which is
+    what the smoke uses to know the renderer has actually applied the
+    selection before ``Ctrl+C`` is driven into it.
+    """
 
     fixture_dir.mkdir(parents=True, exist_ok=True)
     html_path = fixture_dir / "edge-selected-text-smoke.html"
     html_path.write_text(
-        EDGE_HTML_TEMPLATE.format(title=title, sentence=sentence),
+        EDGE_HTML_TEMPLATE.format(
+            title=title,
+            sentence=sentence,
+            title_json=json.dumps(title),
+            sentence_json=json.dumps(sentence),
+            ready_suffix_json=json.dumps(EDGE_READY_SUFFIX),
+        ),
         encoding="utf-8",
     )
     return html_path
@@ -240,14 +304,15 @@ def launch_edge(
     fixture_html: Path,
     *,
     user_data_dir: Path,
-    title: str,
 ) -> subprocess.Popen[bytes]:
     """Launch Edge with a throwaway profile pointed at the local fixture.
 
     Using a dedicated ``--user-data-dir`` keeps the smoke off the
     user's real profile (no signed-in account, no extensions, no
     cached state). ``--new-window`` ensures we don't get glued onto
-    an already-open Edge instance the user happens to have.
+    an already-open Edge instance the user happens to have. Window
+    discovery is driven by ``activate_window_by_title_fragment``
+    matching against the HTML document's ``<title>``.
     """
 
     user_data_dir.mkdir(parents=True, exist_ok=True)
@@ -260,7 +325,6 @@ def launch_edge(
             "--no-first-run",
             "--no-default-browser-check",
             "--disable-features=msEdgeWelcomePage",
-            f"--window-name={title}",
             file_url,
         ]
     )
@@ -274,6 +338,47 @@ def edge_window_title(title: str) -> str:
     """
 
     return title
+
+
+def wait_for_edge_selection_ready(
+    title: str,
+    *,
+    timeout_s: float = 10.0,
+    poll_interval_s: float = 0.1,
+) -> bool:
+    """Poll Edge's window title until the fixture publishes its readiness marker.
+
+    The local HTML fixture rewrites ``document.title`` to append
+    ``EDGE_READY_SUFFIX`` once ``window.getSelection().toString()``
+    matches the expected sentence (see ``EDGE_HTML_TEMPLATE``). Edge
+    reflects that change into the OS window title, which the Python
+    side observes via ``MainWindowTitle`` on the msedge.exe process
+    tree — the same primitive ``force_close_notepad_for`` uses.
+
+    Replaces the prior ``time.sleep(0.6)`` settle in the Edge smoke,
+    which was the root cause of the cold-start flakiness flagged in
+    QA on the second workstation.
+    """
+
+    # PowerShell's ``-like`` treats ``[`` and ``]`` as wildcard character
+    # classes, so the ``[PIPPAL_SELECTION_READY]`` suffix would never
+    # match itself. Use ``-match`` against an escaped regex literal.
+    needle = (title + EDGE_READY_SUFFIX).replace("'", "''")
+    script = (
+        "Get-Process -Name msedge -ErrorAction SilentlyContinue | "
+        "Where-Object { $_.MainWindowTitle } | "
+        f"Where-Object {{ $_.MainWindowTitle -match [regex]::Escape('{needle}') }} | "
+        "Select-Object -First 1 | "
+        "ForEach-Object { Write-Output 'READY' }"
+    )
+
+    deadline = time.monotonic() + timeout_s
+    while time.monotonic() < deadline:
+        result = run_powershell(script, timeout=10.0)
+        if result.returncode == 0 and "READY" in result.stdout:
+            return True
+        time.sleep(poll_interval_s)
+    return False
 
 
 # ---------------------------------------------------------------------------
@@ -356,6 +461,7 @@ def write_initial_clipboard(value: str) -> None:
 # Public re-exports for tests.
 __all__ = [
     "EDGE_HTML_TEMPLATE",
+    "EDGE_READY_SUFFIX",
     "SmokeEvidence",
     "StubCaptureEngine",
     "activate_window_by_title_fragment",
@@ -369,6 +475,7 @@ __all__ = [
     "notepad_window_title",
     "run_powershell",
     "send_keys_to_foreground",
+    "wait_for_edge_selection_ready",
     "write_edge_fixture",
     "write_initial_clipboard",
 ]
