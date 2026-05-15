@@ -161,6 +161,52 @@ in this local smoke while still restoring the previous clipboard. The
 remaining gap is a maintained automated UI smoke and a live installed-app
 human-hotkey confirmation.
 
+## Issue #62 Maintained Notepad and Edge UI Smokes
+
+Issue: [#62](https://github.com/bug-factory-kft/pippal/issues/62)
+
+Target release branch: `release/0.2.5`
+
+What it adds:
+
+- `tests/ui_smokes/test_selected_text_smokes.py` drives Notepad and
+  Edge directly and asserts that
+  `pippal.clipboard_capture.capture_selection` captured the exact
+  selected text *and* restored the previous clipboard.
+- `e2e/run-ui-smokes.ps1` is the maintained runner. It writes a
+  `ui-smokes-summary.json`, a per-smoke `<smoke_id>.json` evidence
+  file (app version, fixture path, captured text, clipboard
+  restoration), `pytest-ui-smokes.junit.xml`, and `pytest-ui-smokes.log`
+  under `.e2e\evidence\ui-smokes-<UTC timestamp>\`.
+
+Surfaces covered today:
+
+- Notepad happy path: temp `.txt` fixture, `WScript.Shell.AppActivate`
+  focus, `SendKeys ^a` selection, then `capture_selection`.
+- Notepad known-bad-state recovery: same fixture, collapsed selection
+  (`{END}{HOME}`), then `capture_selection`. Asserts empty result and
+  that the clipboard sentinel survives.
+- Edge webpage happy path: local HTML fixture that DOM-selects a
+  paragraph on `window.load`, throwaway `--user-data-dir`,
+  `AppActivate` focus, then `capture_selection`.
+
+Gating:
+
+- `python -m pytest` does NOT run the UI smokes by default (the dir is
+  in `addopts --ignore=tests/ui_smokes`).
+- `tests/ui_smokes/conftest.py` skips when `platform.system() != 'Windows'`
+  or `PIPPAL_UI_SMOKES != '1'`.
+- `e2e/run-ui-smokes.ps1` sets `PIPPAL_UI_SMOKES=1` and treats a
+  zero-test / all-skipped run as `blocked` unless `-AllowUnavailable`
+  is explicitly passed (matches `e2e/run-local.ps1`).
+
+Out of scope for #62 and tracked elsewhere:
+
+- PDF surfaces (#63).
+- Editor / terminal / chat surfaces (#61).
+- Live installed-app human-hotkey confirmation (`e2e/run-local.ps1`
+  release gate, #42).
+
 ## Issue #43 Edge Browser Smoke
 
 Worker AE ran this on `release/0.2.4` on 2026-05-14.
