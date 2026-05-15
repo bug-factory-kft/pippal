@@ -542,3 +542,87 @@ def test_missing_piper_repair_state_actions_are_reachable_without_exit(
 
     assert opened == ["setup", "settings"]
     assert panel.win.winfo_exists()
+
+
+def _run_after_calls_with_delay(root: _FakeRoot, delay_ms: int) -> int:
+    """Drain every ``root.after(delay_ms, ...)`` scheduled so far and
+    return how many callbacks fired. New ``after`` calls scheduled by
+    those callbacks (e.g. the next poll tick) stay queued for the next
+    drain — this lets a test step the poll loop one tick at a time.
+    """
+    pending = [call for call in root.after_calls if call[0] == delay_ms]
+    for call in pending:
+        root.after_calls.remove(call)
+    for _delay, callback, args in pending:
+        callback(*args)
+    return len(pending)
+
+
+def test_first_run_panel_refreshes_after_settings_driven_voice_install(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Settings → Voice Manager install must refresh the first-run panel
+    without a manual restart, even when no ``on_installed`` callback is
+    wired (the Settings card opens Voice Manager directly).
+    """
+    buttons = _install_headless_tk(monkeypatch)
+    piper_exe = tmp_path / "piper.exe"
+    piper_exe.write_bytes(b"exe")
+    voices_dir = tmp_path / "voices"
+    state_path = tmp_path / "first_run_activation.json"
+    non_default_voice = "en_GB-alan-low.onnx"
+    config = {
+        "engine": "piper",
+        "voice": "en_US-ryan-high.onnx",
+        "hotkey_speak": "windows+shift+r",
+    }
+
+    def build_readiness(config_values: dict[str, Any]) -> onboarding.FirstRunReadiness:
+        return onboarding.build_activation_readiness(
+            config_values,
+            piper_exe=piper_exe,
+            voices_dir=voices_dir,
+        )
+
+    monkeypatch.setattr(activation_panel, "build_activation_readiness", build_readiness)
+    monkeypatch.setattr(
+        activation_panel,
+        "load_activation_state",
+        lambda: onboarding.load_activation_state(path=state_path),
+    )
+
+    root = _FakeRoot()
+    panel = activation_panel.FirstRunActivationPanel(
+        root,
+        config,
+        on_play_sample=lambda _text: None,
+        on_open_settings=lambda: None,
+        on_open_voice_manager=lambda: None,
+        on_open_setup=lambda: None,
+    )
+
+    panel.open()
+
+    assert panel._status_var.get().startswith("No local voice is installed yet.")
+    _button(buttons, "Install default voice")
+    with pytest.raises(AssertionError, match="missing visible button"):
+        _button(buttons, "Play sample")
+
+    # Settings-driven install: a non-default voice lands in voices_dir
+    # without any ``apply_installed_voice`` callback being invoked,
+    # because the user reached Voice Manager through the Settings card.
+    voices_dir.mkdir(parents=True, exist_ok=True)
+    (voices_dir / non_default_voice).write_bytes(b"voice")
+    (voices_dir / f"{non_default_voice}.json").write_text("{}", encoding="utf-8")
+
+    fired = _run_after_calls_with_delay(root, 750)
+    assert fired == 1, "activation panel never polled for readiness"
+
+    _button(buttons, "Play sample")
+    _button(buttons, "Finish setup")
+    with pytest.raises(AssertionError, match="missing visible button"):
+        _button(buttons, "Install default voice")
+    assert panel._status_var.get() == (
+        "Local voice is ready. Play the sample to finish activation."
+    )
