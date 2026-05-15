@@ -6,7 +6,7 @@ from __future__ import annotations
 import tkinter as tk
 from collections.abc import Callable
 from tkinter import messagebox, ttk
-from typing import Any
+from typing import Any, Protocol
 
 from .. import plugins
 from ..context_menu import (
@@ -20,6 +20,17 @@ from .theme import UI
 from .voice_manager import VoiceManagerDialog
 
 
+class _FirstRunPanel(Protocol):
+    """Subset of :class:`FirstRunActivationPanel` the Settings window
+    needs to notify when a voice is installed via the Voice Manager.
+
+    Declared as a Protocol to avoid a circular import between
+    ``settings_window`` and ``activation_panel``.
+    """
+
+    def apply_installed_voice(self, installed_filename: str) -> None: ...
+
+
 class SettingsWindow:
     def __init__(
         self,
@@ -28,12 +39,20 @@ class SettingsWindow:
         on_save: Callable[[dict[str, Any]], None],
         on_hotkey_change: Callable[[], list[tuple[str, str, str]] | None],
         on_engine_change: Callable[[], None] | None = None,
+        active_first_run_panel: Callable[[], _FirstRunPanel | None] | None = None,
     ) -> None:
         self.root = root
         self.config = config
         self.on_save = on_save
         self.on_hotkey_change = on_hotkey_change
         self.on_engine_change = on_engine_change
+        # Provider that returns the currently open first-run activation
+        # panel (or ``None``). Used by ``_open_voice_manager`` to wire
+        # the ``on_installed`` callback automatically so every entry
+        # point — Settings card "Manage…" and the first-run "Open Voice
+        # Manager" button — notifies the panel synchronously rather
+        # than relying on the readiness poll.
+        self._active_first_run_panel = active_first_run_panel
         self.win: tk.Toplevel | None = None
         self.vars: dict[str, tk.Variable] = {}
         # Remember last window position so the user reopens it where
@@ -313,6 +332,19 @@ class SettingsWindow:
         *,
         on_installed: Callable[[str], None] | None = None,
     ) -> None:
+        # When the caller didn't pass an explicit ``on_installed``
+        # callback, fall back to notifying any open first-run
+        # activation panel. This keeps every Voice Manager entry
+        # point — Settings card "Manage…" and first-run "Open Voice
+        # Manager" — consistent: the panel refreshes synchronously on
+        # install rather than waiting for the readiness poll tick.
+        if on_installed is None:
+            provider = getattr(self, "_active_first_run_panel", None)
+            if provider is not None:
+                panel = provider()
+                if panel is not None:
+                    on_installed = panel.apply_installed_voice
+
         def _show_voice_manager() -> None:
             if self.win is None:
                 return
