@@ -16,7 +16,7 @@ from ..context_menu import (
 )
 from ..voices import installed_voices
 from . import theme
-from .theme import UI, apply_dark_theme
+from .theme import UI
 from .voice_manager import VoiceManagerDialog
 
 
@@ -39,9 +39,6 @@ class SettingsWindow:
         # Remember last window position so the user reopens it where
         # they left it. None on first open → screen-centre fallback.
         self._last_position: tuple[int, int] | None = None
-        # PhotoImage for the title-bar icon. Has to outlive the window
-        # so Tk doesn't garbage-collect the bitmap mid-render.
-        self._title_icon_photo: Any = None
         # Wheel handler reference so the post-build pass can reuse it.
         self._wheel_handler: Callable[[tk.Event], str] | None = None
 
@@ -55,29 +52,21 @@ class SettingsWindow:
             self.win.focus_force()
             return
 
-        w = tk.Toplevel(self.root)
-        self.win = w
-        w.title(self.config.get("brand_name", "PipPal"))
-        # Compute initial geometry: last-known position, otherwise
-        # centre on the screen the root window is on.
         win_w, win_h = 600, 700
-        if self._last_position is not None:
-            x, y = self._last_position
-        else:
-            sw = w.winfo_screenwidth()
-            sh = w.winfo_screenheight()
-            x = max(0, (sw - win_w) // 2)
-            y = max(0, (sh - win_h) // 2)
-        w.geometry(f"{win_w}x{win_h}+{x}+{y}")
-        w.minsize(560, 600)
-        apply_dark_theme(w)
-        self._install_chromeless_handlers(w)
-        # The chromeless window has no system menu; bind Esc + Alt+F4
-        # so the user has both standard ways to close it.
+        w = theme.create_native_dialog(
+            self.root,
+            title=str(self.config.get("brand_name", "PipPal")),
+            width=win_w,
+            height=win_h,
+            minsize=(560, 600),
+            origin=self._last_position,
+        )
+        self.win = w
+        # Keep Escape as a quick dialog close shortcut; Alt+F4 is
+        # still handled by the native Windows title bar.
         w.bind("<Escape>", lambda _e: self._close())
         w.bind("<Alt-F4>", lambda _e: self._close())
 
-        self._build_header(w)
         body = self._build_scrollable_body(w)
         # Cards are registered into the plugin host (pippal.plugins) by
         # whichever package supplies them — the core pippal package
@@ -94,32 +83,7 @@ class SettingsWindow:
         self._build_footer(w)
 
         w.protocol("WM_DELETE_WINDOW", self._close)
-
-    def _install_chromeless_handlers(self, w: tk.Toplevel) -> None:
-        # Hide the native title bar via the canonical Win32 WndProc
-        # subclass — WM_NCCALCSIZE returns 0 so Windows treats the
-        # whole window as client area, no caption strip drawn. The
-        # window remains a normal app window from the WM's view, so
-        # taskbar / Alt+Tab / focus all keep working.
-        #
-        # Tk creates the HWND lazily; firing on `<Map>` (the moment
-        # the window becomes visible) is more reliable than a blind
-        # `after(10, ...)` timer. The guard is scoped to this specific
-        # Toplevel, so a later Settings reopen gets its own setup pass.
-        did_chromeless = False
-
-        def _apply_chromeless(_e: tk.Event | None = None) -> None:
-            nonlocal did_chromeless
-            if did_chromeless:
-                return
-            did_chromeless = True
-            theme.make_chromeless_keep_taskbar(w)
-            theme.apply_rounded_corners(w)
-
-        w.bind("<Map>", _apply_chromeless)
-        # Also fire after 50 ms in case the window is mapped before
-        # the binding takes effect (race-y on some Tk builds).
-        w.after(50, _apply_chromeless)
+        theme.show_native_dialog(w)
 
     def _close(self) -> None:
         if self.win is not None:
@@ -138,61 +102,11 @@ class SettingsWindow:
     # UI construction helpers
     # ------------------------------------------------------------------
 
-    def _build_header(self, w: tk.Toplevel) -> None:
-        brand = self.config.get("brand_name", "PipPal")
-        header = ttk.Frame(w, style="Header.TFrame", padding=(24, 14, 8, 14))
-        header.pack(fill="x")
 
-        # Custom-titlebar window controls. Just a close button — this
-        # is a fixed-size dialog, no min/max needed. Pack it first so
-        # the title row gets `expand=True` and the ✕ stays right-edge.
-        ttk.Button(
-            header, text="✕", style="TitleClose.TButton",
-            command=self._close, width=3, takefocus=False,
-        ).pack(side="right", padx=(0, 4))
-
-        title_row = ttk.Frame(header, style="Header.TFrame")
-        title_row.pack(side="left", fill="x", expand=True)
-
-        # PipPal logo in the custom title bar — same asset as the
-        # tray, downscaled to ~22 px for the header. We hold the
-        # PhotoImage on `self` so Tk doesn't GC it under the window.
-        try:
-            from PIL import Image, ImageTk
-
-            from ..tray import _load_and_fit_icon
-            _lanczos = getattr(Image, "Resampling", Image).LANCZOS
-            icon_64 = _load_and_fit_icon()
-            icon_22 = icon_64.resize((22, 22), _lanczos)
-            self._title_icon_photo = ImageTk.PhotoImage(icon_22)
-            tk.Label(
-                title_row, image=self._title_icon_photo,
-                bg=UI["bg"], borderwidth=0,
-            ).pack(side="left", padx=(0, 10))
-        except Exception:
-            # Fallback: the previous accent-coloured dot, in case the
-            # asset / Pillow ImageTk is unavailable for any reason.
-            dot = tk.Canvas(title_row, width=14, height=14,
-                            bg=UI["bg"], highlightthickness=0)
-            dot.create_oval(2, 2, 12, 12, fill=UI["accent"], outline="")
-            dot.pack(side="left", padx=(0, 10))
-        ttk.Label(title_row, text=brand, style="Title.TLabel").pack(side="left")
-        # Inline subtitle next to the brand, baseline-shifted so it
-        # sits one row with the brand and the right-side ✕ button
-        # rather than dangling below them.
-        ttk.Label(
-            title_row, text="Settings", style="Sub.TLabel",
-        ).pack(side="left", padx=(10, 0), pady=(7, 0))
-
-        # Native title bar is hidden — without `enable_drag_to_move`
-        # the user couldn't move the window. Drag handlers go on the
-        # whole header; clicks on the ✕ button or any interactive
-        # widget pass through unaffected.
-        theme.enable_drag_to_move(w, header)
 
     def _build_scrollable_body(self, w: tk.Toplevel) -> ttk.Frame:
         body_outer = ttk.Frame(w, style="TFrame")
-        body_outer.pack(fill="both", expand=True, padx=20)
+        body_outer.pack(fill="both", expand=True, padx=20, pady=(20, 0))
         canvas = tk.Canvas(body_outer, bg=UI["bg"], highlightthickness=0)
         canvas.pack(side="left", fill="both", expand=True)
         sb = ttk.Scrollbar(body_outer, orient="vertical", command=canvas.yview,
@@ -394,8 +308,31 @@ class SettingsWindow:
         self._refresh_ctx_status()
 
 
-    def _open_voice_manager(self) -> None:
-        VoiceManagerDialog(self.win, on_changed=self._refresh_voice_list)
+    def _open_voice_manager(
+        self,
+        *,
+        on_installed: Callable[[str], None] | None = None,
+    ) -> None:
+        def _show_voice_manager() -> None:
+            if self.win is None:
+                return
+            try:
+                if not self.win.winfo_exists():
+                    return
+            except Exception:
+                return
+            VoiceManagerDialog(
+                self.win,
+                on_changed=self._refresh_voice_list,
+                on_installed=on_installed,
+            )
+
+        if self.win is None:
+            return
+        try:
+            self.win.after(120, _show_voice_manager)
+        except Exception:
+            _show_voice_manager()
 
     # ------------------------------------------------------------------
     # Save / Apply / Reset

@@ -122,7 +122,7 @@ def build_speech_card(sw: SettingsWindow, body: ttk.Frame) -> None:
     ttk.Label(card,
               text="Speed: 0.6× clearer · 1.0× normal · 1.7× faster.   "
                    "Variation: livelier intonation at higher values.",
-              style="CardHint.TLabel", wraplength=500, justify="left",
+              style="CardHint.TLabel", wraplength=430, justify="left",
               ).pack(anchor="w", pady=(10, 0))
 
 
@@ -147,7 +147,7 @@ def build_hotkeys_card(sw: SettingsWindow, body: ttk.Frame) -> None:
     ttk.Label(card,
               text="Format: windows+shift+r · ctrl+alt+space · alt+shift+f1 …  "
                    "Captured combos are suppressed (other apps won't also see them).",
-              style="CardHint.TLabel", wraplength=480, justify="left",
+              style="CardHint.TLabel", wraplength=430, justify="left",
               ).pack(anchor="w", pady=(10, 0))
 
 

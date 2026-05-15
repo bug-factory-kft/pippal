@@ -157,9 +157,9 @@ the same API. The contract is pinned by `tests/test_plugin_host.py`.
 
 ## Status
 
-**Core v0.2.3 — public release (2026-05-13).** See
+**Core v0.2.4 — release branch (2026-05-15).** See
 [CHANGELOG.md](CHANGELOG.md) and the
-[GitHub release](https://github.com/bug-factory-kft/pippal/releases/tag/v0.2.3).
+[GitHub releases](https://github.com/bug-factory-kft/pippal/releases).
 Use `python -m pytest` and `python -m ruff check .` for the current
 local logic gate. The live Windows UI release gate is
 `.\e2e\run-local.ps1 -SkipSetup`; it writes review evidence documented in

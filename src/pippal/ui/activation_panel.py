@@ -20,7 +20,8 @@ from ..onboarding import (
     load_activation_state,
     mark_activation_complete,
 )
-from .theme import UI, apply_dark_theme, make_card
+from . import theme
+from .theme import UI, make_card
 from .voice_manager import install_piper_voice
 
 
@@ -47,6 +48,8 @@ class FirstRunActivationPanel:
         self._sample_started = False
         self._installing_default_voice = False
         self._state_poll_after_id: str | None = None
+        self._complete_close_after_id: str | None = None
+        self._confirm_button: ttk.Button | None = None
 
     def open(self) -> None:
         if self.win is not None and self.win.winfo_exists():
@@ -56,21 +59,28 @@ class FirstRunActivationPanel:
 
         self._sample_started = False
 
-        w = tk.Toplevel(self.root)
+        w = theme.create_native_dialog(
+            self.root,
+            title=str(self.config.get("brand_name", "PipPal")),
+            width=520,
+            height=420,
+            resizable=(False, False),
+            placement="screen-upper",
+        )
         self.win = w
-        w.title("PipPal - First-run check")
-        w.resizable(False, False)
         w.protocol("WM_DELETE_WINDOW", self._close)
-        apply_dark_theme(w)
-
+        if hasattr(w, "bind"):
+            w.bind("<Escape>", lambda _event: self._close())
+            w.bind("<Alt-F4>", lambda _event: self._close())
         frame = ttk.Frame(w, style="TFrame", padding=(22, 20, 22, 20))
         frame.pack(fill="both", expand=True)
         self._frame = frame
         self._render()
         self._schedule_activation_state_poll()
         self._fit_to_content()
-        w.deiconify()
-        w.lift()
+        theme.show_native_dialog(w)
+
+
 
     def _render(self, status_override: str | None = None) -> FirstRunReadiness:
         readiness = build_activation_readiness(self.config)
@@ -90,20 +100,22 @@ class FirstRunActivationPanel:
             )
         self._status_var.set(status_text)
 
-        title = (
-            "PipPal needs a local reading engine"
-            if readiness.status == READINESS_MISSING_PIPER
-            else "PipPal is ready to read locally"
-        )
-        subtitle = (
-            "The tray app is running so you can repair setup or switch engines."
-            if readiness.status == READINESS_MISSING_PIPER
-            else (
+        if readiness.status == READINESS_MISSING_PIPER:
+            title = "PipPal needs a local reading engine"
+            subtitle = "The tray app is running so you can repair setup or switch engines."
+        elif readiness.status == READINESS_MISSING_VOICE:
+            title = "PipPal needs a local voice"
+            subtitle = (
+                "Install an offline voice before the first reading test.\n"
+                "No account. No telemetry. No cloud TTS."
+            )
+        else:
+            title = "PipPal is ready to read locally"
+            subtitle = (
                 "PipPal reads selected text aloud on this PC.\n"
                 "No account. No telemetry. No cloud TTS.\n"
                 "Let's make sure you can hear it now."
             )
-        )
         ttk.Label(
             frame,
             text=title,
@@ -176,8 +188,12 @@ class FirstRunActivationPanel:
         self.win.update_idletasks()
         width = max(520, self.win.winfo_reqwidth())
         height = self.win.winfo_reqheight()
-        x = max((self.win.winfo_screenwidth() - width) // 2, 0)
-        y = max((self.win.winfo_screenheight() - height) // 3, 0)
+        x, y = theme.dialog_origin_on_screen(
+            self.win,
+            width,
+            height,
+            y_divisor=3,
+        )
         self.win.geometry(f"{width}x{height}+{x}+{y}")
 
     def _build_readiness_card(
@@ -237,6 +253,7 @@ class FirstRunActivationPanel:
         parent: tk.Misc,
         readiness: FirstRunReadiness,
     ) -> None:
+        self._confirm_button = None
         row = ttk.Frame(parent, style="TFrame")
         row.pack(fill="x")
 
@@ -279,16 +296,47 @@ class FirstRunActivationPanel:
                 self._set_buttons_state("disabled")
             return
 
+        if load_activation_state().is_complete:
+            ttk.Button(
+                row,
+                text="Close",
+                style="Primary.TButton",
+                command=self._close,
+            ).pack(side="right")
+            ttk.Button(
+                row,
+                text="Open Settings",
+                command=self.on_open_settings,
+            ).pack(side="right", padx=(0, 8))
+            ttk.Button(
+                row,
+                text="Play sample again",
+                command=lambda: self._play_sample(readiness),
+            ).pack(side="right", padx=(0, 8))
+            return
+
+        play_label = "Play sample again" if self._sample_started else "Play sample"
+        play_style = "TButton" if self._sample_started else "Primary.TButton"
+        finish_style = "Primary.TButton" if self._sample_started else "TButton"
         ttk.Button(
             row,
-            text="Play sample",
-            style="Primary.TButton",
+            text=play_label,
+            style=play_style,
             command=lambda: self._play_sample(readiness),
         ).pack(side="right")
-        ttk.Button(row, text="Yes, continue", command=self._confirm_sample).pack(
+        confirm = ttk.Button(
+            row,
+            text="Finish setup",
+            style=finish_style,
+            command=self._confirm_sample,
+        )
+        confirm.pack(
             side="right",
             padx=(0, 8),
         )
+        self._confirm_button = confirm
+        if not self._sample_started:
+            confirm.config(state="disabled")
         ttk.Button(row, text="Open Settings", command=self.on_open_settings).pack(
             side="right",
             padx=(0, 8),
@@ -356,13 +404,35 @@ class FirstRunActivationPanel:
             messagebox.showerror("Voice install failed", f"{status}\n\n{error}", parent=self.win)
             return
 
+        self._finish_voice_install(
+            installed_filename=installed_filename,
+            status=(
+                "Default English voice installed for offline reading. "
+                "Play the sample to finish activation."
+            ),
+        )
+
+    def apply_installed_voice(self, installed_filename: str) -> None:
+        if self.win is None or not self.win.winfo_exists():
+            return
+        self._finish_voice_install(
+            installed_filename=installed_filename,
+            status=(
+                "Voice installed from Voice Manager. "
+                "Play the sample to finish activation."
+            ),
+        )
+
+    def _finish_voice_install(
+        self,
+        *,
+        installed_filename: str | None,
+        status: str,
+    ) -> None:
         if installed_filename is not None:
             self.config["voice"] = installed_filename
         self._sample_started = False
-        self._render(
-            "Default English voice installed for offline reading. "
-            "Play the sample to finish activation."
-        )
+        self._render(status)
         self._fit_to_content()
 
     def _play_sample(self, readiness: FirstRunReadiness) -> None:
@@ -370,7 +440,15 @@ class FirstRunActivationPanel:
             self._status_var.set(readiness.message)
             return
         self._sample_started = True
-        self._status_var.set("Playing sample...")
+        if load_activation_state().is_complete:
+            status = "Playing sample again. PipPal is already set up."
+        else:
+            status = "Playing sample. If you can hear it, finish setup."
+        if self.win is not None and self.win.winfo_exists():
+            self._render(status)
+            self._fit_to_content()
+        else:
+            self._status_var.set(status)
         self.on_play_sample(activation_sample_text(readiness.hotkey_label))
 
     def _confirm_sample(self) -> None:
@@ -379,6 +457,8 @@ class FirstRunActivationPanel:
             return
         mark_activation_complete("sample")
         self._status_var.set("Done. PipPal can read selected text on this PC.")
+        self._set_buttons_state("disabled")
+        self._complete_close_after_id = self.root.after(900, self._close)
 
     def _open_setup(self) -> None:
         if self.on_open_setup is not None:
@@ -388,6 +468,12 @@ class FirstRunActivationPanel:
         )
 
     def _close(self) -> None:
+        if self._complete_close_after_id is not None:
+            try:
+                self.root.after_cancel(self._complete_close_after_id)
+            except tk.TclError:
+                pass
+            self._complete_close_after_id = None
         if self._state_poll_after_id is not None:
             try:
                 self.root.after_cancel(self._state_poll_after_id)
@@ -398,3 +484,4 @@ class FirstRunActivationPanel:
             self.win.destroy()
         self.win = None
         self._frame = None
+        self._confirm_button = None

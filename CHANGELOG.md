@@ -1,5 +1,26 @@
 # PipPal Changelog
 
+## 0.2.4 - 2026-05-15
+
+Release date: 2026-05-15
+
+Categories:
+
+- Onboarding: added a first-run activation panel that guides a new user
+  from setup to a real sample playback before setup can be completed.
+- Voice setup: the first-run Voice Manager path opens on the recommended
+  Ryan voice, returns to the activation panel after install, and keeps the
+  voice list scrollable over row content.
+- UI consistency: Settings-adjacent dialogs now use the shared native
+  Windows title bar, dark dialog body, and centered placement instead of
+  custom internal headers or top-left fallback placement.
+- Selected text reliability: improved the Notepad selected-text capture
+  path and documented the current compatibility evidence without broad
+  "anywhere" claims.
+- Safety and release gates: production command-server control routes stay
+  hidden unless the explicit E2E harness enables them, and live UI evidence
+  capture is now part of the release-readiness story.
+
 ## 0.2.3 - 2026-05-13
 
 Release date: 2026-05-13

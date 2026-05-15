@@ -114,11 +114,11 @@ Run setup.ps1 from this checkout, then open PipPal again.
 
 Primary button: `Open setup instructions`
 
-Secondary button: `Quit`
+Secondary button: `Close`
 
 ### Screen 3: Sample Playback
 
-Title: `You should hear this now`
+Title: `PipPal is ready to read locally`
 
 Sample text:
 
@@ -126,21 +126,34 @@ Sample text:
 PipPal is reading locally. Select text in an app that can copy it, then press Win+Shift+R.
 ```
 
+Initial state:
+
+- `Finish setup` is disabled until a sample is played.
+- `Open Settings` remains available for voice or hotkey changes.
+
 During playback:
 
 ```text
-Playing sample...
+Playing sample. If you can hear it, finish setup.
 ```
 
-After playback:
+Primary button after sample playback: `Finish setup`
+
+Secondary button after sample playback: `Play sample again`
+
+After `Finish setup`:
 
 ```text
-Did you hear PipPal?
+Done. PipPal can read selected text on this PC.
 ```
 
-Primary button: `Yes, continue`
+Primary button: `Play sample`
 
-Secondary button: `No sound`
+Completion button: `Finish setup`
+
+There is no separate `No sound` button in the current Core UI. If the
+sample is not audible, the user can replay it, open Settings, or skip
+and return through the tray's First-run check entry.
 
 ### Screen 4: Try Real Text
 
@@ -178,7 +191,7 @@ Secondary button: `Open Settings`
 | Voice download fails | Default voice install raises network, permission, or partial-file error. | `The voice download did not finish. Check your connection or choose a voice later in Voice Manager.` | Delete partial files, keep retry button, keep app usable for settings/repair. |
 | Hotkey conflict | Binding the configured read hotkey fails or duplicate combo validation reports conflict. | `Win+Shift+R is already taken. Choose another read hotkey before the final test.` | Open Hotkeys card inline or deep-link Settings > Hotkeys. |
 | Clipboard denied or unchanged | Capture returns no text after the user presses the read hotkey. | `PipPal could not read the current selection. Try Ctrl+C once, then press the hotkey again.` | Offer retry, practice text box, and clipboard troubleshooting link. |
-| No sound heard | Sample playback completed but user clicks `No sound`. | `The voice played, but you did not hear it. Check Windows output device and volume, then replay.` | Replay sample, open Windows sound settings if safe, do not mark activation complete. |
+| No sound heard | Sample playback completes but user does not finish setup. | `Playing sample. If you can hear it, finish setup.` | Replay sample, open Settings, or skip and return later; do not mark activation complete. |
 | User skips | User clicks `Skip for now`. | `No problem. PipPal will stay in the tray. Use First-run check when you want to test it.` | Do not mark activation complete; show tray menu entry until success. |
 
 ## State Model

@@ -23,6 +23,7 @@ ALLOWED_EXTENSIONS = (".txt", ".md", ".log", ".csv", ".json", ".html", ".xml")
 _CONTROL_COMMAND_ROUTES = {
     "/settings": "settings",
     "/voice-manager": "voice-manager",
+    "/first-run-check": "first-run-check",
     "/stop": "stop",
     "/pause": "pause",
     "/prev": "prev",
@@ -36,6 +37,7 @@ _CONTROL_JSON_COMMAND_ROUTES = {
     "/ui/type": "ui.type",
     "/ui/set": "ui.set",
     "/ui/select": "ui.select",
+    "/ui/window-move": "ui.window_move",
     "/ui/overlay-click": "ui.overlay_click",
 }
 

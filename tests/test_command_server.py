@@ -181,6 +181,7 @@ class TestServerWiring:
             json_commands={
                 "settings.apply": lambda _data: calls.append("settings.apply"),
                 "ui.click": lambda _data: calls.append("ui.click"),
+                "ui.window_move": lambda _data: calls.append("ui.window_move"),
             },
             queries={"state": lambda: calls.append("state") or {"ok": True}},
         )
@@ -192,6 +193,7 @@ class TestServerWiring:
             assert _post_empty(port, "/stop")[0] == 404
             assert _post(port, "/settings/apply", {"values": {}})[0] == 404
             assert _post(port, "/ui/click", {"target": "x"})[0] == 404
+            assert _post(port, "/ui/window-move", {"target": "x"})[0] == 404
             assert calls == []
         finally:
             srv.shutdown()
@@ -233,6 +235,26 @@ class TestServerWiring:
             code, _ = _post_empty(port, "/voice-manager")
             assert code == 200
             assert calls == ["voice-manager"]
+        finally:
+            srv.shutdown()
+            srv.server_close()
+
+    def test_first_run_check_command_routes_to_callback(self):
+        engine = _FakeEngine()
+        port = _free_port()
+        calls: list[str] = []
+        srv = start_command_server(
+            engine,
+            port=port,
+            commands={"first-run-check": lambda: calls.append("first-run-check")},
+            control_routes_enabled=True,
+        )
+        assert srv is not None
+        time.sleep(0.05)
+        try:
+            code, _ = _post_empty(port, "/first-run-check")
+            assert code == 200
+            assert calls == ["first-run-check"]
         finally:
             srv.shutdown()
             srv.server_close()
@@ -323,6 +345,7 @@ class TestServerWiring:
             ("/ui/type", "ui.type"),
             ("/ui/set", "ui.set"),
             ("/ui/select", "ui.select"),
+            ("/ui/window-move", "ui.window_move"),
             ("/ui/overlay-click", "ui.overlay_click"),
         ],
     )
@@ -351,7 +374,14 @@ class TestServerWiring:
 
     @pytest.mark.parametrize(
         "path",
-        ["/ui/click", "/ui/type", "/ui/set", "/ui/select", "/ui/overlay-click"],
+        [
+            "/ui/click",
+            "/ui/type",
+            "/ui/set",
+            "/ui/select",
+            "/ui/window-move",
+            "/ui/overlay-click",
+        ],
     )
     def test_ui_json_commands_are_404_without_callback(self, path: str):
         engine = _FakeEngine()

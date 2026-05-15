@@ -3,6 +3,8 @@ function applied to every Toplevel, plus a `make_card` helper."""
 
 from __future__ import annotations
 
+import re
+import sys
 import tkinter as tk
 from tkinter import ttk
 
@@ -86,21 +88,6 @@ def apply_dark_theme(toplevel: tk.Misc) -> None:
     style.map("Danger.TButton",
               background=[("active", "#3a2030")],
               bordercolor=[("active", UI["danger"])])
-
-    # Custom-titlebar close button — flat, no border, hover turns red
-    # (Win 10/11 close-button convention). Sits inline with the
-    # custom title-bar header.
-    style.configure("TitleClose.TButton", background=UI["bg"],
-                    foreground=UI["text_dim"], bordercolor=UI["bg"],
-                    lightcolor=UI["bg"], darkcolor=UI["bg"],
-                    focusthickness=0, padding=(10, 4),
-                    font=("Segoe UI", 11))
-    style.map("TitleClose.TButton",
-              background=[("active", UI["danger"]), ("pressed", "#9a3535")],
-              foreground=[("active", "#ffffff")],
-              bordercolor=[("active", UI["danger"])],
-              lightcolor=[("active", UI["danger"])],
-              darkcolor=[("active", UI["danger"])])
 
     # Entries
     style.configure("TEntry", fieldbackground=UI["bg_input"], foreground=UI["text"],
@@ -223,9 +210,9 @@ def _apply_native_titlebar(window: tk.Misc) -> None:
 # Chromeless window helpers
 # ---------------------------------------------------------------------------
 # `tk.Toplevel.overrideredirect(True)` removes the native Windows title
-# bar entirely. We then provide our own ✕ button and drag-to-move so
-# the window still behaves like a window — it just looks like the rest
-# of the dark app instead of a light Windows slab.
+# bar entirely for callers that still need a custom surface.
+# Normal dialogs now keep the native titlebar through the centralized
+# `create_native_dialog` / `apply_native_dialog_frame` path.
 #
 # Caveats: snap layouts, maximise, and the system menu are gone. For
 # fixed-size dialog windows that's fine; we wouldn't use this for the
@@ -350,8 +337,7 @@ def make_chromeless_keep_taskbar(window: tk.Toplevel) -> None:
 
 
 def apply_rounded_corners(window: tk.Misc) -> None:
-    """Restore Win 11 rounded corners on a chromeless Toplevel.
-    `overrideredirect` removes them by default."""
+    """Ask DWM to use Win 11 rounded corners for a Toplevel."""
     import sys
     if sys.platform != "win32":
         return
@@ -365,6 +351,269 @@ def apply_rounded_corners(window: tk.Misc) -> None:
             hwnd, _DWMWA_WINDOW_CORNER_PREFERENCE,
             ctypes.byref(v), ctypes.sizeof(v),
         )
+    except Exception:
+        pass
+
+
+def apply_native_dialog_frame(window: tk.Misc) -> None:
+    """Apply native title-bar colour and frame polish to a dialog."""
+    _apply_native_titlebar(window)
+    apply_rounded_corners(window)
+
+    def _refresh() -> None:
+        try:
+            if window.winfo_exists():
+                _apply_native_titlebar(window)
+                apply_rounded_corners(window)
+        except Exception:
+            pass
+
+    try:
+        window.after_idle(_refresh)
+    except Exception:
+        pass
+
+
+def _parse_tk_geometry(value: str) -> tuple[int | None, int | None, int, int] | None:
+    match = re.match(r"^(?:(\d+)x(\d+))?([+-]\d+)([+-]\d+)$", value.strip())
+    if not match:
+        return None
+    width = int(match.group(1)) if match.group(1) is not None else None
+    height = int(match.group(2)) if match.group(2) is not None else None
+    return width, height, int(match.group(3)), int(match.group(4))
+
+
+def dialog_screen_bounds(dialog: tk.Misc) -> tuple[int, int, int, int] | None:
+    """Return virtual screen bounds as ``(left, top, width, height)``."""
+    if sys.platform == "win32":
+        try:
+            import ctypes
+
+            user32 = ctypes.windll.user32
+            left = int(user32.GetSystemMetrics(76))
+            top = int(user32.GetSystemMetrics(77))
+            width = int(user32.GetSystemMetrics(78))
+            height = int(user32.GetSystemMetrics(79))
+            if width > 0 and height > 0:
+                return left, top, width, height
+        except Exception:
+            pass
+
+    try:
+        width = int(dialog.winfo_screenwidth())
+        height = int(dialog.winfo_screenheight())
+    except Exception:
+        return None
+    if width <= 0 or height <= 0:
+        return None
+    return 0, 0, width, height
+
+
+def _clamp_dialog_origin(
+    dialog: tk.Misc,
+    width: int,
+    height: int,
+    x: int,
+    y: int,
+) -> tuple[int, int]:
+    screen_bounds = dialog_screen_bounds(dialog)
+    if screen_bounds is None:
+        return max(0, x), max(0, y)
+    screen_x, screen_y, screen_w, screen_h = screen_bounds
+    max_x = screen_x + max(0, screen_w - width)
+    max_y = screen_y + max(0, screen_h - height)
+    return max(screen_x, min(x, max_x)), max(screen_y, min(y, max_y))
+
+
+def _settled_parent_geometry(parent: tk.Misc) -> tuple[int, int, int, int] | None:
+    try:
+        parent.update_idletasks()
+    except Exception:
+        pass
+
+    geometry: tuple[int | None, int | None, int, int] | None = None
+    try:
+        geometry = _parse_tk_geometry(str(parent.geometry()))
+    except Exception:
+        geometry = None
+
+    root_coords: tuple[int, int] | None = None
+    try:
+        root_coords = (int(parent.winfo_rootx()), int(parent.winfo_rooty()))
+    except Exception:
+        try:
+            root_coords = (int(parent.winfo_x()), int(parent.winfo_y()))
+        except Exception:
+            root_coords = None
+
+    if root_coords is None and geometry is None:
+        return None
+
+    if geometry is not None and (
+        root_coords is None
+        or (root_coords == (0, 0) and (geometry[2], geometry[3]) != (0, 0))
+    ):
+        px, py = geometry[2], geometry[3]
+    else:
+        assert root_coords is not None
+        px, py = root_coords
+
+    try:
+        parent_w = int(parent.winfo_width())
+        parent_h = int(parent.winfo_height())
+    except Exception:
+        parent_w, parent_h = 0, 0
+    if geometry is not None:
+        geo_w, geo_h, _geo_x, _geo_y = geometry
+    else:
+        geo_w, geo_h = None, None
+    if parent_w <= 1:
+        parent_w = geo_w or parent_w
+    if parent_h <= 1:
+        parent_h = geo_h or parent_h
+    return px, py, parent_w, parent_h
+
+
+def dialog_origin_near_parent(
+    parent: tk.Misc,
+    dialog: tk.Misc,
+    width: int,
+    height: int,
+) -> tuple[int, int]:
+    """Return a centered dialog origin after pending parent geometry settles."""
+    parent_geometry = _settled_parent_geometry(parent)
+    if parent_geometry is None:
+        return dialog_origin_on_screen(dialog, width, height)
+    px, py, parent_w, parent_h = parent_geometry
+    if parent_w <= 1:
+        parent_w = width
+    if parent_h <= 1:
+        parent_h = height
+    x = px + max(0, (parent_w - width) // 2)
+    y = py + max(0, (parent_h - height) // 2)
+    return _clamp_dialog_origin(dialog, width, height, x, y)
+
+
+def dialog_origin_at_parent(
+    parent: tk.Misc,
+    dialog: tk.Misc,
+    width: int,
+    height: int,
+) -> tuple[int, int]:
+    """Return a clamped dialog origin aligned to the parent top-left."""
+    parent_geometry = _settled_parent_geometry(parent)
+    if parent_geometry is None:
+        return dialog_origin_on_screen(dialog, width, height)
+    px, py, _parent_w, _parent_h = parent_geometry
+    return _clamp_dialog_origin(dialog, width, height, px, py)
+
+
+def dialog_origin_on_screen(
+    dialog: tk.Misc,
+    width: int,
+    height: int,
+    *,
+    y_divisor: int = 2,
+) -> tuple[int, int]:
+    """Return a centered screen origin, clamped to the virtual desktop."""
+    bounds = dialog_screen_bounds(dialog)
+    if bounds is None:
+        return 100, 100
+    screen_x, screen_y, screen_w, screen_h = bounds
+    y_divisor = max(1, y_divisor)
+    x = screen_x + max(0, (screen_w - width) // 2)
+    y = screen_y + max(0, (screen_h - height) // y_divisor)
+    return _clamp_dialog_origin(dialog, width, height, x, y)
+
+
+def create_native_dialog(
+    parent: tk.Misc,
+    *,
+    title: str,
+    width: int,
+    height: int,
+    minsize: tuple[int, int] | None = None,
+    resizable: tuple[bool, bool] | None = None,
+    placement: str = "screen-center",
+    origin: tuple[int, int] | None = None,
+) -> tk.Toplevel:
+    """Create a hidden, themed dialog with stable geometry before first paint."""
+    window = tk.Toplevel(parent)
+    try:
+        window.withdraw()
+    except Exception:
+        pass
+    window.title(title)
+    if minsize is not None:
+        window.minsize(*minsize)
+    if resizable is not None:
+        window.resizable(*resizable)
+    apply_dark_theme(window)
+    apply_native_dialog_frame(window)
+
+    if origin is not None:
+        x, y = _clamp_dialog_origin(window, width, height, origin[0], origin[1])
+    elif placement == "parent-center":
+        x, y = dialog_origin_near_parent(parent, window, width, height)
+    elif placement == "parent-origin":
+        x, y = dialog_origin_at_parent(parent, window, width, height)
+    elif placement == "screen-upper":
+        x, y = dialog_origin_on_screen(window, width, height, y_divisor=3)
+    else:
+        x, y = dialog_origin_on_screen(window, width, height)
+    window.geometry(f"{width}x{height}+{x}+{y}")
+    return window
+
+
+def show_native_dialog(
+    window: tk.Toplevel,
+    parent: tk.Misc | None = None,
+    *,
+    focus: bool = True,
+    grab: bool = False,
+) -> None:
+    """Reveal a prepared dialog after layout and native-frame refresh."""
+    try:
+        window.update_idletasks()
+    except Exception:
+        pass
+    apply_native_dialog_frame(window)
+
+    def _raise() -> None:
+        try:
+            if not window.winfo_exists():
+                return
+        except Exception:
+            return
+        apply_native_dialog_frame(window)
+        try:
+            if parent is not None:
+                window.lift(parent)
+            else:
+                window.lift()
+        except Exception:
+            try:
+                window.lift()
+            except Exception:
+                pass
+        if focus:
+            try:
+                window.focus_force()
+            except Exception:
+                pass
+        if grab:
+            try:
+                window.grab_set()
+            except Exception:
+                pass
+
+    try:
+        window.deiconify()
+    except Exception:
+        pass
+    _raise()
+    try:
+        window.after(30, _raise)
     except Exception:
         pass
 

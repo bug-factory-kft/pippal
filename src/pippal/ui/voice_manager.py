@@ -23,7 +23,7 @@ from ..voices import (
     voice_url_base,
 )
 from . import theme
-from .theme import UI, apply_dark_theme, make_card
+from .theme import UI, make_card
 
 
 def _encode_download_url(url: str) -> str:
@@ -94,11 +94,19 @@ class VoiceManagerDialog:
     remove buttons. The catalogue comes from `plugins.voices()` —
     extension packages can extend it via `plugins.register_voices`."""
 
-    def __init__(self, parent: tk.Misc, on_changed: Callable[[], None]) -> None:
+    def __init__(
+        self,
+        parent: tk.Misc,
+        on_changed: Callable[[], None],
+        *,
+        on_installed: Callable[[str], None] | None = None,
+    ) -> None:
         self.parent = parent
         self.on_changed = on_changed
+        self.on_installed = on_installed
         self.row_status: dict[str, ttk.Label] = {}
         self.row_buttons: dict[str, ttk.Button] = {}
+        self._wheel_handler: Callable[[tk.Event], str] | None = None
 
         # Snapshot the full registered catalogue once. Filter in-memory
         # on every keystroke / dropdown change. Sorted by language label
@@ -108,106 +116,31 @@ class VoiceManagerDialog:
             key=lambda v: (locale_name(v["lang"]), v["id"]),
         )
 
-        d = tk.Toplevel(parent)
+        d = theme.create_native_dialog(
+            parent,
+            title="Voices",
+            width=820,
+            height=620,
+            minsize=(760, 520),
+            placement="parent-center",
+        )
         self.win = d
-        # No native title — we draw our own header to match the main
-        # Settings window. Set a title anyway so the taskbar/Alt+Tab
-        # entry has a name before the chromeless subclass runs.
-        d.title("Voices")
-        d.minsize(620, 500)
-        d.transient(parent)
-        d.grab_set()
-
-        # Open at the same on-screen position as the parent window
-        # (the Settings dialog), not via WM-default placement. The
-        # user expects "the same place as the main window" — use the
-        # parent's geometry as the origin and clamp to the screen.
-        win_w, win_h = 680, 600
-        try:
-            px = parent.winfo_x()
-            py = parent.winfo_y()
-            sw = d.winfo_screenwidth()
-            sh = d.winfo_screenheight()
-            x = max(0, min(px, sw - win_w))
-            y = max(0, min(py, sh - win_h))
-        except Exception:
-            x, y = 100, 100
-        d.geometry(f"{win_w}x{win_h}+{x}+{y}")
-
-        apply_dark_theme(d)
-
-        # Replicate the SettingsWindow chromeless setup: hide the
-        # native title bar via the WM_NCCALCSIZE subclass, restore
-        # Win 11 rounded corners, and hand the user Esc / Alt+F4 to
-        # close (no system menu without the caption strip).
-        self._did_chromeless = False
-
-        def _apply_chromeless(_e: tk.Event | None = None) -> None:
-            if self._did_chromeless:
-                return
-            self._did_chromeless = True
-            theme.make_chromeless_keep_taskbar(d)
-            theme.apply_rounded_corners(d)
-
-        d.bind("<Map>", _apply_chromeless)
-        d.after(50, _apply_chromeless)
-        d.bind("<Escape>", lambda _e: d.destroy())
-        d.bind("<Alt-F4>", lambda _e: d.destroy())
-
-        header = ttk.Frame(d, style="Header.TFrame", padding=(24, 14, 8, 14))
-        header.pack(fill="x")
-
-        # Right-edge ✕ button — packed first so the title row can
-        # claim the rest of the width.
-        ttk.Button(
-            header, text="✕", style="TitleClose.TButton",
-            command=d.destroy, width=3, takefocus=False,
-        ).pack(side="right", padx=(0, 4))
-
-        title_row = ttk.Frame(header, style="Header.TFrame")
-        title_row.pack(side="left", fill="x", expand=True)
-
-        # PipPal logo on the left of the custom title bar — held on
-        # `self` so Tk doesn't garbage-collect the bitmap mid-render.
-        self._title_icon_photo: Any = None
-        try:
-            from PIL import Image, ImageTk
-
-            from ..tray import _load_and_fit_icon
-            _lanczos = getattr(Image, "Resampling", Image).LANCZOS
-            self._title_icon_photo = ImageTk.PhotoImage(
-                _load_and_fit_icon().resize((22, 22), _lanczos),
-            )
-            tk.Label(
-                title_row, image=self._title_icon_photo,
-                bg=UI["bg"], borderwidth=0,
-            ).pack(side="left", padx=(0, 10))
-        except Exception:
-            pass
-
-        ttk.Label(title_row, text="Voices", style="Title.TLabel").pack(side="left")
-        n = len(self._all_voices)
-        ttk.Label(
-            title_row,
-            text=(f"{n} voice{'s' if n != 1 else ''} available · "
-                  "click Install to download."),
-            style="Sub.TLabel",
-        ).pack(side="left", padx=(10, 0), pady=(7, 0))
-
-        # Without a native title bar the user can't drag to move; bind
-        # the whole header (skipping interactive widgets like the ✕
-        # button) so the panel still feels like a normal window.
-        theme.enable_drag_to_move(d, header)
+        d.bind("<Escape>", lambda _e: self._close())
+        d.bind("<Alt-F4>", lambda _e: self._close())
+        d.protocol("WM_DELETE_WINDOW", self._close)
 
         # ----- Filter bar -----
-        # Language dropdown + free-text search. Both drive the same
-        # `_apply_filter` rebuild below. The dropdown's first entry
-        # ('All languages') is the unfiltered case.
-        filter_bar = ttk.Frame(d, style="TFrame", padding=(20, 12, 20, 0))
+        # Keep catalogue filters on the first row and give free-text
+        # search its own full-width row so it remains usable at the
+        # normal 680 px dialog width.
+        filter_bar = ttk.Frame(d, style="TFrame", padding=(20, 20, 20, 0))
         filter_bar.pack(fill="x")
+        filter_bar.columnconfigure(5, weight=1)
 
-        ttk.Label(filter_bar, text="Language", style="TLabel",
-                  width=10, anchor="w").pack(side="left")
+        ttk.Label(
+            filter_bar, text="Language", style="TLabel",
+            width=10, anchor="w",
+        ).grid(row=0, column=0, sticky="w", padx=(0, 8), pady=(0, 10))
         unique_locales = sorted({v["lang"] for v in self._all_voices},
                                  key=locale_name)
         self._lang_choices: list[tuple[str, str]] = [
@@ -219,14 +152,13 @@ class VoiceManagerDialog:
             values=[label for _code, label in self._lang_choices],
             state="readonly", width=22,
         )
-        lang_combo.pack(side="left", padx=(0, 16))
+        lang_combo.grid(row=0, column=1, sticky="w", padx=(0, 18), pady=(0, 10))
         lang_combo.bind("<<ComboboxSelected>>", lambda _e: self._apply_filter())
 
-        # Quality filter — Piper publishes voices at four quality
-        # levels (x_low / low / medium / high). Default to 'Any' so
-        # the user sees everything; filter down once they care.
-        ttk.Label(filter_bar, text="Quality", style="TLabel",
-                  width=8, anchor="w").pack(side="left")
+        ttk.Label(
+            filter_bar, text="Quality", style="TLabel",
+            width=8, anchor="w",
+        ).grid(row=0, column=2, sticky="w", padx=(0, 8), pady=(0, 10))
         self._quality_choices = ("Any", "high", "medium", "low", "x_low")
         self._quality_var = tk.StringVar(value="Any")
         quality_combo = ttk.Combobox(
@@ -234,16 +166,14 @@ class VoiceManagerDialog:
             values=list(self._quality_choices),
             state="readonly", width=10,
         )
-        quality_combo.pack(side="left", padx=(0, 16))
+        quality_combo.grid(row=0, column=3, sticky="w", padx=(0, 18), pady=(0, 10))
         quality_combo.bind("<<ComboboxSelected>>",
                            lambda _e: self._apply_filter())
 
-        # Installed filter — three states: Any / Installed only /
-        # Not installed only. Useful when the user has dozens of
-        # downloads and wants to see at a glance what's already on
-        # disk vs. what could still be added.
-        ttk.Label(filter_bar, text="Status", style="TLabel",
-                  width=7, anchor="w").pack(side="left")
+        ttk.Label(
+            filter_bar, text="Status", style="TLabel",
+            width=7, anchor="w",
+        ).grid(row=0, column=4, sticky="w", padx=(0, 8), pady=(0, 10))
         self._status_choices = ("Any", "Installed", "Not installed")
         self._status_var = tk.StringVar(value="Any")
         status_combo = ttk.Combobox(
@@ -251,15 +181,17 @@ class VoiceManagerDialog:
             values=list(self._status_choices),
             state="readonly", width=14,
         )
-        status_combo.pack(side="left", padx=(0, 16))
+        status_combo.grid(row=0, column=5, sticky="w", pady=(0, 10))
         status_combo.bind("<<ComboboxSelected>>",
                           lambda _e: self._apply_filter())
 
-        ttk.Label(filter_bar, text="Search", style="TLabel",
-                  width=8, anchor="w").pack(side="left")
+        ttk.Label(
+            filter_bar, text="Search", style="TLabel",
+            width=10, anchor="w",
+        ).grid(row=1, column=0, sticky="w", padx=(0, 8))
         self._search_var = tk.StringVar(value="")
         search_entry = ttk.Entry(filter_bar, textvariable=self._search_var)
-        search_entry.pack(side="left", fill="x", expand=True)
+        search_entry.grid(row=1, column=1, columnspan=5, sticky="ew")
         # Debounce the trace: rebuilding 100+ rows on every keystroke
         # is noticeably laggy. Wait 180 ms after the last edit before
         # re-running the filter, but always apply on Enter.
@@ -291,17 +223,14 @@ class VoiceManagerDialog:
             "<Configure>",
             lambda _e: canvas.configure(scrollregion=canvas.bbox("all")),
         )
-        canvas.bind(
-            "<MouseWheel>",
-            lambda e: canvas.yview_scroll(int(-e.delta / 120), "units"),
-        )
-        # Also bind the mousewheel on the inner frame so scrolling
-        # works while the cursor is over a row, not just the canvas
-        # gutter.
-        inner.bind(
-            "<MouseWheel>",
-            lambda e: canvas.yview_scroll(int(-e.delta / 120), "units"),
-        )
+        def _on_wheel(e: tk.Event) -> str:
+            canvas.yview_scroll(int(-e.delta / 120), "units")
+            return "break"
+
+        self._wheel_handler = _on_wheel
+        d.bind("<MouseWheel>", _on_wheel)
+        canvas.bind("<MouseWheel>", _on_wheel)
+        inner.bind("<MouseWheel>", _on_wheel)
 
         # Cache widgets we'll need to rebuild per filter change.
         self._rows_parent = inner
@@ -315,7 +244,19 @@ class VoiceManagerDialog:
         footer.pack(fill="x", side="bottom")
         sep = tk.Frame(d, bg=UI["border"], height=1)
         sep.pack(fill="x", side="bottom", before=footer)
-        ttk.Button(footer, text="Close", command=d.destroy).pack(side="right")
+        ttk.Button(footer, text="Close", command=self._close).pack(side="right")
+
+        theme.show_native_dialog(d, parent, grab=True)
+
+    def _close(self) -> None:
+        try:
+            self.win.grab_release()
+        except Exception:
+            pass
+        try:
+            self.win.destroy()
+        except Exception:
+            pass
 
     def _schedule_filter(self) -> None:
         """Coalesce typing bursts into a single rebuild. Called on every
@@ -370,6 +311,8 @@ class VoiceManagerDialog:
                     continue
             self._build_row(self._rows_parent, v, installed)
             rows += 1
+        if self._wheel_handler is not None:
+            self._bind_wheel_recursive(self._rows_parent)
 
         if rows == 0:
             self._empty_label = ttk.Label(
@@ -382,6 +325,14 @@ class VoiceManagerDialog:
         # Update scrollregion now that the row count changed.
         self._rows_parent.update_idletasks()
         self._canvas.configure(scrollregion=self._canvas.bbox("all"))
+
+    def _bind_wheel_recursive(self, widget: tk.Misc) -> None:
+        if self._wheel_handler is None:
+            return
+        for child in widget.winfo_children():
+            if not isinstance(child, (ttk.Button, ttk.Combobox, ttk.Entry)):
+                child.bind("<MouseWheel>", self._wheel_handler)
+            self._bind_wheel_recursive(child)
 
     def _build_row(self, parent: tk.Misc, v: PiperVoice, installed: set[str]) -> None:
         outer, card = make_card(parent)
@@ -472,6 +423,13 @@ class VoiceManagerDialog:
                 import sys
                 print(f"[voice_manager] on_changed failed after install: {exc}",
                       file=sys.stderr)
+            if self.on_installed is not None:
+                try:
+                    self.on_installed(voice_filename(v))
+                except Exception as exc:
+                    import sys
+                    print(f"[voice_manager] on_installed failed after install: {exc}",
+                          file=sys.stderr)
         else:
             self.row_status[v["id"]].config(text="failed")
             btn = self.row_buttons.get(v["id"])

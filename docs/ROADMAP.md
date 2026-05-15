@@ -15,7 +15,7 @@ project's roadmap.
 
 ---
 
-## Current state — Core v0.2.3 (public release, 2026-05-13)
+## Current state — Core v0.2.4 (release branch, 2026-05-15)
 
 - Tray app (`pythonw reader_app.py`) with autostart on login.
 - Plugin-host architecture (`pippal.plugins`) — engines, settings
@@ -52,7 +52,12 @@ project's roadmap.
 - Voice Manager: one-click install/remove of curated Piper voices
   from huggingface.co/rhasspy/piper-voices. 18 voices across 9
   languages (English US/UK, German, Spanish, French, Italian,
-  Hungarian, Polish, Dutch, Portuguese).
+  Hungarian, Polish, Dutch, Portuguese). First-run can open this manager
+  on the recommended Ryan voice and the list remains scrollable while
+  the pointer is over voice rows.
+- First-run activation panel: new users get a repairable setup path,
+  one-click default voice install, sample playback, and a disabled
+  Finish action until playback has actually been tried.
 - Layered config: only user overrides land in `config.json`; plugin
   defaults overlay at runtime. Uninstalling a plugin doesn't strand
   its defaults on disk.
@@ -69,12 +74,11 @@ multi-reviewer audit is tracked in [CODEREVIEW.md](CODEREVIEW.md).
 
 ---
 
-## Next release focus - Core v0.2.4
+## Next release focus - Core v0.2.5
 
-- First-run activation: make a new Core user hear selected text within
-  60 seconds of first launch. The implementation contract, screen
-  copy, failure states and acceptance checks are in
-  [FIRST_RUN_ACTIVATION.md](FIRST_RUN_ACTIVATION.md).
+- Keep the release confidence loop honest: repeat the live UI evidence
+  gate, docs-truth review, and branch hygiene before broadening user
+  claims.
 - Selected-text reliability evidence: keep the common Windows app
   compatibility matrix and release wording constraints in
   [SELECTED_TEXT_RELIABILITY.md](SELECTED_TEXT_RELIABILITY.md) before

@@ -173,9 +173,21 @@ def _toplevels(
             continue
         if not exists:
             continue
+        geometry = ""
+        x = y = width = height = 0
+        try:
+            geometry = str(widget.geometry())
+            x = int(widget.winfo_rootx())
+            y = int(widget.winfo_rooty())
+            width = int(widget.winfo_width())
+            height = int(widget.winfo_height())
+        except Exception:
+            pass
         windows.append({
             "title": title,
             "visible": visible,
+            "geometry": geometry,
+            "rect": [x, y, x + width, y + height],
             "texts": _widget_texts(widget),
             "controls": _widget_controls(widget, var_keys),
         })
@@ -558,6 +570,18 @@ def main() -> None:
             settings = settings_box[0]
             if settings is None:
                 raise RuntimeError("settings window is not ready")
+
+            def _open_voice_manager_from_first_run() -> None:
+                settings.open()
+                current_panel = activation_panel_box[0]
+                settings._open_voice_manager(
+                    on_installed=(
+                        current_panel.apply_installed_voice
+                        if current_panel is not None
+                        else None
+                    ),
+                )
+
             panel = activation_panel_box[0]
             if panel is None:
                 panel = FirstRunActivationPanel(
@@ -565,10 +589,7 @@ def main() -> None:
                     config,
                     on_play_sample=engine.read_text_async,
                     on_open_settings=settings.open,
-                    on_open_voice_manager=lambda: (
-                        settings.open(),
-                        settings._open_voice_manager(),
-                    ),
+                    on_open_voice_manager=_open_voice_manager_from_first_run,
                     on_open_setup=open_setup_instructions,
                 )
                 activation_panel_box[0] = panel
@@ -782,6 +803,49 @@ def main() -> None:
 
         return _call_on_tk_thread(root, click_overlay, timeout=5.0)
 
+    def ui_window_move_command(data: dict[str, Any]) -> dict[str, Any]:
+        target = data.get("target", {})
+        if not isinstance(target, dict):
+            raise RuntimeError("target must be an object")
+        if not target.get("title"):
+            raise RuntimeError("target.title is required")
+        dx = int(data.get("dx", 0) or 0)
+        dy = int(data.get("dy", 0) or 0)
+        absolute_x = data.get("x")
+        absolute_y = data.get("y")
+
+        def move_window() -> dict[str, Any]:
+            windows = _target_windows(root, target)
+            if not windows:
+                raise RuntimeError(f"UI window target not found: {target}")
+            index = int(target.get("index", 0) or 0)
+            try:
+                window = windows[index]
+            except IndexError as exc:
+                raise RuntimeError(
+                    f"UI window target index out of range: {target}"
+                ) from exc
+
+            try:
+                current_x = int(window.winfo_rootx())
+                current_y = int(window.winfo_rooty())
+            except Exception:
+                try:
+                    current_x = int(window.winfo_x())
+                    current_y = int(window.winfo_y())
+                except Exception as exc:
+                    raise RuntimeError(
+                        f"UI window geometry unavailable: {target}"
+                    ) from exc
+
+            next_x = int(absolute_x) if absolute_x is not None else current_x + dx
+            next_y = int(absolute_y) if absolute_y is not None else current_y + dy
+            window.geometry(f"+{next_x}+{next_y}")
+            root.update_idletasks()
+            return runtime_snapshot()
+
+        return _call_on_tk_thread(root, move_window, timeout=5.0)
+
     command_callbacks = {
         "settings": open_settings_command,
         "stop": engine.stop,
@@ -798,6 +862,7 @@ def main() -> None:
         "ui.type": ui_type_command,
         "ui.set": ui_set_command,
         "ui.select": ui_select_command,
+        "ui.window_move": ui_window_move_command,
         "ui.overlay_click": ui_overlay_click_command,
     }
     state_queries = {"state": state_query}
