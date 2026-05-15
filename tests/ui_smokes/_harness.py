@@ -127,21 +127,94 @@ def get_file_product_version(exe_path: Path) -> str:
 def activate_window_by_title_fragment(title_fragment: str, *, attempts: int = 25) -> bool:
     """Bring a window whose title contains ``title_fragment`` to the foreground.
 
-    Uses ``WScript.Shell.AppActivate`` because it is the same focus
-    primitive that worked in the issue #57/#58 Notepad repro
-    documented in ``docs/SELECTED_TEXT_RELIABILITY.md``.
+    Originally backed by ``WScript.Shell.AppActivate`` (per the issue
+    #57/#58 Notepad repro), this helper now delegates to the Win32
+    ``SetForegroundWindow`` path with the Alt-key foreground-lock
+    bypass via ``activate_window_by_exact_title_substring``.
+    AppActivate's fuzzy matching returns ``True`` when *some*
+    window's title shares a token with the requested fragment, even
+    if the actually-focused window is unrelated — on a gate machine
+    with many windows (Serena Dashboard, other editors) this lets
+    Ctrl+A land on the wrong window, silently corrupting the user's
+    clipboard. ``activate_window_by_exact_title_substring`` verifies
+    ``GetForegroundWindow`` against the target handle before
+    returning success, which AppActivate cannot do.
     """
 
-    escaped = title_fragment.replace("'", "''")
+    return activate_window_by_exact_title_substring(
+        title_fragment,
+        attempts=attempts,
+    )
+
+
+def activate_window_by_exact_title_substring(
+    title_substring: str,
+    *,
+    process_names: tuple[str, ...] | None = None,
+    attempts: int = 25,
+    poll_interval_ms: int = 200,
+) -> bool:
+    """Bring the *correct* top-level window matching ``title_substring`` forward.
+
+    ``WScript.Shell.AppActivate`` is fuzzy: when many windows share a
+    common token (the gate machine has 15+ Serena Dashboard windows)
+    it can latch onto the wrong window even when a perfectly matching
+    title exists, and still report success. PDF smokes need exact
+    targeting because driving Ctrl+A into the wrong window would
+    silently corrupt the user's clipboard.
+
+    This helper uses ``Get-Process`` + ``SetForegroundWindow`` from
+    user32, optionally filtered to a specific set of process names
+    (e.g. ``("msedge",)`` or ``("Acrobat", "AcroRd32")``). Windows
+    blocks foreground stealing from a console-owner process, so we
+    first inject a transient Alt key-up/key-down via ``keybd_event``;
+    this releases the foreground-lock and lets ``SetForegroundWindow``
+    actually move focus to the target window. ``GetForegroundWindow``
+    is then checked against the target handle to confirm the focus
+    swap actually took effect (Windows can silently flash the taskbar
+    instead of stealing focus, so a ``True`` return from
+    ``SetForegroundWindow`` is not sufficient evidence on its own).
+    """
+
+    escaped = title_substring.replace("'", "''")
+    if process_names:
+        names = ",".join(process_names)
+        proc_filter = f"-Name {names} -ErrorAction SilentlyContinue"
+    else:
+        proc_filter = "-ErrorAction SilentlyContinue"
+
     script = (
-        "$ws = New-Object -ComObject WScript.Shell; "
-        f"for ($i = 0; $i -lt {attempts}; $i++) {{"
-        f"  if ($ws.AppActivate('{escaped}')) {{ Write-Output 'OK'; exit 0 }}"
-        "  Start-Sleep -Milliseconds 200"
-        "} ; "
+        "Add-Type -Namespace P -Name FG -MemberDefinition @\"\n"
+        "[DllImport(\"user32.dll\")] public static extern bool SetForegroundWindow(IntPtr hWnd);\n"
+        "[DllImport(\"user32.dll\")] public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);\n"
+        "[DllImport(\"user32.dll\")] public static extern IntPtr GetForegroundWindow();\n"
+        "[DllImport(\"user32.dll\")] public static extern void keybd_event("
+        "byte bVk, byte bScan, uint dwFlags, int dwExtraInfo);\n"
+        "\"@;\n"
+        f"for ($i = 0; $i -lt {attempts}; $i++) {{\n"
+        f"  $p = Get-Process {proc_filter} | "
+        "Where-Object { $_.MainWindowTitle } | "
+        f"Where-Object {{ $_.MainWindowTitle -like '*{escaped}*' }} | "
+        "Select-Object -First 1;\n"
+        "  if ($p) {\n"
+        # Send Alt up/down to release the Windows 11 foreground lock
+        # that prevents a console-owner process from stealing focus.
+        # 0x12 = VK_MENU (Alt), flag 0=keydown, flag 2=keyup.
+        "    [P.FG]::keybd_event(0x12, 0, 0, 0);\n"
+        "    [P.FG]::keybd_event(0x12, 0, 2, 0);\n"
+        "    Start-Sleep -Milliseconds 30;\n"
+        "    [P.FG]::ShowWindow($p.MainWindowHandle, 9) | Out-Null;\n"  # SW_RESTORE
+        "    [P.FG]::SetForegroundWindow($p.MainWindowHandle) | Out-Null;\n"
+        "    Start-Sleep -Milliseconds 200;\n"
+        "    if ([P.FG]::GetForegroundWindow() -eq $p.MainWindowHandle) {\n"
+        "      Write-Output 'OK'; exit 0;\n"
+        "    }\n"
+        "  }\n"
+        f"  Start-Sleep -Milliseconds {poll_interval_ms};\n"
+        "}\n"
         "Write-Output 'MISS'; exit 1"
     )
-    result = run_powershell(script, timeout=15.0)
+    result = run_powershell(script, timeout=20.0)
     return result.returncode == 0 and "OK" in result.stdout
 
 
@@ -162,6 +235,32 @@ def send_keys_to_foreground(keys: str, *, settle_s: float = 0.15) -> bool:
     result = run_powershell(script, timeout=10.0)
     time.sleep(settle_s)
     return result.returncode == 0 and "OK" in result.stdout
+
+
+def send_hotkey_via_keyboard_lib(combo: str, *, settle_s: float = 0.2) -> bool:
+    """Send a ``ctrl+a`` / ``ctrl+c`` style combo via the ``keyboard`` lib.
+
+    PowerShell's ``System.Windows.Forms.SendKeys.SendWait`` is enough
+    for Notepad and Edge HTML pages, but Edge's built-in PDF viewer
+    (a Chromium PDF.js iframe) does not pick up ``^a`` / ``^c`` from
+    ``SendKeys`` even when the document area has the foreground.
+    The HID-level injection ``keyboard`` uses on Windows reaches the
+    iframe the same way a physical key press does. We deliberately
+    keep ``send_keys_to_foreground`` as the default for non-PDF
+    surfaces — it does not need ``keyboard`` and works on a fresh
+    Python install without the optional Windows-only dep.
+    """
+
+    try:
+        import keyboard
+    except Exception:
+        return False
+    try:
+        keyboard.send(combo)
+    except Exception:
+        return False
+    time.sleep(settle_s)
+    return True
 
 
 # ---------------------------------------------------------------------------
@@ -304,6 +403,7 @@ def launch_edge(
     fixture_html: Path,
     *,
     user_data_dir: Path,
+    inprivate: bool = False,
 ) -> subprocess.Popen[bytes]:
     """Launch Edge with a throwaway profile pointed at the local fixture.
 
@@ -313,21 +413,31 @@ def launch_edge(
     an already-open Edge instance the user happens to have. Window
     discovery is driven by ``activate_window_by_title_fragment``
     matching against the HTML document's ``<title>``.
+
+    When ``inprivate=True`` the launch adds ``--inprivate``, which
+    prevents Edge's sync infobar from intercepting focus when the
+    user is signed in to Edge elsewhere on the machine. The HTML
+    smoke does not need this because its inline JS keeps re-asserting
+    the selection across focus juggling, but the PDF viewer has no
+    JS hook to recover from a sync-banner steal — the PDF smoke
+    relies on inprivate launches.
     """
 
     user_data_dir.mkdir(parents=True, exist_ok=True)
     file_url = fixture_html.as_uri()
-    return subprocess.Popen(
-        [
-            str(edge_exe),
-            f"--user-data-dir={user_data_dir}",
-            "--new-window",
-            "--no-first-run",
-            "--no-default-browser-check",
-            "--disable-features=msEdgeWelcomePage",
-            file_url,
-        ]
-    )
+    args = [
+        str(edge_exe),
+        f"--user-data-dir={user_data_dir}",
+        "--new-window",
+        "--no-first-run",
+        "--no-default-browser-check",
+        "--disable-features=msEdgeWelcomePage,msImplicitSignin",
+        "--disable-sync",
+    ]
+    if inprivate:
+        args.append("--inprivate")
+    args.append(file_url)
+    return subprocess.Popen(args)
 
 
 def edge_window_title(title: str) -> str:
@@ -453,6 +563,329 @@ def force_close_edge_user_data_dir(user_data_dir: Path) -> None:
     run_powershell(script, timeout=10.0)
 
 
+# ---------------------------------------------------------------------------
+# PDF fixture synthesis (issue #63).
+# ---------------------------------------------------------------------------
+
+
+def _pdf_escape(text: str) -> str:
+    """Escape a Python string for inclusion in a PDF literal ``(...)``.
+
+    The PDF lexical rules require backslashes and round parens inside a
+    literal string to be backslash-escaped. We do not attempt to escape
+    non-ASCII here because the fixture sentence is ASCII by contract —
+    the smoke is asserting a known fixed sentence round-trips, not
+    Unicode handling.
+    """
+
+    return text.replace("\\", "\\\\").replace("(", "\\(").replace(")", "\\)")
+
+
+def write_selectable_text_pdf(fixture_dir: Path, lines: list[str]) -> Path:
+    """Synthesise a one-page PDF whose text is selectable by a PDF viewer.
+
+    We use ``pypdf`` to assemble a minimal page with a Helvetica Type1
+    font and a single ``BT ... Tj ... ET`` content stream. This avoids
+    a new release dependency (``reportlab``) and matches the no-checked-
+    in-binaries pattern the existing #62 fixtures use for HTML.
+
+    Each entry in ``lines`` is rendered on its own line via the PDF
+    ``T*`` line-advance operator. Splitting the smoke sentence across
+    short lines keeps every line well inside the page's selectable
+    area in Acrobat and Edge — a single long ``Tj`` that wraps in the
+    viewer would silently truncate ``Ctrl+A`` selection to the visible
+    region.
+
+    The Acrobat / Edge PDF viewer both extract literal text from
+    consecutive ``Tj`` operators and offer it to ``Ctrl+A`` /
+    ``Ctrl+C`` as standard PDF text selection. We round-trip via
+    ``PdfReader`` only as a sanity check during fixture generation —
+    the smoke itself asserts the user-visible capture path.
+    """
+
+    from pypdf import PdfReader, PdfWriter
+    from pypdf.generic import DictionaryObject, NameObject, StreamObject
+
+    fixture_dir.mkdir(parents=True, exist_ok=True)
+    pdf_path = fixture_dir / "pippal_issue63_selectable.pdf"
+
+    writer = PdfWriter()
+    page = writer.add_blank_page(width=612, height=792)
+
+    font = DictionaryObject(
+        {
+            NameObject("/Type"): NameObject("/Font"),
+            NameObject("/Subtype"): NameObject("/Type1"),
+            NameObject("/BaseFont"): NameObject("/Helvetica"),
+            NameObject("/Encoding"): NameObject("/WinAnsiEncoding"),
+        }
+    )
+    font_ref = writer._add_object(font)
+    page[NameObject("/Resources")] = DictionaryObject(
+        {NameObject("/Font"): DictionaryObject({NameObject("/F1"): font_ref})}
+    )
+
+    # We position each line with an absolute ``Td`` rather than relying
+    # on ``T*`` line-advance, because some PDF viewers do not consume
+    # the text-matrix advance when the leading was set via ``TL`` in
+    # the same block. Absolute positioning per line keeps the
+    # rendering identical across Acrobat, Edge's PDF.js, and pypdf's
+    # own ``extract_text`` round-trip used by the fixture sanity check.
+    parts: list[str] = ["BT", "/F1 14 Tf"]
+    baseline_top = 720
+    line_height = 18
+    for index, line in enumerate(lines):
+        if index == 0:
+            parts.append(f"72 {baseline_top} Td")
+        else:
+            # ``Td`` is a relative move from the previous text origin.
+            parts.append(f"0 -{line_height} Td")
+        parts.append(f"({_pdf_escape(line)}) Tj")
+    parts.append("ET")
+    body = "\n".join(parts) + "\n"
+
+    stream = StreamObject()
+    stream._data = body.encode("latin-1")
+    page[NameObject("/Contents")] = writer._add_object(stream)
+
+    with pdf_path.open("wb") as fh:
+        writer.write(fh)
+
+    # Fixture-generation sanity check (not a substitute for the smoke):
+    # if extract_text loses the sentence in synthesis, the smoke would
+    # blame the viewer for a bug we introduced in the fixture.
+    extracted = PdfReader(str(pdf_path)).pages[0].extract_text() or ""
+    for line in lines:
+        if line not in extracted:
+            raise RuntimeError(
+                f"Selectable PDF fixture round-trip failed; pypdf saw "
+                f"{extracted!r}, expected to contain {line!r}"
+            )
+    return pdf_path
+
+
+def write_image_only_pdf(fixture_dir: Path) -> Path:
+    """Synthesise a one-page PDF with no extractable text content layer.
+
+    The page has no ``/Contents`` stream beyond a no-op, so neither
+    ``pypdf.extract_text`` nor a PDF viewer's text-layer selection can
+    return anything. This simulates a scanned/image-only PDF without
+    dragging a real rasterised image into the fixture — the smoke's
+    assertion is "no text layer => empty capture, clipboard preserved",
+    which the absence of a text content stream is sufficient to prove.
+    OCR-style image text is explicitly out of scope until that work
+    lands; see ``docs/SELECTED_TEXT_RELIABILITY.md``.
+    """
+
+    from pypdf import PdfWriter
+
+    fixture_dir.mkdir(parents=True, exist_ok=True)
+    pdf_path = fixture_dir / "pippal_issue63_image_only.pdf"
+
+    writer = PdfWriter()
+    writer.add_blank_page(width=612, height=792)
+    with pdf_path.open("wb") as fh:
+        writer.write(fh)
+    return pdf_path
+
+
+def click_into_window_center(title_fragment: str) -> bool:
+    """Move the cursor to and left-click the center of a top-level window.
+
+    Edge's built-in PDF viewer requires the document iframe to hold
+    focus before ``Ctrl+A`` reaches the text selection path. Just
+    using ``AppActivate`` brings the OS window forward but leaves
+    chrome (toolbar / Find) with the focused element. A single
+    left-click in the page center reliably moves focus into the
+    Chromium PDF viewer plugin's document area.
+
+    Implemented via ``user32`` ``SetCursorPos`` + ``mouse_event`` from
+    PowerShell so we do not add a new Python dependency.
+    """
+
+    escaped = title_fragment.replace("'", "''")
+    script = (
+        "Add-Type -Namespace P -Name Win -MemberDefinition @\"\n"
+        "[DllImport(\"user32.dll\")] public static extern bool SetCursorPos(int X, int Y);\n"
+        "[DllImport(\"user32.dll\")] public static extern void mouse_event("
+        "uint dwFlags, uint dx, uint dy, uint dwData, int dwExtraInfo);\n"
+        "[StructLayout(LayoutKind.Sequential)] public struct RECT { public int L, T, R, B; }\n"
+        "[DllImport(\"user32.dll\")] public static extern bool GetWindowRect(IntPtr hWnd, out RECT lpRect);\n"
+        "\"@;\n"
+        "$proc = Get-Process -Name msedge,Acrobat,AcroRd32 -ErrorAction SilentlyContinue | "
+        f"Where-Object {{ $_.MainWindowTitle -like '*{escaped}*' }} | Select-Object -First 1;\n"
+        "if (-not $proc) { Write-Output 'NOWINDOW'; exit 1 }\n"
+        "$rect = New-Object P.Win+RECT;\n"
+        "[P.Win]::GetWindowRect($proc.MainWindowHandle, [ref] $rect) | Out-Null;\n"
+        # Click ~30% from top so we land below the toolbar but in the page.
+        "$cx = [int](($rect.L + $rect.R) / 2);\n"
+        "$cy = [int]($rect.T + (($rect.B - $rect.T) * 0.45));\n"
+        "[P.Win]::SetCursorPos($cx, $cy) | Out-Null;\n"
+        "[P.Win]::mouse_event(0x0002, 0, 0, 0, 0);\n"  # LEFTDOWN
+        "Start-Sleep -Milliseconds 50;\n"
+        "[P.Win]::mouse_event(0x0004, 0, 0, 0, 0);\n"  # LEFTUP
+        "Write-Output 'CLICKED'"
+    )
+    result = run_powershell(script, timeout=15.0)
+    return result.returncode == 0 and "CLICKED" in result.stdout
+
+
+def wait_for_edge_pdf_title(
+    pdf_path: Path,
+    *,
+    timeout_s: float = 15.0,
+    poll_interval_s: float = 0.2,
+) -> bool:
+    """Poll until an msedge.exe window's title contains the PDF basename.
+
+    Edge's built-in PDF viewer takes noticeably longer to paint than
+    an HTML page because PDF.js streams the document and only then
+    sets the document title to the filename. Without this wait, the
+    happy-path smoke races ``Ctrl+A`` against a sync infobar that
+    Edge sometimes briefly pops over the page; once the PDF title is
+    in the OS window list we know the viewer has reached the page-
+    rendered state.
+    """
+
+    needle = pdf_path.stem.replace("'", "''")
+    script = (
+        "Get-Process -Name msedge -ErrorAction SilentlyContinue | "
+        "Where-Object { $_.MainWindowTitle } | "
+        f"Where-Object {{ $_.MainWindowTitle -like '*{needle}*' }} | "
+        "Select-Object -First 1 | "
+        "ForEach-Object { Write-Output 'READY' }"
+    )
+    deadline = time.monotonic() + timeout_s
+    while time.monotonic() < deadline:
+        result = run_powershell(script, timeout=10.0)
+        if result.returncode == 0 and "READY" in result.stdout:
+            return True
+        time.sleep(poll_interval_s)
+    return False
+
+
+def edge_pdf_window_title(pdf_path: Path) -> str:
+    """Window-title fragment Edge uses for an opened local PDF.
+
+    Edge's built-in PDF viewer titles the window with the PDF basename;
+    AppActivate matches on the basename *stem* (without the ``.pdf``
+    suffix) because ``WScript.Shell.AppActivate`` treats the trailing
+    ``.pdf`` as a wildcard-stop and returns ``False`` for any title
+    fragment containing a literal extension. Using the stem keeps
+    AppActivate reachable while still being unique enough to find the
+    fixture's window.
+    """
+
+    return pdf_path.stem
+
+
+# ---------------------------------------------------------------------------
+# Acrobat / Adobe Reader driver (issue #63).
+# ---------------------------------------------------------------------------
+
+
+ACROBAT_CANDIDATES: tuple[Path, ...] = (
+    Path(r"C:\Program Files\Adobe\Acrobat DC\Acrobat\Acrobat.exe"),
+    Path(r"C:\Program Files (x86)\Adobe\Acrobat Reader DC\Reader\AcroRd32.exe"),
+    Path(r"C:\Program Files\Adobe\Acrobat DC\Acrobat\AcroRd32.exe"),
+    Path(r"C:\Program Files (x86)\Adobe\Acrobat DC\Acrobat\Acrobat.exe"),
+)
+
+
+def find_acrobat_exe() -> Path | None:
+    """Locate an installed Acrobat or Adobe Reader executable.
+
+    Returns ``None`` when neither is installed; the caller records that
+    case as ``unavailable`` (per the shared release-gate status contract)
+    rather than failing the smoke. This is the same pattern Notepad/Edge
+    detection uses in ``conftest.py``.
+    """
+
+    for candidate in ACROBAT_CANDIDATES:
+        if candidate.is_file():
+            return candidate
+    return None
+
+
+def launch_acrobat(acrobat_exe: Path, fixture_pdf: Path) -> subprocess.Popen[bytes]:
+    """Open a PDF in Acrobat / Adobe Reader and return the process handle.
+
+    Acrobat is single-instance on Windows: a second launch typically
+    forwards the file to the running process and the new ``Popen``
+    exits quickly. The smoke only needs the file to be open in a
+    window whose title contains the PDF basename, which AppActivate
+    can latch onto regardless of which Acrobat process owns it.
+    """
+
+    return subprocess.Popen([str(acrobat_exe), str(fixture_pdf)])
+
+
+def acrobat_window_title(pdf_path: Path) -> str:
+    """Window-title fragment Acrobat uses for an opened PDF.
+
+    Acrobat appends the document filename to its chrome label. We
+    return the basename *stem* without ``.pdf`` so
+    ``WScript.Shell.AppActivate`` matches it — AppActivate returns
+    ``False`` for any title fragment containing a literal extension,
+    so a fragment of ``foo.pdf`` would never focus the Acrobat
+    window even though the OS title contains exactly that substring.
+    """
+
+    return pdf_path.stem
+
+
+def wait_for_acrobat_title(
+    pdf_path: Path,
+    *,
+    timeout_s: float = 25.0,
+    poll_interval_s: float = 0.3,
+) -> bool:
+    """Poll until Acrobat publishes a window title containing the PDF stem.
+
+    Acrobat cold-start is markedly slower than Edge's PDF viewer: a
+    ``Welcome`` / ``Sign in`` modal or a license-renewal pane can hold
+    the foreground for several seconds, during which the document
+    window has no title at all. ``MainWindowTitle`` stays empty in
+    that window — AppActivate would silently fail and the smoke would
+    record empty captures forever. Polling for the titled document
+    window lets the smoke distinguish "Acrobat is unhealthy on this
+    box, mark blocked" from "Acrobat captured wrong text, mark fail".
+    """
+
+    needle = pdf_path.stem.replace("'", "''")
+    script = (
+        "Get-Process -Name Acrobat,AcroRd32 -ErrorAction SilentlyContinue | "
+        "Where-Object { $_.MainWindowTitle } | "
+        f"Where-Object {{ $_.MainWindowTitle -like '*{needle}*' }} | "
+        "Select-Object -First 1 | "
+        "ForEach-Object { Write-Output 'READY' }"
+    )
+    deadline = time.monotonic() + timeout_s
+    while time.monotonic() < deadline:
+        result = run_powershell(script, timeout=10.0)
+        if result.returncode == 0 and "READY" in result.stdout:
+            return True
+        time.sleep(poll_interval_s)
+    return False
+
+
+def force_close_acrobat_for(pdf_path: Path) -> None:
+    """Best-effort close of any Acrobat window owning ``pdf_path``.
+
+    Matches on either ``Acrobat.exe`` or ``AcroRd32.exe`` with a window
+    title containing the fixture basename, to avoid touching another
+    Acrobat document the user might have open during the smoke run.
+    """
+
+    needle = pdf_path.name.replace("'", "''")
+    script = (
+        "Get-Process -Name Acrobat,AcroRd32 -ErrorAction SilentlyContinue | "
+        f"Where-Object {{ $_.MainWindowTitle -like '*{needle}*' }} | "
+        "Stop-Process -Force -ErrorAction SilentlyContinue"
+    )
+    run_powershell(script, timeout=10.0)
+
+
 def write_initial_clipboard(value: str) -> None:
     pyperclip.copy(value)
     time.sleep(0.05)
@@ -460,24 +893,37 @@ def write_initial_clipboard(value: str) -> None:
 
 # Public re-exports for tests.
 __all__ = [
+    "ACROBAT_CANDIDATES",
     "EDGE_HTML_TEMPLATE",
     "EDGE_READY_SUFFIX",
     "SmokeEvidence",
     "StubCaptureEngine",
+    "acrobat_window_title",
+    "activate_window_by_exact_title_substring",
     "activate_window_by_title_fragment",
     "capture_with_sentinel_clipboard",
+    "click_into_window_center",
+    "edge_pdf_window_title",
     "edge_window_title",
+    "find_acrobat_exe",
+    "force_close_acrobat_for",
     "force_close_edge_user_data_dir",
     "force_close_notepad_for",
     "get_file_product_version",
+    "launch_acrobat",
     "launch_edge",
     "launch_notepad",
     "notepad_window_title",
     "run_powershell",
+    "send_hotkey_via_keyboard_lib",
     "send_keys_to_foreground",
+    "wait_for_acrobat_title",
+    "wait_for_edge_pdf_title",
     "wait_for_edge_selection_ready",
     "write_edge_fixture",
+    "write_image_only_pdf",
     "write_initial_clipboard",
+    "write_selectable_text_pdf",
 ]
 
 
