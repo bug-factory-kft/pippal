@@ -1,6 +1,14 @@
 # Live UI E2E Release Gate
 
-This checklist is the public Core release gate for live Windows UI behavior.
+This document is the reviewer rulebook for **Gate 2** of the Core release
+checklist. The authoritative, named release checklist that ties every
+gate together (headless logic, this live UI gate, and the foreign-app
+selected-text smokes) lives in
+[RELEASE_CHECKLIST.md](RELEASE_CHECKLIST.md), and the release PR template
+encoding it is at
+[.github/PULL_REQUEST_TEMPLATE/release.md](../.github/PULL_REQUEST_TEMPLATE/release.md).
+
+This gate is the public Core release gate for live Windows UI behavior.
 It is intentionally separate from the default `python -m pytest` suite because
 it launches the real desktop app, uses the localhost command server, and
 requires a Windows desktop session with Piper assets installed.
@@ -63,6 +71,12 @@ If the runner exits with status `fail` or `blocked`, the UI environment did not
 prove the release gate. Common blockers are a non-Windows runner, no desktop
 session, a stale PipPal process already owning the command port, or missing
 Piper assets.
+
+For when (and only when) this gate may be waived, who signs off, and what
+is explicitly non-waivable, see the
+[Waiver Policy](RELEASE_CHECKLIST.md#waiver-policy) in the release
+checklist. The waiver path does not apply to a `fail` or `blocked`
+result.
 
 ## UI State Proven
 

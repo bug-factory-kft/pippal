@@ -40,8 +40,14 @@ speaker output; that requires a machine-level loopback capture device.
 
 ## Run
 
-Release reviewers should use the checklist in
+This runner is **Gate 2** of the Core release checklist. The authoritative,
+named release checklist is
+[docs/RELEASE_CHECKLIST.md](../docs/RELEASE_CHECKLIST.md); the reviewer rule
+for this specific gate is in
 [docs/LIVE_UI_E2E_RELEASE_GATE.md](../docs/LIVE_UI_E2E_RELEASE_GATE.md).
+The companion foreign-app selected-text smokes (`run-ui-smokes.ps1`) are
+**Gate 3**.
+
 The runner writes a log, JUnit XML, command record, and JSON summary for every
 run under `.e2e\evidence\live-ui-<UTC timestamp>\` unless `-EvidenceDir` is
 provided.
