@@ -107,6 +107,8 @@ def _register() -> None:
     from .ui import settings_cards as cards
     plugins.register_settings_card(cards.build_voice_card,       zone=Zone.VOICE)
     plugins.register_settings_card(cards.build_speech_card,      zone=Zone.SPEECH)
+    plugins.register_settings_card(cards.build_pronunciation_card,
+                                   zone=Zone.SPEECH, order=10)
     plugins.register_settings_card(cards.build_hotkeys_card,     zone=Zone.HOTKEYS)
     plugins.register_settings_card(cards.build_panel_card,       zone=Zone.PANEL)
     plugins.register_settings_card(cards.build_integration_card, zone=Zone.INTEGRATION)
