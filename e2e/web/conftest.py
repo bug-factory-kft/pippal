@@ -55,18 +55,122 @@ mock. Only the data directory is redirected to a per-test temp profile.
 
 from __future__ import annotations
 
+import contextlib
 import importlib
+import logging
 import os
 import shutil
 import sys
 import tempfile
 import threading
+from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "src"))
+
+
+# ==========================================================================
+# HUMAN-READABLE STEP LOGGING — make a passing run say what it actually did
+# ==========================================================================
+#
+# Previously a green CI run showed only "Passed ... no log output
+# captured" per test — you could not tell what the test exercised. Every
+# e2e/web test now narrates its meaningful actions/assertions through a
+# tiny ``step`` logger on the stdlib ``logging`` module (so pytest
+# captures it and ``--log-cli-level=INFO`` streams it live in CI, per
+# passing test, via ``-rA``).
+#
+# Usage in a test (the ``step`` fixture is function-scoped):
+#
+#     step("open Settings")                 -> "  → open Settings"
+#     step.check("config.auto_hide_ms == 2400")
+#                                            -> "  ✓ config.auto_hide_ms == 2400"
+#     with step.group("read-aloud 'hello'"): ...   (logs enter/leave)
+#
+# This is pure observability: it changes NO backend / UI behaviour and
+# does not touch the default ``tests/`` suite (this conftest is only
+# loaded for ``e2e/web``; the verbose/log CLI flags are passed by the
+# workflow command, never by the root ``pytest.ini``).
+
+_STEP_LOG = logging.getLogger("e2e.web.step")
+
+
+class _StepLogger:
+    """A concise, human-readable step recorder bound to one test.
+
+    ``step("...")`` logs an action line (``→``); ``step.check("...")``
+    logs an assertion/observation line (``✓``); ``step.group("...")``
+    is a context manager that brackets a multi-step action.
+    """
+
+    def __init__(self, log: logging.Logger, nodeid: str) -> None:
+        self._log = log
+        self._nodeid = nodeid
+        self._depth = 0
+
+    def _emit(self, mark: str, msg: str) -> None:
+        indent = "  " * (self._depth + 1)
+        self._log.info("%s%s %s", indent, mark, msg)
+
+    def __call__(self, msg: str) -> None:
+        """Log a meaningful ACTION the test performs (``→``)."""
+        self._emit("→", msg)
+
+    def check(self, msg: str) -> None:
+        """Log an ASSERTION / observed real effect (``✓``)."""
+        self._emit("✓", msg)
+
+    def info(self, msg: str) -> None:
+        """Log a neutral note (no arrow)."""
+        self._emit(" ", msg)
+
+    @contextlib.contextmanager
+    def group(self, msg: str) -> Iterator[None]:
+        self._emit("→", msg)
+        self._depth += 1
+        try:
+            yield
+        finally:
+            self._depth -= 1
+
+
+@pytest.fixture
+def step(request: pytest.FixtureRequest) -> _StepLogger:
+    """Per-test human-readable step logger (see the block above).
+
+    Logged via stdlib ``logging`` so pytest captures it; the workflow
+    runs the suite with ``--log-cli-level=INFO -rA -v`` so EVERY passing
+    test prints its step lines in the CI log.
+    """
+    logger = _StepLogger(_STEP_LOG, request.node.nodeid)
+    logger.info(f"start {request.node.name}")
+    return logger
+
+
+def pytest_configure(config: pytest.Config) -> None:
+    """Scope the step-log formatting to the e2e/web run ONLY.
+
+    This conftest is loaded *only* when pytest collects ``e2e/web``
+    (the default ``python -m pytest`` runs ``tests/`` and never imports
+    this file), so configuring the live-log format here cannot affect
+    the default suite. We only set a terse formatter and a sane default
+    level if the CLI did not already pin one — the workflow passes
+    ``--log-cli-level=INFO -rA -v`` so every PASSING test's step lines
+    show in the CI log (``-rA`` prints captured output for passes too).
+    """
+    # A compact live-log format: just the message (the step lines are
+    # already self-describing — "  → open Settings"). Only applied for
+    # this (e2e/web) session.
+    config.option.log_cli_format = "%(message)s"
+    config.option.log_cli_date_format = "%H:%M:%S"
+    # Provide a default if the invoker did not pass --log-cli-level so a
+    # bare ``pytest e2e/web`` locally is already informative; the
+    # workflow still passes it explicitly for clarity.
+    if not config.getoption("log_cli_level"):
+        config.option.log_cli_level = "INFO"
 
 
 # Modules that did `from ..paths import <CONST>` at import time and so

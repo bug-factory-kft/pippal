@@ -65,28 +65,62 @@ jobs:
         run: |
           python -m playwright install chromium
 
-      - name: Run web Playwright suite (served + headless)
+      - name: Run web Playwright suite (served + headless, VERBOSE)
         shell: pwsh
+        env:
+          # The step lines use → / ✓ glyphs. The self-hosted runner's
+          # console is cp1252 by default, which renders them (and the
+          # newlines pytest's live-log writes) as escapes. Force UTF-8
+          # IO so the CI log shows the human-readable steps verbatim.
+          # Scoped to THIS step only — the default `python -m pytest`
+          # (tests/) job in ci.yml is untouched.
+          PYTHONUTF8: "1"
+          PYTHONIOENCODING: "utf-8"
         run: |
           # Headless is the pytest-playwright default — no --headed is
           # passed, so no browser window and no pywebview window. The
           # conftest serves the UI in-process; Chromium hits localhost.
-          # --tracing/--screenshot retain-on-failure feed the artifact;
-          # pytest's non-zero exit on any failure fails this job.
+          #
+          # Visibility for PASSING tests (the whole point of this
+          # change): -v + --log-cli-level=INFO streams every test's
+          # human-readable step lines live, and -rA prints the captured
+          # step log for PASSES too (not just failures) — so a green CI
+          # run now shows exactly what each test did instead of
+          # "Passed ... no log output captured".
+          #
+          # Playwright artifacts ALWAYS (not only on failure):
+          # --tracing=on --video=on --screenshot=on write a trace.zip +
+          # video + screenshot for EVERY test under
+          # playwright-report/artifacts, alongside the self-contained
+          # HTML report — all uploaded by the always() step below.
+          #
+          # These flags live in the workflow command (NOT the root
+          # pytest.ini), so the default `python -m pytest` (tests/)
+          # suite and its config are completely unaffected, and e2e/web
+          # stays excluded from the default suite (pytest.ini:
+          # testpaths = tests).
+          #
+          # pytest's non-zero exit on any failure still fails this job.
           New-Item -ItemType Directory -Force -Path playwright-report | Out-Null
-          python -m pytest e2e/web -q `
+          python -m pytest e2e/web `
+            -v -rA --log-cli-level=INFO `
             --browser chromium `
-            --tracing=retain-on-failure `
-            --screenshot=only-on-failure `
-            --video=retain-on-failure `
+            --tracing=on `
+            --video=on `
+            --screenshot=on `
             --output=playwright-report/artifacts `
             --html=playwright-report/report.html `
             --self-contained-html
 
-      - name: Upload Playwright report + traces
+      - name: Upload Playwright report + traces + videos + screenshots
         if: always()
         uses: actions/upload-artifact@v4
         with:
+          # Always-on artifact (if: always()) — even on a fully green
+          # run: per-test trace.zip (open with
+          # `playwright show-trace <file>`), per-test video (.webm),
+          # per-test screenshot, and the self-contained HTML report.
+          # See e2e/web/README.md for how to open each.
           name: web-ui-e2e-playwright-report
           path: playwright-report/
           if-no-files-found: warn

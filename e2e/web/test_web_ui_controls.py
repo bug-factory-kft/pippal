@@ -33,22 +33,29 @@ def _config_on_disk(profile: Path) -> dict:
     return json.loads(cfg.read_text("utf-8")) if cfg.exists() else {}
 
 
-def _goto(page: Page, app_url: str, view: str) -> None:
+def _goto(page: Page, app_url: str, view: str, step=None) -> None:
+    if step is not None:
+        step(f"open '{view}' surface")
     page.goto(f"{app_url}/index.html?view={view}")
     expect(page.locator("body")).to_have_attribute(
         "data-ready", view, timeout=15000
     )
+    if step is not None:
+        step.check(f"surface '{view}' rendered (body[data-ready={view}])")
 
 
 # ===========================================================================
 # §1 Onboarding — readiness states + every per-state button
 # ===========================================================================
 
-def test_onboarding_ready_state_controls(page: Page, app_url: str, readiness):
+def test_onboarding_ready_state_controls(
+    page: Page, app_url: str, readiness, step
+):
     """READY state: the Local-voice-check card shows the real engine /
     voice / hotkey labels from build_activation_readiness."""
+    step("force readiness = ready (real stub piper.exe + voice on disk)")
     rd = readiness["ready"]()
-    _goto(page, app_url, "onboarding")
+    _goto(page, app_url, "onboarding", step)
     expect(page.get_by_test_id("onboarding-engine")).to_contain_text(
         "Piper engine"
     )
@@ -56,28 +63,33 @@ def test_onboarding_ready_state_controls(page: Page, app_url: str, readiness):
     card = page.get_by_test_id("onboarding-engine")
     expect(card).to_be_visible()
     assert rd.engine_label.startswith("Piper engine")
+    step.check(f"engine card shows real readiness label {rd.engine_label!r}")
 
 
 def test_onboarding_sample_textbox_holds_sample(
-    page: Page, app_url: str, readiness, backend
+    page: Page, app_url: str, readiness, backend, step
 ):
     """The "Try it in any app" box holds the real sample text the
     backend computed from the configured hotkey."""
+    step("force readiness = ready")
     readiness["ready"]()
-    _goto(page, app_url, "onboarding")
+    _goto(page, app_url, "onboarding", step)
     box = page.get_by_test_id("onboarding-sample")
     expect(box).to_be_visible()
     sample = backend["bridge"].get_readiness()["sample_text"]
     assert box.input_value().strip() == sample.strip()
     assert "PipPal is reading locally" in sample
+    step.check("sample box == real bridge.get_readiness()['sample_text']")
 
 
 def test_onboarding_ready_skip_closes_window(
-    page: Page, app_url: str, readiness, backend
+    page: Page, app_url: str, readiness, backend, step
 ):
+    step("force readiness = ready")
     readiness["ready"]()
-    _goto(page, app_url, "onboarding")
+    _goto(page, app_url, "onboarding", step)
     before = len(backend["close_calls"])
+    step("click onboarding Skip")
     page.get_by_test_id("onboarding-skip").click()
 
     def _closed() -> bool:
@@ -87,13 +99,16 @@ def test_onboarding_ready_skip_closes_window(
     while page.evaluate("Date.now()") < deadline and not _closed():
         page.wait_for_timeout(50)
     assert _closed(), "Skip did not reach on_close_window"
+    step.check("Skip reached the real on_close_window host callback")
 
 
 def test_onboarding_ready_open_settings(
-    page: Page, app_url: str, readiness, backend
+    page: Page, app_url: str, readiness, backend, step
 ):
+    step("force readiness = ready")
     readiness["ready"]()
-    _goto(page, app_url, "onboarding")
+    _goto(page, app_url, "onboarding", step)
+    step("click onboarding Open Settings")
     page.get_by_test_id("onboarding-open-settings").click()
 
     def _opened() -> bool:
@@ -103,41 +118,49 @@ def test_onboarding_ready_open_settings(
     while page.evaluate("Date.now()") < deadline and not _opened():
         page.wait_for_timeout(50)
     assert _opened(), "Open Settings did not reach on_open_settings"
+    step.check("Open Settings reached the real on_open_settings host callback")
 
 
 def test_onboarding_finish_gated_until_sample_played(
-    page: Page, app_url: str, readiness, backend
+    page: Page, app_url: str, readiness, backend, step
 ):
     """READY but activation NOT complete: Finish setup must be disabled
     until the sample is played (parity with Tk's confirm gate). We force
     activation incomplete on the fresh profile for this row."""
     from pippal.onboarding import activation_state_path
 
+    step("force readiness = ready, remove pre-seeded activation completion")
     readiness["ready"]()
     # Remove the pre-seeded completion so the first-run gate is live.
     activation_state_path().unlink(missing_ok=True)
-    _goto(page, app_url, "onboarding")
+    _goto(page, app_url, "onboarding", step)
 
     finish = page.get_by_test_id("onboarding-finish")
     expect(finish).to_be_disabled()
+    step.check("Finish setup is disabled before the sample is played (gate held)")
     # Playing the sample enables Finish (real engine read + UI gate).
+    step("click Play sample (real engine read)")
     page.get_by_test_id("onboarding-play-sample").click()
     expect(finish).to_be_enabled(timeout=6000)
+    step.check("Finish setup became enabled after the real sample read")
     backend["engine"].stop()
 
 
 def test_onboarding_finish_marks_activation_complete(
-    page: Page, app_url: str, readiness, backend
+    page: Page, app_url: str, readiness, backend, step
 ):
     """Finish setup must call the real mark_activation_complete so the
     activation state file on disk flips to complete."""
     from pippal.onboarding import activation_state_path, load_activation_state
 
+    step("force readiness = ready, clear activation completion")
     readiness["ready"]()
     activation_state_path().unlink(missing_ok=True)
     assert not load_activation_state().is_complete
-    _goto(page, app_url, "onboarding")
+    step.check("activation state on disk: NOT complete")
+    _goto(page, app_url, "onboarding", step)
 
+    step("click Play sample (real engine read), then Finish setup")
     page.get_by_test_id("onboarding-play-sample").click()
     finish = page.get_by_test_id("onboarding-finish")
     expect(finish).to_be_enabled(timeout=6000)
@@ -150,19 +173,23 @@ def test_onboarding_finish_marks_activation_complete(
     while page.evaluate("Date.now()") < deadline and not _complete():
         page.wait_for_timeout(100)
     assert _complete(), "Finish setup did not mark activation complete on disk"
+    step.check("activation state on disk flipped to complete (real effect)")
     backend["engine"].stop()
 
 
 def test_onboarding_missing_voice_state_buttons(
-    page: Page, app_url: str, readiness, backend
+    page: Page, app_url: str, readiness, backend, step
 ):
     """MISSING_VOICE state renders Skip / Open Voice Manager / Install
     default voice; Skip closes, Open VM opens the real voices window."""
+    step("force readiness = missing_voice (stub piper.exe, no voice)")
     readiness["missing_voice"]()
-    _goto(page, app_url, "onboarding")
+    _goto(page, app_url, "onboarding", step)
     expect(page.get_by_test_id("onboarding-skip")).to_be_visible()
     expect(page.get_by_test_id("onboarding-install-voice")).to_be_visible()
+    step.check("missing_voice renders Skip + Install-default-voice buttons")
 
+    step("click Open Voice Manager")
     page.get_by_test_id("onboarding-open-vm").click()
 
     def _opened() -> bool:
@@ -172,10 +199,11 @@ def test_onboarding_missing_voice_state_buttons(
     while page.evaluate("Date.now()") < deadline and not _opened():
         page.wait_for_timeout(50)
     assert _opened(), "Open Voice Manager did not reach the host callback"
+    step.check("Open Voice Manager reached the real host callback")
 
 
 def test_onboarding_install_default_voice_real_effect(
-    page: Page, app_url: str, readiness, backend, monkeypatch
+    page: Page, app_url: str, readiness, backend, monkeypatch, step
 ):
     """Install default voice must call the REAL bridge.install_default
     _voice → install_piper_voice; we stub only the network download
@@ -185,6 +213,7 @@ def test_onboarding_install_default_voice_real_effect(
     from pippal import voices as voices_mod
     from pippal.ui import voice_manager as vm
 
+    step("force readiness = missing_voice; stub only the network download")
     readiness["missing_voice"]()
 
     def _fake_download(url: str, dest: Path, *a, **k) -> None:
@@ -192,7 +221,8 @@ def test_onboarding_install_default_voice_real_effect(
 
     monkeypatch.setattr(vm, "_streaming_download", _fake_download)
 
-    _goto(page, app_url, "onboarding")
+    _goto(page, app_url, "onboarding", step)
+    step("click Install default voice (real installer path)")
     page.get_by_test_id("onboarding-install-voice").click()
 
     def _installed() -> bool:
@@ -204,18 +234,25 @@ def test_onboarding_install_default_voice_real_effect(
     assert _installed(), "Install default voice produced no real voice file"
     # The bridge set the live config voice to the installed filename.
     assert backend["config"]["voice"].endswith(".onnx")
+    step.check(
+        f"real voice file landed on disk; live config voice == "
+        f"{backend['config']['voice']!r}"
+    )
 
 
 def test_onboarding_missing_piper_state_buttons(
-    page: Page, app_url: str, readiness, backend
+    page: Page, app_url: str, readiness, backend, step
 ):
     """MISSING_PIPER renders Close / Open Settings / Open setup. Close
     reaches close_window; Open Settings reaches the host callback."""
+    step("force readiness = missing_piper (natural state, no piper.exe)")
     readiness["missing_piper"]()
-    _goto(page, app_url, "onboarding")
+    _goto(page, app_url, "onboarding", step)
     expect(page.get_by_test_id("onboarding-close")).to_be_visible()
     expect(page.get_by_test_id("onboarding-open-setup")).to_be_visible()
+    step.check("missing_piper renders Close + Open-setup buttons")
 
+    step("click Open Settings")
     page.get_by_test_id("onboarding-open-settings").click()
     deadline = page.evaluate("Date.now()") + 4000
     while (
@@ -224,8 +261,10 @@ def test_onboarding_missing_piper_state_buttons(
     ):
         page.wait_for_timeout(50)
     assert "settings" in backend["window_opens"]
+    step.check("Open Settings reached the real host callback")
 
     before = len(backend["close_calls"])
+    step("click Close")
     page.get_by_test_id("onboarding-close").click()
     deadline = page.evaluate("Date.now()") + 4000
     while (
@@ -234,10 +273,11 @@ def test_onboarding_missing_piper_state_buttons(
     ):
         page.wait_for_timeout(50)
     assert len(backend["close_calls"]) > before
+    step.check("Close reached the real on_close_window host callback")
 
 
 def test_onboarding_missing_piper_open_setup_url(
-    page: Page, app_url: str, readiness, backend, monkeypatch
+    page: Page, app_url: str, readiness, backend, monkeypatch, step
 ):
     """Open setup instructions must call the real bridge.open_url with
     the real README URL (we capture the actual webbrowser.open call)."""
@@ -247,14 +287,17 @@ def test_onboarding_missing_piper_open_setup_url(
     monkeypatch.setattr(
         bridge_mod.webbrowser, "open", lambda u: opened.append(u) or True
     )
+    step("force readiness = missing_piper; capture real webbrowser.open")
     readiness["missing_piper"]()
-    _goto(page, app_url, "onboarding")
+    _goto(page, app_url, "onboarding", step)
+    step("click Open setup instructions")
     page.get_by_test_id("onboarding-open-setup").click()
 
     deadline = page.evaluate("Date.now()") + 4000
     while page.evaluate("Date.now()") < deadline and not opened:
         page.wait_for_timeout(50)
     assert opened and "github.com/bug-factory-kft/pippal" in opened[0]
+    step.check(f"real bridge.open_url called with the README URL: {opened[0]!r}")
 
 
 # ===========================================================================
@@ -262,9 +305,10 @@ def test_onboarding_missing_piper_open_setup_url(
 # ===========================================================================
 
 def test_settings_manage_voices_opens_vm(
-    page: Page, app_url: str, backend
+    page: Page, app_url: str, backend, step
 ):
-    _goto(page, app_url, "settings")
+    _goto(page, app_url, "settings", step)
+    step("click Manage voices…")
     page.get_by_test_id("settings-manage-voices").click()
 
     def _opened() -> bool:
@@ -274,10 +318,11 @@ def test_settings_manage_voices_opens_vm(
     while page.evaluate("Date.now()") < deadline and not _opened():
         page.wait_for_timeout(50)
     assert _opened(), "Manage… did not reach on_open_voice_manager"
+    step.check("Manage… reached the real on_open_voice_manager host callback")
 
 
 def test_settings_voice_card_empty_install_state(
-    page: Page, app_url: str, backend
+    page: Page, app_url: str, backend, step
 ):
     """With no voices installed (the fresh-profile default) the Voice
     card shows the Install CTA label and disables the voice combo —
@@ -285,7 +330,8 @@ def test_settings_voice_card_empty_install_state(
     from pippal.voices import installed_voices
 
     assert installed_voices() == []
-    _goto(page, app_url, "settings")
+    step.check("real backend state: installed_voices() == []")
+    _goto(page, app_url, "settings", step)
     expect(page.get_by_test_id("settings-manage-voices")).to_have_text(
         "Install voices…"
     )
@@ -293,24 +339,32 @@ def test_settings_voice_card_empty_install_state(
     expect(page.get_by_test_id("settings-engine-hint")).to_contain_text(
         "No Piper voice installed"
     )
+    step.check(
+        "Voice card: 'Install voices…' CTA, voice combo disabled, "
+        "'No Piper voice installed' hint"
+    )
 
 
 def test_settings_variation_slider_reflects_and_persists(
-    page: Page, app_url: str, backend
+    page: Page, app_url: str, backend, step
 ):
-    _goto(page, app_url, "settings")
+    _goto(page, app_url, "settings", step)
+    step("set Variation slider = 0.85")
     noise = page.get_by_test_id("settings-noise")
     noise.evaluate(
         "el => { el.value = '0.85';"
         " el.dispatchEvent(new Event('input', {bubbles:true})); }"
     )
     expect(page.get_by_test_id("settings-noise-value")).to_have_text("0.85")
+    step.check("noise value label shows 0.85")
+    step("click Save")
     page.get_by_test_id("settings-save").click()
     expect(page.get_by_test_id("toast")).to_contain_text("Saved")
 
     cfg = _config_on_disk(backend["profile"])
     assert abs(float(cfg["noise_scale"]) - 0.85) < 1e-6
     assert abs(backend["config"]["noise_scale"] - 0.85) < 1e-6
+    step.check("noise_scale == 0.85 persisted to config.json + live config")
 
 
 @pytest.mark.parametrize(
@@ -322,14 +376,16 @@ def test_settings_variation_slider_reflects_and_persists(
     ],
 )
 def test_settings_hotkey_each_field_rebinds_and_persists(
-    page: Page, app_url: str, backend, key: str, combo: str
+    page: Page, app_url: str, backend, key: str, combo: str, step
 ):
     """Each remaining hotkey field (Queue / Pause-Resume / Stop) rebinds
     and persists independently (Read selection is covered in the
     original suite)."""
-    _goto(page, app_url, "settings")
+    _goto(page, app_url, "settings", step)
+    step(f"set {key} = {combo}")
     page.get_by_test_id(f"settings-{key}").fill(combo)
     before = len(backend["hotkey_calls"])
+    step("click Apply")
     page.get_by_test_id("settings-apply").click()
     expect(page.get_by_test_id("toast")).to_contain_text("Applied")
 
@@ -337,6 +393,10 @@ def test_settings_hotkey_each_field_rebinds_and_persists(
     assert cfg.get(key) == combo
     assert backend["config"][key] == combo
     assert len(backend["hotkey_calls"]) > before
+    step.check(
+        f"{key} == {combo} persisted to disk + live config; "
+        "host rebind callback fired"
+    )
 
 
 @pytest.mark.parametrize(
@@ -347,13 +407,15 @@ def test_settings_hotkey_each_field_rebinds_and_persists(
     ],
 )
 def test_settings_checkbox_persists(
-    page: Page, app_url: str, backend, tid: str, cfg_key: str
+    page: Page, app_url: str, backend, tid: str, cfg_key: str, step
 ):
     """The two Reader-panel checkboxes default True; unticking and
     Saving must persist False to disk + live config."""
-    _goto(page, app_url, "settings")
+    _goto(page, app_url, "settings", step)
     box = page.get_by_test_id(tid)
     expect(box).to_be_checked()
+    step.check(f"{cfg_key} checkbox starts checked (default True)")
+    step(f"uncheck {cfg_key} and Save")
     box.uncheck()
     page.get_by_test_id("settings-save").click()
     expect(page.get_by_test_id("toast")).to_contain_text("Saved")
@@ -361,6 +423,7 @@ def test_settings_checkbox_persists(
     cfg = _config_on_disk(backend["profile"])
     assert cfg.get(cfg_key) is False
     assert backend["config"][cfg_key] is False
+    step.check(f"{cfg_key} == False persisted to config.json + live config")
 
 
 @pytest.mark.parametrize(
@@ -371,11 +434,12 @@ def test_settings_checkbox_persists(
     ],
 )
 def test_settings_spinbox_persists(
-    page: Page, app_url: str, backend, tid: str, cfg_key: str, value: str
+    page: Page, app_url: str, backend, tid: str, cfg_key: str, value: str, step
 ):
     """Distance-from-taskbar and Karaoke-offset spinboxes persist their
     integer value to disk + live config."""
-    _goto(page, app_url, "settings")
+    _goto(page, app_url, "settings", step)
+    step(f"set {cfg_key} = {value}, then Save")
     page.get_by_test_id(tid).fill(value)
     page.get_by_test_id("settings-save").click()
     expect(page.get_by_test_id("toast")).to_contain_text("Saved")
@@ -383,15 +447,17 @@ def test_settings_spinbox_persists(
     cfg = _config_on_disk(backend["profile"])
     assert cfg.get(cfg_key) == int(value)
     assert backend["config"][cfg_key] == int(value)
+    step.check(f"{cfg_key} == {value} persisted to config.json + live config")
 
 
 def test_settings_ctx_status_reflects_backend(
-    page: Page, app_url: str, backend
+    page: Page, app_url: str, backend, step
 ):
     """The Windows-integration status label reflects the REAL
     context_menu_status() the bridge returns."""
-    _goto(page, app_url, "settings")
+    _goto(page, app_url, "settings", step)
     real = backend["bridge"].context_menu_status()
+    step.check(f"real bridge.context_menu_status() == {real!r}")
     label = page.get_by_test_id("settings-ctx-status")
     if real == "all":
         expect(label).to_contain_text("installed")
@@ -399,10 +465,11 @@ def test_settings_ctx_status_reflects_backend(
         expect(label).to_contain_text("Partial")
     else:
         expect(label).to_contain_text("not installed")
+    step.check(f"status label reflects the real {real!r} state")
 
 
 def test_settings_ctx_install_real_effect(
-    page: Page, app_url: str, backend, monkeypatch
+    page: Page, app_url: str, backend, monkeypatch, step
 ):
     """Install must call the REAL bridge.install_context_menu. The
     registry write is Windows-registry side-effecting, so we capture the
@@ -418,16 +485,21 @@ def test_settings_ctx_install_real_effect(
     monkeypatch.setattr(
         bridge_mod, "context_menu_status", lambda: "all"
     )
-    _goto(page, app_url, "settings")
+    _goto(page, app_url, "settings", step)
+    step("click Windows-integration Install")
     page.get_by_test_id("settings-ctx-install").click()
     expect(page.get_by_test_id("settings-ctx-status")).to_contain_text(
         "installed", timeout=4000
     )
     assert calls == ["install"]
+    step.check(
+        "real bridge.install_context_menu called; status label refreshed "
+        "to 'installed'"
+    )
 
 
 def test_settings_ctx_remove_real_effect(
-    page: Page, app_url: str, backend, monkeypatch
+    page: Page, app_url: str, backend, monkeypatch, step
 ):
     import pippal.web_ui.bridge as bridge_mod
 
@@ -436,18 +508,24 @@ def test_settings_ctx_remove_real_effect(
         bridge_mod, "uninstall_context_menu", lambda: calls.append("remove")
     )
     monkeypatch.setattr(bridge_mod, "context_menu_status", lambda: "none")
-    _goto(page, app_url, "settings")
+    _goto(page, app_url, "settings", step)
+    step("click Windows-integration Remove")
     page.get_by_test_id("settings-ctx-remove").click()
     expect(page.get_by_test_id("settings-ctx-status")).to_contain_text(
         "not installed", timeout=4000
     )
     assert calls == ["remove"]
+    step.check(
+        "real bridge.uninstall_context_menu called; status label refreshed "
+        "to 'not installed'"
+    )
 
 
 def test_settings_view_licences_opens_notices(
-    page: Page, app_url: str, backend
+    page: Page, app_url: str, backend, step
 ):
-    _goto(page, app_url, "settings")
+    _goto(page, app_url, "settings", step)
+    step("click View licences…")
     page.get_by_test_id("settings-view-licences").click()
 
     def _opened() -> bool:
@@ -457,10 +535,11 @@ def test_settings_view_licences_opens_notices(
     while page.evaluate("Date.now()") < deadline and not _opened():
         page.wait_for_timeout(50)
     assert _opened(), "View licences… did not reach on_open_notices"
+    step.check("View licences… reached the real on_open_notices host callback")
 
 
 def test_settings_about_links_open_real_urls(
-    page: Page, app_url: str, backend, monkeypatch
+    page: Page, app_url: str, backend, monkeypatch, step
 ):
     """Each of the 5 About links must call the real bridge.open_url with
     the exact URL the backend's about_info() returns."""
@@ -473,24 +552,28 @@ def test_settings_about_links_open_real_urls(
     about = backend["bridge"].about_info()
     expected = {link["key"]: link["url"] for link in about["links"]}
     assert set(expected) == {"website", "github", "licence", "privacy", "terms"}
+    step.check("real about_info() exposes the 5 expected About links")
 
-    _goto(page, app_url, "settings")
+    _goto(page, app_url, "settings", step)
     for key, url in expected.items():
         opened.clear()
+        step(f"click About link '{key}'")
         page.get_by_test_id(f"about-{key}").click()
         deadline = page.evaluate("Date.now()") + 3000
         while page.evaluate("Date.now()") < deadline and not opened:
             page.wait_for_timeout(40)
         assert opened and opened[0] == url, f"about-{key} → {opened!r} != {url}"
+        step.check(f"about-{key} → real bridge.open_url({url!r})")
 
 
 def test_settings_cancel_closes_without_persist(
-    page: Page, app_url: str, backend
+    page: Page, app_url: str, backend, step
 ):
     """Cancel must close the window WITHOUT persisting: edit a field,
     Cancel, assert no config.json written and the host close callback
     fired."""
-    _goto(page, app_url, "settings")
+    _goto(page, app_url, "settings", step)
+    step("edit auto_hide_ms = 4321, then click Cancel")
     page.get_by_test_id("settings-auto_hide_ms").fill("4321")
     before = len(backend["close_calls"])
     page.get_by_test_id("settings-cancel").click()
@@ -505,10 +588,14 @@ def test_settings_cancel_closes_without_persist(
     # Nothing persisted — fresh profile still has no config.json.
     assert not (backend["profile"] / "config.json").exists()
     assert "auto_hide_ms" not in _config_on_disk(backend["profile"])
+    step.check(
+        "Cancel reached on_close_window and persisted NOTHING "
+        "(no config.json on disk)"
+    )
 
 
 def test_settings_save_persists_with_saved_toast(
-    page: Page, app_url: str, backend
+    page: Page, app_url: str, backend, step
 ):
     """Save persists the form and shows the "Saved." toast — distinct
     from Apply's "Applied." toast (Apply re-renders in place). The web
@@ -520,7 +607,8 @@ def test_settings_save_persists_with_saved_toast(
 
     Apply vs Save distinction is asserted: Apply → "Applied." +
     re-render; Save → "Saved." (no re-render request)."""
-    _goto(page, app_url, "settings")
+    _goto(page, app_url, "settings", step)
+    step("set auto_hide_ms = 3300, then click Save")
     page.get_by_test_id("settings-auto_hide_ms").fill("3300")
     page.get_by_test_id("settings-save").click()
 
@@ -528,21 +616,25 @@ def test_settings_save_persists_with_saved_toast(
     expect(toast).to_have_text("Saved.")
     assert _config_on_disk(backend["profile"]).get("auto_hide_ms") == 3300
     assert backend["config"]["auto_hide_ms"] == 3300
+    step.check('Save → "Saved." toast; auto_hide_ms == 3300 on disk + live config')
 
     # Contrast with Apply: same persistence, different toast, stays open.
+    step("set auto_hide_ms = 3400, then click Apply")
     page.get_by_test_id("settings-auto_hide_ms").fill("3400")
     page.get_by_test_id("settings-apply").click()
     expect(toast).to_have_text("Applied.")
     assert _config_on_disk(backend["profile"]).get("auto_hide_ms") == 3400
+    step.check('Apply → "Applied." toast; auto_hide_ms == 3400 on disk')
 
 
 def test_window_close_button_calls_bridge(
-    page: Page, app_url: str, backend
+    page: Page, app_url: str, backend, step
 ):
     """The chromeless title-bar ✕ (window-close) must reach the real
     on_close_window host callback."""
-    _goto(page, app_url, "settings")
+    _goto(page, app_url, "settings", step)
     before = len(backend["close_calls"])
+    step("click the title-bar window-close ✕")
     page.get_by_test_id("window-close").click()
 
     deadline = page.evaluate("Date.now()") + 4000
@@ -552,16 +644,17 @@ def test_window_close_button_calls_bridge(
     ):
         page.wait_for_timeout(50)
     assert len(backend["close_calls"]) > before
+    step.check("window-close ✕ reached the real on_close_window host callback")
 
 
 # ===========================================================================
 # §3 Voice Manager — controls not covered by the original 17
 # ===========================================================================
 
-def test_voice_manager_language_filter(page: Page, app_url: str, backend):
+def test_voice_manager_language_filter(page: Page, app_url: str, backend, step):
     """Picking a specific language must narrow the list to only that
     language's voices (asserted against the real catalogue)."""
-    _goto(page, app_url, "voices")
+    _goto(page, app_url, "voices", step)
     cat = backend["bridge"].get_voice_catalogue()
     langs = cat["languages"]
     assert langs, "catalogue exposes no languages"
@@ -572,26 +665,34 @@ def test_voice_manager_language_filter(page: Page, app_url: str, backend):
     target = min(counts, key=counts.get)
     expected = counts[target]
 
+    step(f"select language filter = {target!r} ({expected} voices expected)")
     page.get_by_test_id("vm-language").select_option(target)
     rows = page.locator('#view [data-testid^="vm-action-"]')
     expect(rows).to_have_count(expected)
+    step.check(
+        f"language {target!r} → exactly {expected} rows (matches real catalogue)"
+    )
 
 
-def test_voice_manager_quality_filter(page: Page, app_url: str, backend):
-    _goto(page, app_url, "voices")
+def test_voice_manager_quality_filter(page: Page, app_url: str, backend, step):
+    _goto(page, app_url, "voices", step)
     cat = backend["bridge"].get_voice_catalogue()
     counts: dict[str, int] = {}
     for v in cat["voices"]:
         counts[v["quality"]] = counts.get(v["quality"], 0) + 1
     # 'high' is always present in the curated catalogue.
     assert "high" in counts
+    step(f"select quality filter = high ({counts['high']} voices expected)")
     page.get_by_test_id("vm-quality").select_option("high")
     rows = page.locator('#view [data-testid^="vm-action-"]')
     expect(rows).to_have_count(counts["high"])
+    step.check(
+        f"quality 'high' → exactly {counts['high']} rows (matches real catalogue)"
+    )
 
 
 def test_voice_manager_row_install_real_effect(
-    page: Page, app_url: str, backend, monkeypatch
+    page: Page, app_url: str, backend, monkeypatch, step
 ):
     """A per-row Install must call the REAL bridge.install_voice →
     install_piper_voice; only the network download is stubbed, so a real
@@ -605,12 +706,13 @@ def test_voice_manager_row_install_real_effect(
 
     monkeypatch.setattr(vm, "_streaming_download", _fake_download)
 
-    _goto(page, app_url, "voices")
+    _goto(page, app_url, "voices", step)
     # Pick the first not-installed catalogue row.
     cat = backend["bridge"].get_voice_catalogue()
     vid = cat["voices"][0]["id"]
     btn = page.get_by_test_id(f"vm-action-{vid}")
     expect(btn).to_have_text("Install")
+    step(f"click per-row Install for {vid} (real installer, stubbed download)")
     btn.click()
 
     def _installed() -> bool:
@@ -623,15 +725,20 @@ def test_voice_manager_row_install_real_effect(
     # The catalogue now reports it installed (real on-disk state).
     fresh = backend["bridge"].get_voice_catalogue()
     assert any(v["id"] == vid and v["installed"] for v in fresh["voices"])
+    step.check(
+        f"real voice file for {vid} landed on disk; catalogue now reports it "
+        "installed"
+    )
 
 
 def test_voice_manager_close_button_calls_bridge(
-    page: Page, app_url: str, backend
+    page: Page, app_url: str, backend, step
 ):
     """The Voice Manager surface's window-close (the Tk dialog's Close
     button parity) reaches the real on_close_window host callback."""
-    _goto(page, app_url, "voices")
+    _goto(page, app_url, "voices", step)
     before = len(backend["close_calls"])
+    step("click the Voice Manager window-close")
     page.get_by_test_id("window-close").click()
     deadline = page.evaluate("Date.now()") + 4000
     while (
@@ -640,15 +747,21 @@ def test_voice_manager_close_button_calls_bridge(
     ):
         page.wait_for_timeout(50)
     assert len(backend["close_calls"]) > before
+    step.check("Voice Manager close reached the real on_close_window callback")
 
 
 # ===========================================================================
 # §4 Reader overlay — controls not covered by the original 17
 # ===========================================================================
 
-def _start_reading_session(page: Page, app_url: str) -> None:
+def _start_reading_session(page: Page, app_url: str, step=None) -> None:
+    if step is not None:
+        step("open overlay surface for a live reading session")
     page.goto(f"{app_url}/index.html?view=overlay")
     expect(page.locator("body")).to_have_attribute("data-ready", "overlay")
+    if step is not None:
+        step('read-aloud "PipPal overlay control coverage check sentence."'
+             " via POST /bridge read_text")
     page.evaluate(
         """async () => {
             await fetch('/bridge', {
@@ -664,42 +777,48 @@ def _start_reading_session(page: Page, app_url: str) -> None:
 
 
 def test_overlay_paused_chip_shows_on_pause(
-    page: Page, app_url: str, backend
+    page: Page, app_url: str, backend, step
 ):
     """The paused chip must appear when the engine is paused mid-read
     and clear on resume — driven by a real reading session + the real
     engine.pause_toggle."""
     engine = backend["engine"]
     try:
-        _start_reading_session(page, app_url)
+        _start_reading_session(page, app_url, step)
         expect(page.locator("body")).to_have_attribute(
             "data-overlay-state", "reading", timeout=8000
         )
         chip = page.get_by_test_id("overlay-paused")
         expect(chip).to_be_hidden()
+        step.check("overlay 'reading'; paused chip hidden")
 
+        step("engine.pause_toggle() — real pause mid-read")
         engine.pause_toggle()  # real engine pause
         expect(chip).to_be_visible(timeout=4000)
         assert backend["overlay"].snapshot()["is_paused"] is True
+        step.check("paused chip visible; backend snapshot is_paused == True")
 
+        step("engine.pause_toggle() — real resume")
         engine.pause_toggle()  # real resume
         expect(chip).to_be_hidden(timeout=4000)
         assert backend["overlay"].snapshot()["is_paused"] is False
+        step.check("paused chip hidden again; backend is_paused == False")
     finally:
         engine.stop()
 
 
-def test_overlay_drag_repositions_panel(page: Page, app_url: str, backend):
+def test_overlay_drag_repositions_panel(page: Page, app_url: str, backend, step):
     """Right-button drag must offset the panel (Tk <B3-Motion> parity).
     Asserts the panel's data-offset attribute changes and a transform is
     applied — a real DOM effect of the real drag handlers."""
-    _goto(page, app_url, "overlay")
+    _goto(page, app_url, "overlay", step)
     panel = page.get_by_test_id("overlay-panel")
     box = panel.bounding_box()
     assert box is not None
     cx = box["x"] + box["width"] / 2
     cy = box["y"] + box["height"] / 2
 
+    step("right-button drag the panel by (+60, +40)")
     page.mouse.move(cx, cy)
     page.mouse.down(button="right")
     page.mouse.move(cx + 60, cy + 40, steps=8)
@@ -708,13 +827,14 @@ def test_overlay_drag_repositions_panel(page: Page, app_url: str, backend):
     expect(panel).to_have_attribute("data-offset", "60,40", timeout=3000)
     transform = panel.evaluate("e => e.style.transform")
     assert "translate(60px,40px)" in transform.replace(" ", "")
+    step.check("panel data-offset == '60,40' and transform translate(60px,40px)")
 
 
 # ===========================================================================
 # §5 Tray-reachable effect — Recent submenu uses the engine history API
 # ===========================================================================
 
-def test_history_clear_real_effect(page: Page, app_url: str, backend):
+def test_history_clear_real_effect(page: Page, app_url: str, backend, step):
     """The tray 'Recent' submenu enumerates ``engine.get_history()`` and
     'Clear history' calls ``engine.clear_history()``. The native pystray
     menu has no DOM, but that exact engine/bridge contract is real and
@@ -735,9 +855,11 @@ def test_history_clear_real_effect(page: Page, app_url: str, backend):
     engine = backend["engine"]
     bridge = backend["bridge"]
     assert bridge.get_history() == []  # fresh profile, nothing on disk
+    step.check("fresh profile: bridge.get_history() == []")
 
     # Populate via the REAL history persistence the app uses at startup
     # (engine.attach_history(load_history(), save_history)).
+    step("save_history([2 entries]) + engine.attach_history (real startup path)")
     save_history(["First recent entry", "Second recent entry"])
     assert load_history() == ["First recent entry", "Second recent entry"]
     engine.attach_history(load_history(), save_history)
@@ -746,10 +868,13 @@ def test_history_clear_real_effect(page: Page, app_url: str, backend):
         "First recent entry",
         "Second recent entry",
     ]
+    step.check("bridge.get_history() (UI + tray source) reflects the 2 entries")
 
     # 'Clear history' (tray) → engine.clear_history(): empties memory AND
     # rewrites the real history.json on disk to [].
+    step("engine.clear_history() (the tray 'Clear history' contract)")
     engine.clear_history()
     assert bridge.get_history() == []
     assert json.loads(Path(history_mod.HISTORY_PATH).read_text("utf-8")) == []
+    step.check("history cleared in memory AND history.json on disk == []")
     engine.stop()
