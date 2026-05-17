@@ -391,3 +391,41 @@ body.overlay-mode #root { border: none; background: transparent; }
   color: var(--text);
   line-height: 1.5;
 }
+
+/* ---- Confirm modal (restores Tk messagebox.askyesno gate) ---- */
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 2000;
+}
+.modal {
+  background: var(--bg-card);
+  border: 1px solid var(--border-lt);
+  border-radius: var(--radius-card);
+  padding: 20px 22px;
+  width: 380px;
+  max-width: calc(100vw - 48px);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.6);
+}
+.modal-title {
+  font-family: var(--font-semibold);
+  font-weight: 600;
+  font-size: 15px;
+  color: var(--text);
+  margin-bottom: 10px;
+}
+.modal-body {
+  color: var(--text-dim);
+  font-size: 13px;
+  line-height: 1.5;
+  margin-bottom: 18px;
+}
+.modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}

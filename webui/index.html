@@ -33,6 +33,25 @@
 
   <div class="toast" id="toast" data-testid="toast"></div>
 
+  <!-- Confirm modal — restores the Tk messagebox.askyesno gate for
+       destructive actions (voice Remove, Reset to defaults). Hidden
+       until confirm() shows it; the action only runs on accept. -->
+  <div class="modal-backdrop hidden" id="confirm-modal"
+       data-testid="confirm-modal" role="dialog" aria-modal="true"
+       aria-labelledby="confirm-title">
+    <div class="modal">
+      <div class="modal-title" id="confirm-title"
+           data-testid="confirm-title"></div>
+      <div class="modal-body" id="confirm-body"
+           data-testid="confirm-body"></div>
+      <div class="modal-actions">
+        <button id="confirm-cancel" data-testid="confirm-cancel">No</button>
+        <button class="danger" id="confirm-ok"
+                data-testid="confirm-ok">Yes</button>
+      </div>
+    </div>
+  </div>
+
   <script src="js/api.js"></script>
   <script src="js/components.js"></script>
   <script src="js/app.js"></script>
