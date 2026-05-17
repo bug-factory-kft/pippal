@@ -689,7 +689,12 @@ def write_image_only_pdf(fixture_dir: Path) -> Path:
     return pdf_path
 
 
-def click_into_window_center(title_fragment: str) -> bool:
+def click_into_window_center(
+    title_fragment: str,
+    *,
+    process_names: tuple[str, ...] = ("msedge", "Acrobat", "AcroRd32"),
+    vertical_ratio: float = 0.45,
+) -> bool:
     """Move the cursor to and left-click the center of a top-level window.
 
     Edge's built-in PDF viewer requires the document iframe to hold
@@ -699,11 +704,21 @@ def click_into_window_center(title_fragment: str) -> bool:
     left-click in the page center reliably moves focus into the
     Chromium PDF viewer plugin's document area.
 
+    The same pattern is needed for modern Notepad on Win11 (issue #84):
+    after ``activate_window_by_exact_title_substring`` brings the
+    top-level window forward, the title-bar / tab strip still owns
+    keyboard focus, not the edit child — so ``Ctrl+A`` does not
+    select anything. A click in the document area moves focus into
+    the edit control. Pass ``process_names=("notepad",)`` and a
+    larger ``vertical_ratio`` (e.g. ``0.6``) to land below the tab
+    strip but still inside the text body.
+
     Implemented via ``user32`` ``SetCursorPos`` + ``mouse_event`` from
     PowerShell so we do not add a new Python dependency.
     """
 
     escaped = title_fragment.replace("'", "''")
+    names = ",".join(process_names)
     script = (
         "Add-Type -Namespace P -Name Win -MemberDefinition @\"\n"
         "[DllImport(\"user32.dll\")] public static extern bool SetCursorPos(int X, int Y);\n"
@@ -712,14 +727,13 @@ def click_into_window_center(title_fragment: str) -> bool:
         "[StructLayout(LayoutKind.Sequential)] public struct RECT { public int L, T, R, B; }\n"
         "[DllImport(\"user32.dll\")] public static extern bool GetWindowRect(IntPtr hWnd, out RECT lpRect);\n"
         "\"@;\n"
-        "$proc = Get-Process -Name msedge,Acrobat,AcroRd32 -ErrorAction SilentlyContinue | "
+        f"$proc = Get-Process -Name {names} -ErrorAction SilentlyContinue | "
         f"Where-Object {{ $_.MainWindowTitle -like '*{escaped}*' }} | Select-Object -First 1;\n"
         "if (-not $proc) { Write-Output 'NOWINDOW'; exit 1 }\n"
         "$rect = New-Object P.Win+RECT;\n"
         "[P.Win]::GetWindowRect($proc.MainWindowHandle, [ref] $rect) | Out-Null;\n"
-        # Click ~30% from top so we land below the toolbar but in the page.
         "$cx = [int](($rect.L + $rect.R) / 2);\n"
-        "$cy = [int]($rect.T + (($rect.B - $rect.T) * 0.45));\n"
+        f"$cy = [int]($rect.T + (($rect.B - $rect.T) * {vertical_ratio}));\n"
         "[P.Win]::SetCursorPos($cx, $cy) | Out-Null;\n"
         "[P.Win]::mouse_event(0x0002, 0, 0, 0, 0);\n"  # LEFTDOWN
         "Start-Sleep -Milliseconds 50;\n"
