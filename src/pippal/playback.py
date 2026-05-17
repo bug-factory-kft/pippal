@@ -22,6 +22,7 @@ from typing import TYPE_CHECKING
 from .config import DEFAULT_CONFIG
 from .engines.base import TTSBackend
 from .paths import TEMP_DIR
+from .pronunciation import get_dictionary
 from .text_utils import split_sentences
 from .timing import (
     CHUNK_DEADLINE_PAD_S,
@@ -87,6 +88,15 @@ def play_one(
 ) -> None:
     """Drive the per-text playback loop. Returns when the text has
     finished playing, the user cancelled, or synthesis failed."""
+    # Apply the user's local pronunciation dictionary BEFORE chunking
+    # so rules that add punctuation (e.g. "Dr. Smith" → "Doctor Smith")
+    # affect sentence boundaries the same way a rewritten input would.
+    # Empty dictionary is a cheap no-op (see pronunciation.apply).
+    try:
+        text = get_dictionary().apply(text).text
+    except Exception as exc:  # pragma: no cover - defensive
+        import sys
+        print(f"[playback] pronunciation apply failed: {exc}", file=sys.stderr)
     chunks = split_sentences(text)
     if not chunks:
         return

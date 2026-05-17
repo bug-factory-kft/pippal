@@ -10,12 +10,17 @@ the SettingsWindow's `_save` to read."""
 from __future__ import annotations
 
 import tkinter as tk
-from tkinter import ttk
-from typing import TYPE_CHECKING
+from tkinter import filedialog, messagebox, ttk
+from typing import TYPE_CHECKING, get_args
 
 from .. import plugins
 from ..config import DEFAULT_CONFIG
-from .theme import make_card
+from ..pronunciation import (
+    PronunciationRule,
+    RuleKind,
+    get_dictionary,
+)
+from .theme import UI, make_card
 
 if TYPE_CHECKING:  # pragma: no cover
     from .settings_window import SettingsWindow
@@ -226,6 +231,305 @@ def build_integration_card(sw: SettingsWindow, body: ttk.Frame) -> None:
     ttk.Button(ctx_row, text="Remove", style="Danger.TButton",
                command=sw._remove_ctx).pack(side="left", padx=(8, 0))
     sw._refresh_ctx_status()
+
+
+def build_pronunciation_card(sw: SettingsWindow, body: ttk.Frame) -> None:
+    """Local pronunciation / substitution dictionary card.
+
+    Lists rules and exposes Add / Edit / Delete / Test / Import / Export.
+    The dictionary is loaded from ``<DATA_ROOT>/pronunciation.json`` on
+    open so changes the user made in a previous session are visible
+    without restarting the app."""
+    outer, card = make_card(body, "Pronunciation")
+    outer.pack(fill="x", pady=(0, 12))
+
+    ttk.Label(
+        card,
+        text="Rewrite words before they reach the voice — names, acronyms, "
+             "URLs. Rules apply only inside this PipPal install.",
+        style="CardHint.TLabel", wraplength=480, justify="left",
+    ).pack(anchor="w", pady=(0, 10))
+
+    dictionary = get_dictionary()
+
+    list_frame = ttk.Frame(card, style="Card.TFrame")
+    list_frame.pack(fill="x")
+    listbox = tk.Listbox(
+        list_frame, height=6,
+        bg=UI["bg_input"], fg=UI["text"],
+        selectbackground=UI["accent"], selectforeground=UI["accent_dk"],
+        highlightthickness=0, borderwidth=0, activestyle="none",
+    )
+    listbox.pack(side="left", fill="x", expand=True)
+    sb = ttk.Scrollbar(list_frame, orient="vertical", command=listbox.yview,
+                       style="Vertical.TScrollbar")
+    sb.pack(side="right", fill="y")
+    listbox.configure(yscrollcommand=sb.set)
+
+    def _refresh() -> None:
+        listbox.delete(0, "end")
+        for rule in dictionary.list_rules():
+            cs = "" if rule.case_sensitive is None else (
+                " · case-sensitive" if rule.case_sensitive
+                else " · case-insensitive"
+            )
+            listbox.insert(
+                "end",
+                f"{rule.match!r:<24} → {rule.replacement!r}   "
+                f"[{rule.kind} · p{rule.priority}{cs}]",
+            )
+
+    _refresh()
+
+    btn_row = ttk.Frame(card, style="Card.TFrame")
+    btn_row.pack(fill="x", pady=(10, 0))
+
+    def _selected_index() -> int | None:
+        sel = listbox.curselection()
+        return int(sel[0]) if sel else None
+
+    def _add() -> None:
+        if _open_rule_dialog(sw, dictionary):
+            _refresh()
+
+    def _edit() -> None:
+        idx = _selected_index()
+        if idx is None:
+            messagebox.showinfo("Edit rule", "Pick a rule first.", parent=sw.win)
+            return
+        if _open_rule_dialog(sw, dictionary, index=idx):
+            _refresh()
+
+    def _delete() -> None:
+        idx = _selected_index()
+        if idx is None:
+            messagebox.showinfo("Delete rule", "Pick a rule first.", parent=sw.win)
+            return
+        rule = dictionary.list_rules()[idx]
+        if not messagebox.askyesno(
+            "Delete rule",
+            f"Delete rule {rule.match!r} → {rule.replacement!r}?",
+            parent=sw.win,
+        ):
+            return
+        dictionary.delete_rule(idx)
+        dictionary.save()
+        _refresh()
+
+    def _test() -> None:
+        _open_test_dialog(sw, dictionary)
+
+    def _export() -> None:
+        target = filedialog.asksaveasfilename(
+            parent=sw.win,
+            title="Export pronunciation rules",
+            defaultextension=".json",
+            filetypes=[("JSON", "*.json"), ("All files", "*.*")],
+        )
+        if not target:
+            return
+        try:
+            from pathlib import Path as _Path
+            dictionary.export_to_file(_Path(target))
+        except Exception as exc:
+            messagebox.showerror("Export failed", str(exc), parent=sw.win)
+            return
+        messagebox.showinfo(
+            "Exported", f"Wrote {len(dictionary.list_rules())} rules.",
+            parent=sw.win,
+        )
+
+    def _import() -> None:
+        target = filedialog.askopenfilename(
+            parent=sw.win,
+            title="Import pronunciation rules",
+            filetypes=[("JSON", "*.json"), ("All files", "*.*")],
+        )
+        if not target:
+            return
+        mode_replace = messagebox.askyesno(
+            "Import rules",
+            "Replace existing rules?\n\n"
+            "Yes = replace all current rules with the imported set.\n"
+            "No = append the imported rules to your current list.",
+            parent=sw.win,
+        )
+        try:
+            from pathlib import Path as _Path
+            n = dictionary.import_from_file(_Path(target), replace=mode_replace)
+        except Exception as exc:
+            messagebox.showerror("Import failed", str(exc), parent=sw.win)
+            return
+        dictionary.save()
+        _refresh()
+        messagebox.showinfo(
+            "Imported", f"Loaded {n} rules.", parent=sw.win,
+        )
+
+    ttk.Button(btn_row, text="Add", style="Card.TButton",
+               command=_add).pack(side="left")
+    ttk.Button(btn_row, text="Edit", style="Card.TButton",
+               command=_edit).pack(side="left", padx=(8, 0))
+    ttk.Button(btn_row, text="Delete", style="Danger.TButton",
+               command=_delete).pack(side="left", padx=(8, 0))
+    ttk.Button(btn_row, text="Test", style="Card.TButton",
+               command=_test).pack(side="left", padx=(16, 0))
+    ttk.Button(btn_row, text="Import…", style="Card.TButton",
+               command=_import).pack(side="right")
+    ttk.Button(btn_row, text="Export…", style="Card.TButton",
+               command=_export).pack(side="right", padx=(0, 8))
+
+
+def _open_rule_dialog(
+    sw: SettingsWindow,
+    dictionary: object,
+    *,
+    index: int | None = None,
+) -> bool:
+    """Modal add / edit dialog. Returns True on save, False on cancel.
+
+    Pulled out of the card builder so it stays a single small surface
+    that the test button + the listbox row both share."""
+    from ..pronunciation import PronunciationDictionary
+    assert isinstance(dictionary, PronunciationDictionary)
+
+    rules = dictionary.list_rules()
+    initial = rules[index] if index is not None else None
+
+    dlg = tk.Toplevel(sw.win)
+    dlg.title("Edit rule" if initial else "Add rule")
+    dlg.transient(sw.win)
+    dlg.grab_set()
+    dlg.configure(bg=UI["bg"])
+
+    body = ttk.Frame(dlg, style="TFrame", padding=(20, 16, 20, 16))
+    body.pack(fill="both", expand=True)
+
+    match_var = tk.StringVar(value=initial.match if initial else "")
+    repl_var = tk.StringVar(value=initial.replacement if initial else "")
+    kind_var = tk.StringVar(value=initial.kind if initial else "exact_word")
+    prio_var = tk.IntVar(value=initial.priority if initial else 100)
+    case_var = tk.StringVar(
+        value=(
+            "default" if initial is None or initial.case_sensitive is None
+            else ("yes" if initial.case_sensitive else "no")
+        )
+    )
+
+    def _row(label: str, widget: tk.Widget) -> None:
+        row = ttk.Frame(body, style="TFrame")
+        row.pack(fill="x", pady=(0, 8))
+        ttk.Label(row, text=label, width=16, anchor="w").pack(side="left")
+        widget.pack(side="left", fill="x", expand=True)
+
+    _row("Match", ttk.Entry(body, textvariable=match_var))
+    _row("Replacement", ttk.Entry(body, textvariable=repl_var))
+    kinds = list(get_args(RuleKind))
+    _row("Kind", ttk.Combobox(body, textvariable=kind_var,
+                              values=kinds, state="readonly", width=14))
+    _row("Case sensitive",
+         ttk.Combobox(body, textvariable=case_var,
+                      values=["default", "yes", "no"],
+                      state="readonly", width=14))
+    _row("Priority", ttk.Spinbox(body, from_=0, to=9999, width=8,
+                                  textvariable=prio_var))
+
+    saved = {"ok": False}
+
+    def _save() -> None:
+        try:
+            cs_text = case_var.get()
+            cs: bool | None = (
+                None if cs_text == "default"
+                else (cs_text == "yes")
+            )
+            rule = PronunciationRule(
+                match=match_var.get().strip(),
+                replacement=repl_var.get(),
+                kind=kind_var.get(),  # type: ignore[arg-type]
+                case_sensitive=cs,
+                priority=int(prio_var.get()),
+            )
+        except Exception as exc:
+            messagebox.showerror("Invalid rule", str(exc), parent=dlg)
+            return
+        if index is None:
+            dictionary.add_rule(rule)
+        else:
+            dictionary.update_rule(index, rule)
+        dictionary.save()
+        saved["ok"] = True
+        dlg.destroy()
+
+    btn_row = ttk.Frame(body, style="TFrame")
+    btn_row.pack(fill="x", pady=(8, 0))
+    ttk.Button(btn_row, text="Cancel", command=dlg.destroy).pack(side="right")
+    ttk.Button(btn_row, text="Save", style="Primary.TButton",
+               command=_save).pack(side="right", padx=(0, 8))
+
+    dlg.bind("<Escape>", lambda _e: dlg.destroy())
+    dlg.wait_window()
+    return saved["ok"]
+
+
+def _open_test_dialog(sw: SettingsWindow, dictionary: object) -> None:
+    """Modal text-in / text-out tester. No synthesis — just runs
+    :meth:`PronunciationDictionary.apply` and shows the result + which
+    rules fired."""
+    from ..pronunciation import PronunciationDictionary
+    assert isinstance(dictionary, PronunciationDictionary)
+
+    dlg = tk.Toplevel(sw.win)
+    dlg.title("Test pronunciation rules")
+    dlg.transient(sw.win)
+    dlg.grab_set()
+    dlg.configure(bg=UI["bg"])
+
+    body = ttk.Frame(dlg, style="TFrame", padding=(20, 16, 20, 16))
+    body.pack(fill="both", expand=True)
+
+    ttk.Label(body, text="Input text", style="TLabel").pack(anchor="w")
+    in_box = tk.Text(body, height=4, width=60,
+                     bg=UI["bg_input"], fg=UI["text"],
+                     insertbackground=UI["text"],
+                     highlightthickness=0, borderwidth=0)
+    in_box.pack(fill="x", pady=(4, 10))
+
+    ttk.Label(body, text="Result", style="TLabel").pack(anchor="w")
+    out_box = tk.Text(body, height=4, width=60,
+                      bg=UI["bg_input"], fg=UI["text"],
+                      highlightthickness=0, borderwidth=0,
+                      state="disabled")
+    out_box.pack(fill="x", pady=(4, 10))
+
+    audit_lbl = ttk.Label(body, text="", style="CardHint.TLabel",
+                          wraplength=520, justify="left")
+    audit_lbl.pack(anchor="w")
+
+    def _run() -> None:
+        text = in_box.get("1.0", "end-1c")
+        result = dictionary.apply(text)
+        out_box.configure(state="normal")
+        out_box.delete("1.0", "end")
+        out_box.insert("1.0", result.text)
+        out_box.configure(state="disabled")
+        if result.audit:
+            lines = "\n".join(
+                f"  • {e.rule.match!r} → {e.rule.replacement!r}  "
+                f"({e.occurrences}×)"
+                for e in result.audit
+            )
+            audit_lbl.config(text=f"Rules fired:\n{lines}")
+        else:
+            audit_lbl.config(text="No rules fired.")
+
+    btn_row = ttk.Frame(body, style="TFrame")
+    btn_row.pack(fill="x", pady=(8, 0))
+    ttk.Button(btn_row, text="Close", command=dlg.destroy).pack(side="right")
+    ttk.Button(btn_row, text="Run", style="Primary.TButton",
+               command=_run).pack(side="right", padx=(0, 8))
+
+    dlg.bind("<Escape>", lambda _e: dlg.destroy())
 
 
 def build_about_card(sw: SettingsWindow, body: ttk.Frame) -> None:
