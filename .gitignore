@@ -15,6 +15,12 @@ piper/
 voices/
 kokoro/
 
+# Web-UI migration spike: local venv + Playwright report artifacts
+.venv-web/
+.venv*/
+test-results/
+playwright-report/
+
 # Editor / IDE
 .vscode/
 .idea/
