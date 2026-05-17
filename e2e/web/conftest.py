@@ -18,6 +18,7 @@ import os
 import shutil
 import sys
 import tempfile
+import threading
 from pathlib import Path
 
 import pytest
@@ -61,9 +62,24 @@ def backend(pippal_profile: Path):
     from pippal.web_ui.server import start_web_ui_server
 
     class _NullRoot:
-        def after(self, _ms, fn=None, *a):
-            if fn:
+        """Same semantics as pippal.web_ui.app_web._NullRoot: an
+        immediate (ms<=0) hop runs inline; a delayed call schedules a
+        real timer so timed callbacks don't fire instantly."""
+
+        def after(self, ms, fn=None, *a):
+            if not fn:
+                return None
+            if not ms or ms <= 0:
                 fn(*a)
+                return None
+            t = threading.Timer(ms / 1000.0, lambda: fn(*a))
+            t.daemon = True
+            t.start()
+            return t
+
+        def after_cancel(self, t):
+            if t is not None:
+                t.cancel()
 
     ensure_dirs()
     config = load_config()
