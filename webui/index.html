@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self';" />
+  <title>PipPal</title>
+  <link rel="stylesheet" href="css/theme.css" />
+</head>
+<body>
+  <div id="root">
+    <!-- Custom chromeless title bar -->
+    <div class="titlebar" id="titlebar">
+      <img src="assets/pippal_icon.png" alt="" />
+      <span class="brand" id="brand-name">PipPal</span>
+      <button class="winbtn close" id="btn-window-close" data-testid="window-close"
+              title="Close" aria-label="Close">&#x2715;</button>
+    </div>
+
+    <!-- View container — one of the surfaces is rendered here by app.js -->
+    <div class="scroll-body" id="view" data-testid="view"></div>
+
+    <!-- Footer (Settings only) -->
+    <div class="footer hidden" id="footer">
+      <button id="btn-reset" data-testid="settings-reset">Reset to defaults</button>
+      <span class="spacer"></span>
+      <button id="btn-cancel" data-testid="settings-cancel">Cancel</button>
+      <button id="btn-apply" data-testid="settings-apply">Apply</button>
+      <button class="primary" id="btn-save" data-testid="settings-save">Save</button>
+    </div>
+  </div>
+
+  <div class="toast" id="toast" data-testid="toast"></div>
+
+  <script src="js/api.js"></script>
+  <script src="js/components.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>
