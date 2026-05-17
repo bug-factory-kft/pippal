@@ -3,11 +3,14 @@
 # Authoritative release-gate contract: docs/RELEASE_CHECKLIST.md
 # (this runner is Gate 3 of the Core release checklist).
 #
-# Maintained release-gate runner for issues #62 and #63. Drives
-# Notepad, Edge (webpage + built-in PDF viewer), and Acrobat (when
-# installed) directly to validate
+# Maintained release-gate runner for issues #62, #63, and #61. Drives
+# Notepad, Edge (webpage + built-in PDF viewer), Acrobat (when
+# installed), VS Code / Notepad++ (editor row), Windows Terminal /
+# legacy PowerShell console (terminal row), and Teams / Outlook /
+# Discord (chat / mail row) directly to validate
 # `pippal.clipboard_capture.capture_selection` on a real Windows
-# desktop session.
+# desktop session. The #61 daily-use rows do not gate release on their
+# own; their results feed the SELECTED_TEXT_RELIABILITY.md matrix.
 #
 # Unlike e2e\run-local.ps1, this runner does NOT launch the PipPal
 # desktop app. It exercises only the selected-text capture helper
@@ -114,7 +117,7 @@ $pytestArgs = @(
 )
 
 @(
-    'PipPal public selected-text UI smokes (issues #62, #63)',
+    'PipPal public selected-text UI smokes (issues #62, #63, #61)',
     "Started: $($startedAt.ToString('o'))",
     "Command: `"$pythonExe`" $($pytestArgs -join ' ')",
     "EvidenceDir: $EvidenceDir",
@@ -146,7 +149,7 @@ try {
     }
 
     $summary = [ordered]@{
-        gate = 'pippal-public-ui-smokes-issues-62-63'
+        gate = 'pippal-public-ui-smokes-issues-62-63-61'
         status = $status
         exit_code = $finalExitCode
         pytest_exit_code = $pytestExitCode
@@ -170,7 +173,14 @@ try {
             'Edge webpage selected-text happy path',
             'Edge built-in PDF viewer selected-text happy path (issue #63)',
             'Edge built-in PDF viewer image-only unsupported recovery (issue #63)',
-            'Acrobat / Adobe Reader selected-text happy path or unavailable (issue #63)'
+            'Acrobat / Adobe Reader selected-text happy path or unavailable (issue #63)',
+            'VS Code selected-text happy path or unavailable (issue #61)',
+            'Notepad++ selected-text happy path or unavailable (issue #61)',
+            'Windows Terminal buffer happy path or blocked (issue #61)',
+            'Legacy powershell.exe console blocked (issue #61)',
+            'Teams chat body blocked / unavailable (issue #61)',
+            'Outlook message body blocked / unavailable (issue #61)',
+            'Discord message body blocked / unavailable (issue #61)'
         )
     }
     $summary | ConvertTo-Json -Depth 4 | Set-Content -Encoding utf8 -Path $summaryJson

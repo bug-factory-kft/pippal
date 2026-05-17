@@ -119,3 +119,58 @@ def acrobat_exe() -> Path | None:
     from . import _harness as harness
 
     return harness.find_acrobat_exe()
+
+
+# Issue #61 — editor / terminal / chat surfaces. Each fixture returns
+# ``None`` when the app is not installed; the smoke records the
+# absence as ``unavailable`` with structured evidence rather than a
+# silent pytest skip, matching the Acrobat pattern in #63.
+
+
+@pytest.fixture(scope="session")
+def vscode_exe() -> Path | None:
+    from . import _harness as harness
+
+    return harness.find_vscode_exe()
+
+
+@pytest.fixture(scope="session")
+def notepad_pp_exe() -> Path | None:
+    from . import _harness as harness
+
+    return harness.find_notepad_pp_exe()
+
+
+@pytest.fixture(scope="session")
+def windows_terminal_exe() -> Path | None:
+    from . import _harness as harness
+
+    return harness.find_windows_terminal_exe()
+
+
+@pytest.fixture(scope="session")
+def powershell_legacy_exe() -> Path | None:
+    from . import _harness as harness
+
+    return harness.find_powershell_exe()
+
+
+@pytest.fixture(scope="session")
+def outlook_exe() -> Path | None:
+    from . import _harness as harness
+
+    return harness.find_outlook_exe()
+
+
+@pytest.fixture(scope="session")
+def teams_exe() -> Path | None:
+    from . import _harness as harness
+
+    return harness.find_teams_exe()
+
+
+@pytest.fixture(scope="session")
+def discord_exe() -> Path | None:
+    from . import _harness as harness
+
+    return harness.find_discord_exe()

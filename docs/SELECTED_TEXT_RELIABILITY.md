@@ -306,6 +306,78 @@ roadmap. The image-only smoke is the regression guard that prevents
 a viewer change from silently broadening the supported surface
 before OCR is implemented and validated.
 
+## Issue #61 Editor / Terminal / Chat Smokes
+
+What it adds:
+
+- `tests/ui_smokes/test_editor_terminal_chat_smokes.py` extends the
+  maintained UI smoke harness to editor, terminal, and chat/email body
+  surfaces. Same opt-in `PIPPAL_UI_SMOKES=1` gate, same evidence dir
+  convention, same `pass/fail/blocked/unavailable` status contract used
+  by issues #62 and #63.
+- New harness helpers in `tests/ui_smokes/_harness.py`: candidate-path
+  tables for VS Code, Notepad++, Outlook, Teams, Discord;
+  `find_*_exe` / `find_*_dir` discovery helpers; `launch_vscode`,
+  `launch_notepad_pp`, `launch_windows_terminal`; window-title waiters;
+  `force_close_vscode_for(user_data_dir)` (command-line match) and
+  `force_close_windows_terminal_for(title)` (title match with a
+  per-fixture unique suffix; #79 will tighten this further).
+
+| Smoke | Surface | What it asserts |
+| --- | --- | --- |
+| `test_vscode_selected_text_or_unavailable` | VS Code editor with a throwaway `--user-data-dir`, fixture file opened, full buffer selected | If VS Code is installed: exact captured text matches the fixture AND clipboard sentinel restored. If not installed: `unavailable` evidence with the searched paths. |
+| `test_notepad_pp_selected_text_or_unavailable` | Notepad++ if installed (`-multiInst -nosession` to avoid leaking into a developer-running instance) | Same exact-capture + clipboard-restoration contract as Notepad. Without Notepad++ installed: `unavailable`. |
+| `test_windows_terminal_buffer_selected_text_or_blocked` | Windows Terminal new window (`wt.exe --window new --title <unique>`) running an inline `Write-Host` of the fixture line under `pwsh -NoExit`; HID-injected `Ctrl+Shift+A` then `Ctrl+Shift+C` for select-all + copy | When the host window publishes its title in time AND accepts focus: captured buffer contains the fixture line on at least one right-stripped line, clipboard restored. If `wt.exe` is missing → `unavailable`. If the Appx host is slow to publish the title within 30s OR refuses focus → `blocked` with `failure_symptom` + `candidate_fix`. |
+| `test_powershell_legacy_console_blocked` | Windows PowerShell 5.1 conhost mark-mode | Always `blocked`: legacy conhost requires a mouse-driven Mark mode that is not unattended-smokable. The candidate fix in the evidence JSON is "use Windows Terminal as the modern default". |
+| `test_teams_message_body_or_blocked` | Microsoft Teams desktop chat compose surface | Without an interactive sign-in on the gate machine: `blocked` with documented sign-in candidate fix. The smoke does not auto-launch and harvest a real chat — Teams sign-in is the documented gate machine prerequisite, not a release blocker. |
+| `test_outlook_message_body_or_blocked` | Outlook desktop new-message body | Without a configured mail profile on the gate machine: `blocked` with documented profile candidate fix. |
+| `test_discord_message_body_or_unavailable` | Discord desktop message compose surface | If Discord is installed: real capture path. Otherwise `unavailable`. |
+
+Required Windows Terminal copy settings (documented in the smoke
+docstring): `selectAll` keybinding `Ctrl+Shift+A`, `copy` keybinding
+`Ctrl+Shift+C`, `copyOnSelect` defaults to `false`. The smoke matches
+PipPal's `Ctrl+C` capture surface because Windows Terminal v1.16+ also
+runs the `copy` action on `Ctrl+C` whenever a selection is active and
+`copyOnSelect` is `false`.
+
+The legacy `powershell.exe` console is documented as **unsupported for
+unattended smoke** in this matrix. Surface row in the matrix recommends
+Windows Terminal (the modern default) when capture from a legacy console
+window is needed.
+
+### Run summary
+
+Single cold run on 2026-05-17 against `qa/61-editor-terminal-chat-smokes`
+(branch head includes the Windows-Terminal `blocked`-graceful fix that
+landed after the initial dev pass):
+
+| Smoke | pass | fail | blocked | unavailable |
+| --- | --- | --- | --- | --- |
+| `test_vscode_selected_text_or_unavailable` | 1 | 0 | 0 | 0 |
+| `test_notepad_pp_selected_text_or_unavailable` | 0 | 0 | 0 | 1 (not installed) |
+| `test_windows_terminal_buffer_selected_text_or_blocked` | 0 | 0 | 1 (host slow to publish title; graceful) | 0 |
+| `test_powershell_legacy_console_blocked` | 0 | 0 | 1 (documented permanent state) | 0 |
+| `test_teams_message_body_or_blocked` | 0 | 0 | 1 (requires sign-in) | 0 |
+| `test_outlook_message_body_or_blocked` | 0 | 0 | 1 (requires profile) | 0 |
+| `test_discord_message_body_or_unavailable` | 0 | 0 | 0 | 1 (not installed) |
+
+Release-engineer must run this script under the **0.2.5 release gate**
+(see `docs/RELEASE_CHECKLIST.md` Gate 3) and append the 5-cold-run
+aggregate evidence to the release PR before signing off on broader
+editor / terminal / chat compatibility wording. The gate accepts any
+smoke whose evidence is `pass`, `blocked`, or `unavailable` per the
+existing waiver policy; a `fail` on any smoke is a release blocker.
+
+### Compatibility wording delta
+
+These surfaces are NOT yet covered by the broad "anywhere in Windows"
+copy. Until 5-cold-run aggregate evidence on a clean gate machine shows
+each smoke either `pass`, `blocked`, or `unavailable` consistently, the
+release notes for v0.2.5 should keep the wording constrained to the
+Notepad + Edge surfaces from issues #62 and #63 plus the Edge PDF viewer
+surface from issue #63. Editor / terminal / chat support is documented
+as **best-effort**, not promised.
+
 ## Issue #43 Edge Browser Smoke
 
 Worker AE ran this on `release/0.2.4` on 2026-05-14.

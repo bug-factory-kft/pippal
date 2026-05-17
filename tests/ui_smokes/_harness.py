@@ -891,11 +891,334 @@ def write_initial_clipboard(value: str) -> None:
     time.sleep(0.05)
 
 
+# ---------------------------------------------------------------------------
+# Editor / terminal / chat driver helpers (issue #61).
+# ---------------------------------------------------------------------------
+
+
+VSCODE_CANDIDATES: tuple[Path, ...] = (
+    Path(
+        r"C:\Users\tigyi\AppData\Local\Programs\Microsoft VS Code\Code.exe"
+    ),
+    Path(r"C:\Program Files\Microsoft VS Code\Code.exe"),
+    Path(r"C:\Program Files (x86)\Microsoft VS Code\Code.exe"),
+)
+
+
+NOTEPAD_PP_CANDIDATES: tuple[Path, ...] = (
+    Path(r"C:\Program Files\Notepad++\notepad++.exe"),
+    Path(r"C:\Program Files (x86)\Notepad++\notepad++.exe"),
+)
+
+
+OUTLOOK_CANDIDATES: tuple[Path, ...] = (
+    Path(r"C:\Program Files\Microsoft Office\root\Office16\OUTLOOK.EXE"),
+    Path(r"C:\Program Files (x86)\Microsoft Office\root\Office16\OUTLOOK.EXE"),
+)
+
+
+TEAMS_CANDIDATES: tuple[Path, ...] = (
+    Path(r"C:\Users\tigyi\AppData\Local\Microsoft\WindowsApps\ms-teams.exe"),
+)
+
+
+DISCORD_CANDIDATES: tuple[Path, ...] = (
+    Path(r"C:\Users\tigyi\AppData\Local\Discord"),
+)
+
+
+def find_vscode_exe() -> Path | None:
+    """Locate an installed VS Code executable, or ``None``.
+
+    Returns ``None`` when no install is found; the editor smoke records
+    that as ``unavailable`` per the shared release-gate status contract.
+    """
+
+    import shutil
+
+    which = shutil.which("code.exe")
+    if which and Path(which).is_file():
+        return Path(which)
+    for candidate in VSCODE_CANDIDATES:
+        if candidate.is_file():
+            return candidate
+    return None
+
+
+def find_notepad_pp_exe() -> Path | None:
+    """Locate an installed Notepad++ executable, or ``None``."""
+
+    import shutil
+
+    which = shutil.which("notepad++.exe")
+    if which and Path(which).is_file():
+        return Path(which)
+    for candidate in NOTEPAD_PP_CANDIDATES:
+        if candidate.is_file():
+            return candidate
+    return None
+
+
+def find_windows_terminal_exe() -> Path | None:
+    """Locate the Windows Terminal launcher (``wt.exe``), or ``None``.
+
+    Windows Terminal is distributed as an Appx package; ``wt.exe`` is a
+    Store-shim that lives under ``%LOCALAPPDATA%\\Microsoft\\WindowsApps``.
+    The shim is the documented programmatic launch path — it dispatches
+    into the actual ``WindowsTerminal.exe`` inside the Appx package.
+    """
+
+    import shutil
+
+    which = shutil.which("wt.exe")
+    if which and Path(which).is_file():
+        return Path(which)
+    candidate = Path(
+        r"C:\Users\tigyi\AppData\Local\Microsoft\WindowsApps\wt.exe"
+    )
+    if candidate.is_file():
+        return candidate
+    return None
+
+
+def find_powershell_exe() -> Path | None:
+    """Locate ``powershell.exe`` (Windows PowerShell 5.1 legacy console).
+
+    The conhost-hosted Windows PowerShell ships on every Windows install
+    and is the documented fallback when Windows Terminal is not present.
+    """
+
+    candidate = Path(r"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe")
+    if candidate.is_file():
+        return candidate
+    return None
+
+
+def find_outlook_exe() -> Path | None:
+    """Locate ``OUTLOOK.EXE``, or ``None``."""
+
+    import shutil
+
+    which = shutil.which("outlook.exe")
+    if which and Path(which).is_file():
+        return Path(which)
+    for candidate in OUTLOOK_CANDIDATES:
+        if candidate.is_file():
+            return candidate
+    return None
+
+
+def find_teams_exe() -> Path | None:
+    """Locate the new Teams (Store) Win32 shim, or ``None``.
+
+    The current ("new") Teams client is an Appx package; ``ms-teams.exe``
+    is the Store shim that ``%LOCALAPPDATA%\\Microsoft\\WindowsApps``
+    publishes for programmatic launch.
+    """
+
+    import shutil
+
+    which = shutil.which("ms-teams.exe")
+    if which and Path(which).is_file():
+        return Path(which)
+    for candidate in TEAMS_CANDIDATES:
+        if candidate.is_file():
+            return candidate
+    return None
+
+
+def find_discord_exe() -> Path | None:
+    """Locate a Discord install, or ``None``.
+
+    Discord ships as a per-user installer; the launcher lives at
+    ``%LOCALAPPDATA%\\Discord\\app-<version>\\Discord.exe`` with the
+    version baked into the directory name (squirrel pattern). We glob
+    the parent dir and pick the most recent install if multiple are
+    present.
+    """
+
+    parent = Path(r"C:\Users\tigyi\AppData\Local\Discord")
+    if not parent.is_dir():
+        return None
+    matches = sorted(parent.glob("app-*/Discord.exe"), reverse=True)
+    return matches[0] if matches else None
+
+
+def launch_vscode(
+    vscode_exe: Path,
+    fixture_path: Path,
+    *,
+    user_data_dir: Path,
+    extensions_dir: Path,
+) -> subprocess.Popen[bytes]:
+    """Open a fixture file in a clean VS Code instance and return the process.
+
+    ``--user-data-dir`` and ``--extensions-dir`` point at throwaway dirs
+    so the smoke never touches the user's real VS Code profile (no
+    signed-in account, no extensions, no recently-opened file list).
+    ``-n`` forces a new window so we don't get glued onto an already-
+    open VS Code instance the user happens to have running. ``--wait``
+    is intentionally omitted: VS Code returns immediately after the
+    window is requested, and the smoke polls for the window title
+    rather than blocking on the editor process exit.
+    """
+
+    user_data_dir.mkdir(parents=True, exist_ok=True)
+    extensions_dir.mkdir(parents=True, exist_ok=True)
+    args = [
+        str(vscode_exe),
+        "-n",
+        "--disable-extensions",
+        f"--user-data-dir={user_data_dir}",
+        f"--extensions-dir={extensions_dir}",
+        "--skip-release-notes",
+        "--skip-welcome",
+        str(fixture_path),
+    ]
+    return subprocess.Popen(args)
+
+
+def vscode_window_title(fixture_path: Path) -> str:
+    """Window-title fragment VS Code uses for an opened file.
+
+    VS Code titles its window ``<basename> - <foldername> - Visual Studio
+    Code``. The basename alone is enough for the exact-substring
+    activator scoped to the ``Code`` process name.
+    """
+
+    return fixture_path.name
+
+
+def wait_for_vscode_title(
+    fixture_path: Path,
+    *,
+    timeout_s: float = 25.0,
+    poll_interval_s: float = 0.3,
+) -> bool:
+    """Poll until a Code.exe process publishes a title containing the file name."""
+
+    needle = fixture_path.name.replace("'", "''")
+    script = (
+        "Get-Process -Name Code -ErrorAction SilentlyContinue | "
+        "Where-Object { $_.MainWindowTitle } | "
+        f"Where-Object {{ $_.MainWindowTitle -like '*{needle}*' }} | "
+        "Select-Object -First 1 | "
+        "ForEach-Object { Write-Output 'READY' }"
+    )
+    deadline = time.monotonic() + timeout_s
+    while time.monotonic() < deadline:
+        result = run_powershell(script, timeout=10.0)
+        if result.returncode == 0 and "READY" in result.stdout:
+            return True
+        time.sleep(poll_interval_s)
+    return False
+
+
+def force_close_vscode_for(user_data_dir: Path) -> None:
+    """Best-effort close of any Code.exe process bound to ``user_data_dir``.
+
+    Mirrors ``force_close_edge_user_data_dir`` — Code's child processes
+    carry the ``--user-data-dir`` argument on the command line so the
+    match cannot accidentally hit the user's real VS Code windows.
+    """
+
+    path_for_match = str(user_data_dir).replace("\\", "\\\\")
+    script = (
+        "Get-CimInstance Win32_Process -Filter \"Name = 'Code.exe'\" | "
+        f"Where-Object {{ $_.CommandLine -like '*{path_for_match}*' }} | "
+        "ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }"
+    )
+    run_powershell(script, timeout=10.0)
+
+
+def launch_windows_terminal(
+    wt_exe: Path,
+    *,
+    title: str,
+    inline_command: str,
+) -> subprocess.Popen[bytes]:
+    """Open a Windows Terminal tab running ``inline_command`` under pwsh -NoExit.
+
+    ``--title`` is the documented ``wt`` flag for forcing the tab title,
+    which our window-activation helper relies on for exact targeting.
+    ``-NoExit`` keeps the shell open after the inline command emits the
+    fixture text, so the buffer content stays selectable until the
+    smoke is finished.
+    """
+
+    pwsh = Path(r"C:\Program Files\PowerShell\7\pwsh.exe")
+    if not pwsh.is_file():
+        # Fallback: Windows PowerShell 5.1 (always present). Same -NoExit /
+        # -Command surface so the inline_command works identically.
+        pwsh = Path(r"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe")
+    args = [
+        str(wt_exe),
+        "--window",
+        "new",
+        "--title",
+        title,
+        str(pwsh),
+        "-NoLogo",
+        "-NoProfile",
+        "-NoExit",
+        "-Command",
+        inline_command,
+    ]
+    return subprocess.Popen(args)
+
+
+def wait_for_windows_terminal_title(
+    title: str,
+    *,
+    timeout_s: float = 30.0,
+    poll_interval_s: float = 0.25,
+) -> bool:
+    """Poll until a Windows Terminal window publishes the requested title.
+
+    The Windows Terminal host process is ``WindowsTerminal.exe``; the
+    ``wt.exe`` shim exits as soon as it has dispatched into the host.
+    We match on the host so we do not race the shim's exit.
+    """
+
+    escaped = title.replace("'", "''")
+    script = (
+        "Get-Process -Name WindowsTerminal -ErrorAction SilentlyContinue | "
+        "Where-Object { $_.MainWindowTitle } | "
+        f"Where-Object {{ $_.MainWindowTitle -like '*{escaped}*' }} | "
+        "Select-Object -First 1 | "
+        "ForEach-Object { Write-Output 'READY' }"
+    )
+    deadline = time.monotonic() + timeout_s
+    while time.monotonic() < deadline:
+        result = run_powershell(script, timeout=10.0)
+        if result.returncode == 0 and "READY" in result.stdout:
+            return True
+        time.sleep(poll_interval_s)
+    return False
+
+
+def force_close_windows_terminal_for(title: str) -> None:
+    """Best-effort close of Windows Terminal windows with the given title."""
+
+    escaped = title.replace("'", "''")
+    script = (
+        "Get-Process -Name WindowsTerminal -ErrorAction SilentlyContinue | "
+        f"Where-Object {{ $_.MainWindowTitle -like '*{escaped}*' }} | "
+        "Stop-Process -Force -ErrorAction SilentlyContinue"
+    )
+    run_powershell(script, timeout=10.0)
+
+
 # Public re-exports for tests.
 __all__ = [
     "ACROBAT_CANDIDATES",
+    "DISCORD_CANDIDATES",
     "EDGE_HTML_TEMPLATE",
     "EDGE_READY_SUFFIX",
+    "NOTEPAD_PP_CANDIDATES",
+    "OUTLOOK_CANDIDATES",
+    "TEAMS_CANDIDATES",
+    "VSCODE_CANDIDATES",
     "SmokeEvidence",
     "StubCaptureEngine",
     "acrobat_window_title",
@@ -906,20 +1229,34 @@ __all__ = [
     "edge_pdf_window_title",
     "edge_window_title",
     "find_acrobat_exe",
+    "find_discord_exe",
+    "find_notepad_pp_exe",
+    "find_outlook_exe",
+    "find_powershell_exe",
+    "find_teams_exe",
+    "find_vscode_exe",
+    "find_windows_terminal_exe",
     "force_close_acrobat_for",
     "force_close_edge_user_data_dir",
     "force_close_notepad_for",
+    "force_close_vscode_for",
+    "force_close_windows_terminal_for",
     "get_file_product_version",
     "launch_acrobat",
     "launch_edge",
     "launch_notepad",
+    "launch_vscode",
+    "launch_windows_terminal",
     "notepad_window_title",
     "run_powershell",
     "send_hotkey_via_keyboard_lib",
     "send_keys_to_foreground",
+    "vscode_window_title",
     "wait_for_acrobat_title",
     "wait_for_edge_pdf_title",
     "wait_for_edge_selection_ready",
+    "wait_for_vscode_title",
+    "wait_for_windows_terminal_title",
     "write_edge_fixture",
     "write_image_only_pdf",
     "write_initial_clipboard",
