@@ -69,34 +69,25 @@ def test_notepad_selected_text_happy_path(
     process = harness.launch_notepad(notepad_exe, fixture_path)
     started = time.monotonic()
     try:
+        # Issue #84 / #86: after #75 (PR for issue #63) replaced
+        # ``AppActivate`` inside ``activate_window_by_title_fragment``
+        # with the Win32 ``SetForegroundWindow`` + Alt key-up/key-down
+        # foreground-lock bypass, the top-level Notepad window is
+        # foregrounded but the title-bar / tab strip still owns
+        # keyboard focus on modern Win11 Notepad — Ctrl+A then selects
+        # nothing and the capture comes back empty 5/5 cold runs. The
+        # activate helper now folds in a ``click_into_window_center``
+        # nudge when ``nudge_process_names`` is passed; this moves
+        # focus from the tab strip into the edit body the same way
+        # the VS Code smoke (#61) does. ``nudge_vertical_ratio`` is
+        # ``0.6`` by default so the click lands below the tab strip.
         focused = harness.activate_window_by_title_fragment(
-            harness.notepad_window_title(fixture_path)
+            harness.notepad_window_title(fixture_path),
+            nudge_process_names=("notepad",),
         )
         assert focused, (
             f"Notepad window for {fixture_path.name} did not accept focus; "
             "another modal window may be in the foreground"
-        )
-
-        # Issue #84: after #75 (PR for issue #63) replaced ``AppActivate``
-        # inside ``activate_window_by_title_fragment`` with the Win32
-        # ``SetForegroundWindow`` + Alt key-up/key-down foreground-lock
-        # bypass, the top-level Notepad window is foregrounded but the
-        # title-bar / tab strip still owns keyboard focus on modern
-        # Win11 Notepad — Ctrl+A then selects nothing and the capture
-        # comes back empty 5/5 cold runs. A single left-click in the
-        # document body moves focus from the tab strip into the edit
-        # control, mirroring the pattern the VS Code smoke uses to
-        # nudge focus into the editor pane. ``vertical_ratio=0.6``
-        # lands below the tab strip but well inside the text body.
-        clicked = harness.click_into_window_center(
-            harness.notepad_window_title(fixture_path),
-            process_names=("notepad",),
-            vertical_ratio=0.6,
-        )
-        assert clicked, (
-            f"Could not click into Notepad document body for "
-            f"{fixture_path.name}; window may have been minimised or "
-            "GetWindowRect failed"
         )
         time.sleep(0.2)  # let Notepad receive the focus change
 
@@ -201,29 +192,23 @@ def test_notepad_no_selection_recovery_path(
     process = harness.launch_notepad(notepad_exe, fixture_path)
     started = time.monotonic()
     try:
+        # Issue #84 / #86: mirror the happy-path focus dance so both
+        # Notepad smokes use the same primitives. The recovery smoke
+        # happened to be 5/5 green without the click (it sends
+        # ``{END}{HOME}``, not a Ctrl-combo, so the title-bar-owning-
+        # focus regression did not manifest there), but keeping the
+        # two smokes on the same focus path prevents the recovery
+        # smoke from going subtly red the next time anyone tweaks the
+        # foreground primitives. ``nudge_process_names=("notepad",)``
+        # asks the activate helper to fold in the
+        # ``click_into_window_center`` nudge after the foreground
+        # swap.
         focused = harness.activate_window_by_title_fragment(
-            harness.notepad_window_title(fixture_path)
+            harness.notepad_window_title(fixture_path),
+            nudge_process_names=("notepad",),
         )
         assert focused, (
             f"Notepad window for {fixture_path.name} did not accept focus"
-        )
-
-        # Issue #84: mirror the happy-path focus dance so both Notepad
-        # smokes use the same primitives. The recovery smoke happened
-        # to be 5/5 green without the click (it sends ``{END}{HOME}``,
-        # not a Ctrl-combo, so the title-bar-owning-focus regression
-        # did not manifest there), but keeping the two smokes on the
-        # same focus path prevents the recovery smoke from going
-        # subtly red the next time anyone tweaks the foreground
-        # primitives.
-        clicked = harness.click_into_window_center(
-            harness.notepad_window_title(fixture_path),
-            process_names=("notepad",),
-            vertical_ratio=0.6,
-        )
-        assert clicked, (
-            f"Could not click into Notepad document body for "
-            f"{fixture_path.name}"
         )
         time.sleep(0.2)
 

@@ -4,21 +4,59 @@ This module is the *small* extension of the existing live UI evidence
 gate (`e2e/`) — it does not replace it. The live UI gate proves the
 PipPal desktop app's own widgets; these smokes prove the source
 ``pippal.clipboard_capture.capture_selection`` helper against a foreign
-app (Notepad / Edge) that the user actually selects text in.
+app (Notepad / Edge / VS Code / PDF viewers) that the user actually
+selects text in.
 
 Two design rules:
 
 1. **Selection must be set up by an external proven path**, not by the
-   capture helper itself. We use ``WScript.Shell.AppActivate`` for
-   focus and ``System.Windows.Forms.SendKeys.SendWait('^a')`` for the
-   selection, because the issue #57 / #58 repro evidence in
-   ``docs/SELECTED_TEXT_RELIABILITY.md`` already proves they work on
-   modern Notepad on Win11.
+   capture helper itself. ``WScript.Shell.AppActivate`` is no longer
+   the proven path: it does fuzzy title matching (on a gate machine
+   with 15+ Serena Dashboard windows it latches onto the wrong window
+   and silently drives Ctrl+A there, corrupting the user's clipboard),
+   and on modern Win11 Notepad ``SendKeys ^a`` reaches the title bar
+   / tab strip instead of the edit body. The proven path is now Win32
+   ``SetForegroundWindow`` + Alt key-up/key-down foreground-lock
+   bypass (``activate_window_by_exact_title_substring``, which
+   ``activate_window_by_title_fragment`` delegates to) for focus, and
+   HID-level injection via the ``keyboard`` Python lib
+   (``send_hotkey_via_keyboard_lib``) for the select-and-copy combo.
 2. **Evidence is structured**, not ad-hoc prints. Every smoke writes a
    JSON evidence file under the session evidence dir with the foreign
    app version, fixture path, captured text, and clipboard-restoration
    result. The release reviewer reads these files; the test asserts
    that capture matched and the clipboard was restored.
+
+Patterns
+--------
+
+Three patterns cover every surface the maintained smokes drive:
+
+1. **Desktop edit-control apps** (Notepad, Notepad++, VS Code): the
+   top-level window foregrounds correctly via Win32, but the title
+   bar / tab strip keeps keyboard focus — ``Ctrl+A`` selects nothing
+   unless focus is nudged into the document body first. Pattern:
+   ``activate_window_by_title_fragment(..., nudge_process_names=(...))``
+   (the activate helper folds the click-nudge in via
+   ``click_into_window_center``), then
+   ``send_hotkey_via_keyboard_lib("ctrl+a")`` to drive select-all on
+   the same HID path the capture helper uses for Ctrl+C.
+2. **Chromium-based surfaces** (Edge HTML pages, Edge built-in PDF
+   viewer): no click-nudge is needed when the fixture publishes a
+   readiness marker the harness can wait for. Pattern:
+   ``wait_for_edge_selection_ready`` (or
+   ``wait_for_edge_pdf_title``) to gate on the renderer being live,
+   then ``activate_window_by_title_fragment`` (Edge HTML) or
+   ``activate_window_by_exact_title_substring`` (Edge PDF, where
+   exact process filtering avoids cross-window matches), then
+   ``send_hotkey_via_keyboard_lib("ctrl+a")``. PDF viewers may still
+   need a retry-only ``click_into_window_center`` to nudge focus
+   from the toolbar into the iframe on cold-start races.
+3. **Acrobat-style host-modal PDF readers**: documented ``blocked``
+   outcome — Acrobat's first-run / EULA / sign-in modals routinely
+   steal focus from the document and ``Ctrl+A`` then lands on the
+   modal rather than the page. The smoke records ``blocked`` rather
+   than asserting a pass; the reliability matrix tracks the rate.
 """
 
 from __future__ import annotations
@@ -124,7 +162,13 @@ def get_file_product_version(exe_path: Path) -> str:
     return result.stdout.strip() or "unknown"
 
 
-def activate_window_by_title_fragment(title_fragment: str, *, attempts: int = 25) -> bool:
+def activate_window_by_title_fragment(
+    title_fragment: str,
+    *,
+    attempts: int = 25,
+    nudge_process_names: tuple[str, ...] = (),
+    nudge_vertical_ratio: float = 0.6,
+) -> bool:
     """Bring a window whose title contains ``title_fragment`` to the foreground.
 
     Originally backed by ``WScript.Shell.AppActivate`` (per the issue
@@ -139,12 +183,41 @@ def activate_window_by_title_fragment(title_fragment: str, *, attempts: int = 25
     clipboard. ``activate_window_by_exact_title_substring`` verifies
     ``GetForegroundWindow`` against the target handle before
     returning success, which AppActivate cannot do.
+
+    Title-bar-owns-focus follow-up (issue #84): on modern Win11
+    desktop edit-control apps (Notepad as a tabbed UWP-style shell,
+    Notepad++, VS Code) the top-level window foregrounds correctly
+    but the title bar / tab strip keeps keyboard focus, so a
+    follow-up ``Ctrl+A`` selects nothing and the capture comes back
+    empty. Pass ``nudge_process_names`` (e.g. ``("notepad",)``) to
+    have the helper run ``click_into_window_center`` after a
+    successful activation, nudging focus into the document body.
+    Default is ``()`` — the helper does nothing extra, so existing
+    Chromium / Edge callers are unaffected. ``nudge_vertical_ratio``
+    defaults to ``0.6`` so the click lands below the tab strip but
+    well inside the text body; tune per app if needed.
+
+    A failed nudge does not flip the overall return value: the
+    activation already succeeded, and the call site can run its own
+    follow-up click via ``click_into_window_center`` if a specific
+    geometry is required (see the PDF / VS Code retry pattern). The
+    return value reflects only whether the foreground window swap
+    landed on the requested target.
     """
 
-    return activate_window_by_exact_title_substring(
+    activated = activate_window_by_exact_title_substring(
         title_fragment,
         attempts=attempts,
     )
+    if not activated:
+        return False
+    if nudge_process_names:
+        click_into_window_center(
+            title_fragment,
+            process_names=nudge_process_names,
+            vertical_ratio=nudge_vertical_ratio,
+        )
+    return True
 
 
 def activate_window_by_exact_title_substring(
