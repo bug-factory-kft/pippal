@@ -231,27 +231,22 @@ def test_vscode_selected_text_or_unavailable(
         # area and capture the selection. Electron's renderer can take
         # a couple of paint frames before the file content is keyboard-
         # reachable; the fixture content does not change between
-        # attempts.
+        # attempts. ``nudge_process_names=("Code",)`` folds the
+        # editor-pane click-nudge into the activate helper (issue #88)
+        # so every attempt lands focus in the document area rather
+        # than the title bar / tab strip.
         captured = ""
         clipboard_after = ""
         focused = False
-        for attempt in range(5):
+        for _attempt in range(5):
             focused = harness.activate_window_by_exact_title_substring(
                 harness.vscode_window_title(fixture_path),
                 process_names=("Code",),
                 attempts=30,
+                nudge_process_names=("Code",),
             )
             if not focused:
                 continue
-            if attempt > 0:
-                # Nudge focus into the editor pane on retry. Clicking
-                # the window centre is the same primitive the PDF
-                # smokes use for the PDF.js iframe; the editor area is
-                # in the centre of a freshly-opened VS Code window.
-                harness.click_into_window_center(
-                    harness.vscode_window_title(fixture_path)
-                )
-                time.sleep(0.3)
             # Settle so VS Code finishes wiring up the editor model
             # before Ctrl+A reaches it.
             time.sleep(0.6)
@@ -280,8 +275,9 @@ def test_vscode_selected_text_or_unavailable(
             extra={
                 "selection_method": "keyboard.send('ctrl+a') HID-level injection",
                 "focus_method": (
-                    "activate_window_by_exact_title_substring + "
-                    "click_into_window_center retry"
+                    "activate_window_by_exact_title_substring with "
+                    "nudge_process_names=('Code',) (folded click-nudge "
+                    "into editor pane, issue #88)"
                 ),
                 "user_data_dir": str(user_data_dir),
                 "extensions_dir": str(extensions_dir),
@@ -367,6 +363,7 @@ def test_notepad_pp_selected_text_or_unavailable(
             fixture_path.name,
             process_names=("notepad++",),
             attempts=30,
+            nudge_process_names=("notepad++",),
         )
         assert focused, (
             f"Notepad++ window for {fixture_path.name} did not accept "
@@ -396,7 +393,11 @@ def test_notepad_pp_selected_text_or_unavailable(
             duration_s=time.monotonic() - started,
             extra={
                 "selection_method": "SendKeys ^a",
-                "focus_method": "activate_window_by_exact_title_substring",
+                "focus_method": (
+                    "activate_window_by_exact_title_substring with "
+                    "nudge_process_names=('notepad++',) (folded click-"
+                    "nudge into editor pane, issue #88)"
+                ),
                 "launch_flags": "-multiInst -nosession",
             },
         )

@@ -37,10 +37,17 @@ Three patterns cover every surface the maintained smokes drive:
    bar / tab strip keeps keyboard focus — ``Ctrl+A`` selects nothing
    unless focus is nudged into the document body first. Pattern:
    ``activate_window_by_title_fragment(..., nudge_process_names=(...))``
-   (the activate helper folds the click-nudge in via
-   ``click_into_window_center``), then
-   ``send_hotkey_via_keyboard_lib("ctrl+a")`` to drive select-all on
-   the same HID path the capture helper uses for Ctrl+C.
+   for the loose-match helper, or
+   ``activate_window_by_exact_title_substring(..., process_names=(...), nudge_process_names=(...))``
+   for the process-filtered exact helper VS Code / Notepad++ /
+   Windows Terminal smokes use. Both activate helpers accept the
+   nudge tuple and fold the click-nudge in via
+   ``click_into_window_center`` after a successful Win32 foreground
+   swap, then the caller runs ``send_hotkey_via_keyboard_lib("ctrl+a")``
+   to drive select-all on the same HID path the capture helper uses
+   for Ctrl+C. Default ``nudge_process_names=()`` is bit-identical to
+   the pre-#86 / pre-#88 behaviour for callers that don't need a
+   nudge (Edge, Edge PDF, Acrobat).
 2. **Chromium-based surfaces** (Edge HTML pages, Edge built-in PDF
    viewer): no click-nudge is needed when the fixture publishes a
    readiness marker the harness can wait for. Pattern:
@@ -205,19 +212,12 @@ def activate_window_by_title_fragment(
     landed on the requested target.
     """
 
-    activated = activate_window_by_exact_title_substring(
+    return activate_window_by_exact_title_substring(
         title_fragment,
         attempts=attempts,
+        nudge_process_names=nudge_process_names,
+        nudge_vertical_ratio=nudge_vertical_ratio,
     )
-    if not activated:
-        return False
-    if nudge_process_names:
-        click_into_window_center(
-            title_fragment,
-            process_names=nudge_process_names,
-            vertical_ratio=nudge_vertical_ratio,
-        )
-    return True
 
 
 def activate_window_by_exact_title_substring(
@@ -226,6 +226,8 @@ def activate_window_by_exact_title_substring(
     process_names: tuple[str, ...] | None = None,
     attempts: int = 25,
     poll_interval_ms: int = 200,
+    nudge_process_names: tuple[str, ...] = (),
+    nudge_vertical_ratio: float = 0.6,
 ) -> bool:
     """Bring the *correct* top-level window matching ``title_substring`` forward.
 
@@ -247,6 +249,27 @@ def activate_window_by_exact_title_substring(
     swap actually took effect (Windows can silently flash the taskbar
     instead of stealing focus, so a ``True`` return from
     ``SetForegroundWindow`` is not sufficient evidence on its own).
+
+    Title-bar-owns-focus follow-up (issue #88): the same Win11
+    title-bar-keeps-keyboard-focus quirk that motivated the
+    ``activate_window_by_title_fragment`` nudge in issue #86 also
+    affects callers of the exact-substring helper — VS Code (Electron)
+    and Notepad++ both foreground correctly but route ``Ctrl+A`` to
+    the title bar / tab strip on first focus. Pass
+    ``nudge_process_names`` (e.g. ``("Code",)`` or
+    ``("notepad++",)``) to have the helper run
+    ``click_into_window_center`` after a successful activation,
+    nudging focus into the document body. Default is ``()`` — the
+    helper does nothing extra, so existing PDF / Edge / Acrobat
+    callers are bit-identical to the pre-#88 behaviour.
+    ``nudge_vertical_ratio`` defaults to ``0.6`` to land below the
+    tab strip but well inside the text body; tune per app if needed.
+
+    A failed nudge does not flip the overall return value: the
+    activation already succeeded, and the call site can run its own
+    follow-up click via ``click_into_window_center`` if a specific
+    geometry is required. The return value reflects only whether the
+    foreground window swap landed on the requested target.
     """
 
     escaped = title_substring.replace("'", "''")
@@ -288,7 +311,14 @@ def activate_window_by_exact_title_substring(
         "Write-Output 'MISS'; exit 1"
     )
     result = run_powershell(script, timeout=20.0)
-    return result.returncode == 0 and "OK" in result.stdout
+    activated = result.returncode == 0 and "OK" in result.stdout
+    if activated and nudge_process_names:
+        click_into_window_center(
+            title_substring,
+            process_names=nudge_process_names,
+            vertical_ratio=nudge_vertical_ratio,
+        )
+    return activated
 
 
 def send_keys_to_foreground(keys: str, *, settle_s: float = 0.15) -> bool:
