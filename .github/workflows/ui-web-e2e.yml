@@ -1,0 +1,93 @@
+name: UI Web E2E
+
+# The merge-required UI E2E gate for the migrated web frontend.
+#
+# Runs the Playwright suite in e2e/web/ against the REAL served
+# frontend (webui/ + pippal.web_ui.server) wired to the REAL backend
+# (TTSEngine / config / voices), in **served + headless** mode:
+#
+#   * conftest.py starts pippal.web_ui.server (the same localhost
+#     static + /bridge JSON server the desktop pywebview window uses)
+#     on a free port — NO pywebview desktop window is created;
+#   * pytest-playwright launches **headless** Chromium (the default —
+#     no --headed flag is passed) and points it at that local server.
+#
+# So there is NO pywebview window and NO interactive desktop / Session
+# 1 requirement: this runs unattended on the headless LocalSystem
+# self-hosted Windows runner. The job fails if any test fails (pytest's
+# exit code is the job result).
+#
+# Scope guard: this is additive. It does NOT touch ci.yml /
+# e2e-windows.yml / bench-baseline.yml, and the web e2e dir stays
+# excluded from the default `python -m pytest` (pytest.ini:
+# testpaths = tests), so the unit/e2e-windows jobs are unaffected.
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  web-ui-e2e:
+    name: Web UI E2E (served, headless Chromium)
+    # Org-level self-hosted Windows runner (LocalSystem, headless).
+    # actions/setup-python@v5 works there. No interactive desktop is
+    # needed because the suite is served + headless (see header).
+    runs-on: [self-hosted, windows, pippal-windows]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install package + web deps + Playwright e2e requirements
+        shell: pwsh
+        run: |
+          python -m pip install --upgrade pip
+          # The package itself (real backend the served UI talks to).
+          python -m pip install -e .
+          # Web frontend runtime dep (BSD-3). Not strictly needed in
+          # served/headless mode, but install it so the web_ui package
+          # imports identically to the desktop path.
+          python -m pip install pywebview
+          # Playwright + pytest-playwright + pytest-html (test-only).
+          python -m pip install -r e2e/web/requirements.txt
+
+      - name: Install Chromium for Playwright
+        shell: pwsh
+        run: |
+          python -m playwright install chromium
+
+      - name: Run web Playwright suite (served + headless)
+        shell: pwsh
+        run: |
+          # Headless is the pytest-playwright default — no --headed is
+          # passed, so no browser window and no pywebview window. The
+          # conftest serves the UI in-process; Chromium hits localhost.
+          # --tracing/--screenshot retain-on-failure feed the artifact;
+          # pytest's non-zero exit on any failure fails this job.
+          New-Item -ItemType Directory -Force -Path playwright-report | Out-Null
+          python -m pytest e2e/web -q `
+            --browser chromium `
+            --tracing=retain-on-failure `
+            --screenshot=only-on-failure `
+            --video=retain-on-failure `
+            --output=playwright-report/artifacts `
+            --html=playwright-report/report.html `
+            --self-contained-html
+
+      - name: Upload Playwright report + traces
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: web-ui-e2e-playwright-report
+          path: playwright-report/
+          if-no-files-found: warn
+          retention-days: 14
