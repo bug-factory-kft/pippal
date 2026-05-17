@@ -6,6 +6,7 @@ seam was called with the right payload."""
 from __future__ import annotations
 
 import json
+import os
 import socket
 import time
 import urllib.error
@@ -449,3 +450,145 @@ class TestServerWiring:
             port = s.getsockname()[1]
 
             assert start_command_server(engine, port=port) is None
+
+
+class TestE2EHermeticityHook:
+    """The opt-in ephemeral-port + per-test-token hook used by the web
+    E2E harness. Must be strictly behaviour-preserving for production
+    (env unset => byte-identical to before)."""
+
+    def test_production_default_is_unchanged_when_env_unset(
+        self, monkeypatch
+    ):
+        # No env vars => the fixed well-known port, no token gate.
+        monkeypatch.delenv("PIPPAL_CMD_SERVER_PORT", raising=False)
+        monkeypatch.delenv("PIPPAL_CMD_SERVER_TOKEN", raising=False)
+        from pippal.paths import CMD_SERVER_PORT
+
+        engine = _FakeEngine()
+        # Bind the real fixed port only if it's free here; the contract
+        # we assert is "no env => default port arg used, no token".
+        srv = start_command_server(engine, port=_free_port())
+        assert srv is not None
+        try:
+            port = srv.server_address[1]
+            time.sleep(0.05)
+            # No token required: a plain request is accepted.
+            status, _ = _post(port, "/read", {"text": "hello"})
+            assert status == 200
+            assert engine.calls == ["hello"]
+            # Env was not written (production never touches it).
+            assert "PIPPAL_CMD_SERVER_PORT" not in os.environ
+            assert CMD_SERVER_PORT == 51677
+        finally:
+            srv.shutdown()
+            srv.server_close()
+
+    def test_env_port_zero_binds_ephemeral_and_publishes_it(
+        self, monkeypatch
+    ):
+        monkeypatch.setenv("PIPPAL_CMD_SERVER_PORT", "0")
+        monkeypatch.delenv("PIPPAL_CMD_SERVER_TOKEN", raising=False)
+        engine = _FakeEngine()
+        # Default port arg -> env override kicks in -> OS picks a port.
+        srv = start_command_server(engine)
+        assert srv is not None
+        try:
+            bound = srv.server_address[1]
+            assert bound != 51677
+            # The actually-bound port was published back to the env.
+            assert os.environ["PIPPAL_CMD_SERVER_PORT"] == str(bound)
+            time.sleep(0.05)
+            status, _ = _post(bound, "/read", {"text": "ephem"})
+            assert status == 200 and engine.calls == ["ephem"]
+        finally:
+            srv.shutdown()
+            srv.server_close()
+
+    def test_token_is_required_and_enforced_when_set(self, monkeypatch):
+        monkeypatch.setenv("PIPPAL_CMD_SERVER_PORT", "0")
+        monkeypatch.setenv("PIPPAL_CMD_SERVER_TOKEN", "secret-token-123")
+        engine = _FakeEngine()
+        srv = start_command_server(engine)
+        assert srv is not None
+        try:
+            port = srv.server_address[1]
+            time.sleep(0.05)
+
+            # No token -> rejected (404), engine NOT driven.
+            req = urllib.request.Request(
+                f"http://127.0.0.1:{port}/read",
+                data=json.dumps({"text": "no-token"}).encode("utf-8"),
+                headers={"Content-Type": "application/json"},
+            )
+            code = None
+            try:
+                urllib.request.urlopen(req, timeout=2)
+            except urllib.error.HTTPError as e:
+                code = e.code
+            assert code == 404
+            assert engine.calls == []
+
+            # Wrong token -> rejected.
+            req2 = urllib.request.Request(
+                f"http://127.0.0.1:{port}/read",
+                data=json.dumps({"text": "bad"}).encode("utf-8"),
+                headers={
+                    "Content-Type": "application/json",
+                    "X-PipPal-Token": "wrong",
+                },
+            )
+            code2 = None
+            try:
+                urllib.request.urlopen(req2, timeout=2)
+            except urllib.error.HTTPError as e:
+                code2 = e.code
+            assert code2 == 404
+            assert engine.calls == []
+
+            # Correct token -> accepted, engine driven.
+            req3 = urllib.request.Request(
+                f"http://127.0.0.1:{port}/read",
+                data=json.dumps({"text": "ok"}).encode("utf-8"),
+                headers={
+                    "Content-Type": "application/json",
+                    "X-PipPal-Token": "secret-token-123",
+                },
+            )
+            with urllib.request.urlopen(req3, timeout=2) as r:
+                assert r.status == 200
+            assert engine.calls == ["ok"]
+        finally:
+            srv.shutdown()
+            srv.server_close()
+
+    def test_open_file_helper_targets_env_instance_with_token(
+        self, monkeypatch, tmp_path
+    ):
+        """`python -m pippal.open_file` (the registry command) must hit
+        the env-published port WITH the token when the hooks are set —
+        the exact path the hermetic E2E test relies on."""
+        monkeypatch.setenv("PIPPAL_CMD_SERVER_PORT", "0")
+        monkeypatch.setenv("PIPPAL_CMD_SERVER_TOKEN", "tok-xyz")
+        engine = _FakeEngine()
+        srv = start_command_server(engine)
+        assert srv is not None
+        try:
+            time.sleep(0.05)
+            target = tmp_path / "doc.txt"
+            target.write_text("hermetic open-file marker", "utf-8")
+            import sys
+
+            from pippal.open_file import main as _open_main
+
+            monkeypatch.setattr(sys, "argv", ["open_file", str(target)])
+            assert _open_main() == 0
+            # The engine really read the opened file's contents via the
+            # env-targeted, token-gated instance.
+            deadline = time.time() + 3.0
+            while time.time() < deadline and not engine.calls:
+                time.sleep(0.02)
+            assert engine.calls == ["hermetic open-file marker"]
+        finally:
+            srv.shutdown()
+            srv.server_close()
