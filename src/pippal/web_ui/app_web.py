@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import sys
 import threading
+from collections.abc import Callable
 from typing import Any
 
 import pystray
@@ -37,6 +38,78 @@ from .windows import WebWindowManager
 def _selected_piper_missing(config: dict[str, Any]) -> bool:
     engine_name = str(config.get("engine") or "piper").lower()
     return engine_name == "piper" and not PIPER_EXE.exists()
+
+
+def build_tray_menu(
+    *,
+    engine: Any,
+    config: dict[str, Any],
+    windows: Any,
+    hotkey_manager: Any,
+) -> tuple[pystray.Menu, dict[str, Any]]:
+    """Compose the native pystray menu the web app runs in the tray.
+
+    Extracted verbatim from :func:`main` so the *exact same* menu and
+    callables can be exercised head-less by the integration suite (a
+    ``pystray.MenuItem`` is callable — ``item(icon)`` is precisely the
+    dispatch a real tray click performs, minus the OS pixel rendering).
+
+    Returns ``(menu, primitives)``; ``primitives`` exposes the bound
+    callables (``quit_action``, ``history_submenu``, ...) so a test can
+    assert their real effect without re-deriving them. ``main`` only
+    consumes ``menu`` — behaviour is unchanged.
+    """
+
+    def quit_action(icon: Any, _item: Any) -> None:
+        engine.stop()
+        try:
+            hotkey_manager.unregister_all()
+            hotkey_manager.stop()
+        except Exception:
+            pass
+        try:
+            icon.stop()
+        except Exception:
+            pass
+        windows.shutdown()
+
+    def replay_handler(text: str) -> Callable[[Any, Any], None]:
+        return lambda _i, _it: engine.replay_text(text)
+
+    def history_submenu() -> list[pystray.MenuItem]:
+        items = engine.get_history()
+        if not items:
+            return [pystray.MenuItem("(empty)", lambda _i, _it: None, enabled=False)]
+        out = []
+        for t in items[:10]:
+            preview = t.replace("\n", " ").strip()
+            if len(preview) > 70:
+                preview = preview[:67] + "…"
+            out.append(pystray.MenuItem(preview, replay_handler(t)))
+        out.append(pystray.Menu.SEPARATOR)
+        out.append(
+            pystray.MenuItem("Clear history", lambda _i, _it: engine.clear_history())
+        )
+        return out
+
+    menu = pystray.Menu(
+        pystray.MenuItem("Recent", pystray.Menu(history_submenu)),
+        pystray.MenuItem("First-run check", lambda _i, _it: windows.open("onboarding")),
+        pystray.Menu.SEPARATOR,
+        pystray.MenuItem(
+            "Settings…",
+            lambda _i, _it: windows.open("settings"),
+            default=True,
+        ),
+        pystray.Menu.SEPARATOR,
+        pystray.MenuItem("Quit", quit_action),
+    )
+    primitives = {
+        "quit_action": quit_action,
+        "history_submenu": history_submenu,
+        "replay_handler": replay_handler,
+    }
+    return menu, primitives
 
 
 def main() -> None:
@@ -170,49 +243,11 @@ def main() -> None:
 
     threading.Thread(target=tray_poll, daemon=True).start()
 
-    def quit_action(icon: Any, _item: Any) -> None:
-        engine.stop()
-        try:
-            hotkey_manager.unregister_all()
-            hotkey_manager.stop()
-        except Exception:
-            pass
-        try:
-            icon.stop()
-        except Exception:
-            pass
-        windows.shutdown()
-
-    def replay_handler(text: str):
-        return lambda _i, _it: engine.replay_text(text)
-
-    def history_submenu() -> list[pystray.MenuItem]:
-        items = engine.get_history()
-        if not items:
-            return [pystray.MenuItem("(empty)", lambda _i, _it: None, enabled=False)]
-        out = []
-        for t in items[:10]:
-            preview = t.replace("\n", " ").strip()
-            if len(preview) > 70:
-                preview = preview[:67] + "…"
-            out.append(pystray.MenuItem(preview, replay_handler(t)))
-        out.append(pystray.Menu.SEPARATOR)
-        out.append(
-            pystray.MenuItem("Clear history", lambda _i, _it: engine.clear_history())
-        )
-        return out
-
-    menu = pystray.Menu(
-        pystray.MenuItem("Recent", pystray.Menu(history_submenu)),
-        pystray.MenuItem("First-run check", lambda _i, _it: windows.open("onboarding")),
-        pystray.Menu.SEPARATOR,
-        pystray.MenuItem(
-            "Settings…",
-            lambda _i, _it: windows.open("settings"),
-            default=True,
-        ),
-        pystray.Menu.SEPARATOR,
-        pystray.MenuItem("Quit", quit_action),
+    menu, _tray_primitives = build_tray_menu(
+        engine=engine,
+        config=config,
+        windows=windows,
+        hotkey_manager=hotkey_manager,
     )
     icon = pystray.Icon(
         "pippal",

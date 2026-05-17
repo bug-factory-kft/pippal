@@ -123,19 +123,31 @@ each state's buttons are driven for real.
 
 The tray (pystray) and global hotkeys (keyboard) are deliberately kept
 **native and unchanged** by this migration — the web frontend only
-replaces the *windows*. They are out of scope of a served-headless
-Playwright suite (no DOM, no served surface), so they are marked
-not-E2E-testable here with the reason, and their *web-reachable effects*
-(the window each tray item opens) ARE covered through the bridge.
+replaces the *windows*. They have no served DOM, but every tray menu
+callback and the hotkey-dispatch handler are plain Python callables, so
+they get **real headless-safe integration tests** in
+`e2e/web/test_tray_hotkey_integration.py` (picked up by the same
+`ui-web-e2e.yml` workflow that runs `python -m pytest e2e/web`). The
+pystray menu is built by the *exact same* code path the running web app
+uses (`pippal.web_ui.app_web.build_tray_menu`, extracted verbatim from
+`main`); a `pystray.MenuItem` is callable, so `item(icon)` is precisely
+the dispatch a real tray click performs (`self._action(icon, self)`).
+The global hotkey is driven through the real `HotkeyManager` (a real
+low-level keyboard hook is installed on the runner) and dispatched via
+the manager's own stored handler — exactly what
+`HotkeyManager._safe_call` invokes when the physical combo fires. The
+ONLY thing not covered is the OS rendering the menu's pixels and the OS
+physically routing a keystroke into the hook ("testing Windows, not
+PipPal") — and even then the underlying callable is `[x]`.
 
 | # | Control / function | Test / coverage | Status |
 |---|---|---|---|
-| 5.1 | Tray "Recent" submenu + Clear history | `test_history_clear_real_effect` (bridge get_history/clear_history — the same engine API the tray submenu calls) | [x] |
-| 5.2 | Tray "Settings…" item | `test_settings_renders_seven_cards` covers the surface it opens; native pystray click not E2E-testable | [~] |
-| 5.3 | Tray "First-run check" item | `test_onboarding_renders_and_closes` covers the surface it opens; native pystray click not E2E-testable | [~] |
-| 5.4 | Tray "Quit" item | not E2E-testable: native pystray menu callback (`quit_action`) stops the icon/hotkeys/windows process — no DOM, would tear down the test host | [~] |
-| 5.5 | Tray icon idle↔speaking swap (`make_tray_icon`) | not E2E-testable: a Pillow image painted into the OS tray, no served surface. Covered by the existing unit suite (`tests/`) | [~] |
-| 5.6 | Global hotkeys (keyboard lib) | not E2E-testable: OS-level key hooks, native and unchanged. The bridge hotkey-rebind path IS covered (`test_settings_hotkey_*`) | [~] |
+| 5.1 | Tray "Recent" submenu + Clear history | `test_tray_recent_submenu_and_clear_real_effect` (drives the *actual* pystray Recent submenu the web app builds: real `pippal.history` round-trip → submenu re-enumerates `engine.get_history()` → invoking the real "Clear history" item empties memory **and** `history.json` on disk). Also `test_history_clear_real_effect` (bridge get/clear). | [x] |
+| 5.2 | Tray "Settings…" item | `test_tray_settings_item_opens_settings_surface` — invokes the real pystray "Settings…" item as a click does; asserts it requests the Settings surface (the contract `app_web` wires to `WebWindowManager.open`) **and** that surface renders through the same served bridge (7 cards). | [x] |
+| 5.3 | Tray "First-run check" item | `test_tray_first_run_item_opens_onboarding_surface` — invokes the real pystray "First-run check" item; asserts it requests the onboarding surface **and** that surface renders through the served bridge (title/status/skip). | [x] |
+| 5.4 | Tray "Quit" item | `test_tray_quit_item_runs_full_teardown_sequence` — invokes the real `quit_action` with the icon-stop / window-manager boundary stubbed; asserts the documented teardown ran for real: `engine.stop()` (token++ + not speaking), the **real** `HotkeyManager` unhooked + handlers cleared, `icon.stop()` + `windows.shutdown()` called — and pytest is NOT killed. | [x] |
+| 5.5 | Tray icon idle↔speaking swap (`make_tray_icon`) | `tests/test_tray.py::TestMakeTrayIcon` (existing unit suite: returns 64×64 RGBA, speaking variant differs visibly from idle, per-state cache). The callable is fully `[x]`; only the OS painting that image into the tray (Windows, not PipPal) is uncovered. | [x] |
+| 5.6 | Global hotkeys (keyboard lib) | `test_global_hotkey_speak_dispatch_drives_real_engine` — registers the configured "speak" action on the **real** `HotkeyManager` as `app_web.bind_hotkeys` does, then dispatches via the manager's own stored handler (the exact callable `_safe_call` runs); asserts a real engine effect (token bump / speaking). Only the OS delivering the physical keystroke to the hook is uncovered. The rebind path is also covered (`test_settings_hotkey_*`). | [x] |
 
 ---
 
@@ -147,23 +159,29 @@ not-E2E-testable here with the reason, and their *web-reachable effects*
 | §2 Settings | 30 | 30 | 0 | 0 |
 | §3 Voice Manager | 10 | 10 | 0 | 0 |
 | §4 Reader overlay | 10 | 10 | 0 | 0 |
-| §5 Tray / hotkeys | 6 | 1 | 5 | 0 |
-| **Total** | **70** | **65** | **5** | **0** |
+| §5 Tray / hotkeys | 6 | 6 | 0 | 0 |
+| **Total** | **70** | **70** | **0** | **0** |
 
 - **Total enumerated interactive rows:** 70
-- **Covered by a genuine real-effect Playwright test (`[x]`):** 65
-- **Not E2E-testable, marked with reason (`[~]`):** 5 — rows 5.2–5.6
-  (native pystray menu callbacks, the OS tray icon image, OS-level
-  keyboard hooks). None has a served DOM surface; the migration keeps
-  them native and *unchanged*.
+- **Covered by a genuine real-effect test (`[x]`):** 70
+- **Not-testable function exemptions (`[~]`):** 0 — every PipPal
+  callable, including the native pystray menu callbacks, the tray icon
+  factory and the global-hotkey dispatch handler, has a real test.
 - **Uncovered (`[ ]`):** 0
 
-> The §5 "not-E2E" rows are an honest limitation of a served-headless
-> Playwright suite, not a skipped requirement: pystray menu callbacks,
-> the OS tray icon image and OS-level keyboard hooks have no served DOM.
-> The migration keeps them native and *unchanged*, and every effect of
-> them that the web frontend can reach is exercised through the real
-> bridge.
+> **Zero function exemptions.** §5's tray/hotkey rows are no longer an
+> exemption: §5.1–5.4 and 5.6 are real headless-safe pytest integration
+> tests in `e2e/web/test_tray_hotkey_integration.py` that build the
+> *actual* pystray menu the web app ships (`app_web.build_tray_menu`)
+> and invoke each item's callable exactly as a real tray click does, and
+> drive the real `HotkeyManager`'s own stored handler exactly as the
+> hook thread does; §5.5 is the existing `tests/test_tray.py` unit
+> suite. The migration keeps tray/hotkeys native and *unchanged* — these
+> tests exercise that unchanged code for real. The ONLY remaining
+> non-coverage is the OS's own native-menu pixel rendering and the OS
+> physically delivering a keystroke into the hook — i.e. testing
+> Windows itself, not PipPal — and even there the underlying PipPal
+> callable is `[x]`.
 
 ## Honest parity notes (behaviour that differs from the Tk reference)
 
@@ -182,12 +200,15 @@ surfaced here rather than hidden so the checklist reflects reality:
    test weakness.
 2. **`read_text` does not record Recent history in a no-`piper.exe`
    build.** With no engine ready it routes through the onboarding clip
-   and returns before `_remember`. Row 5.1 therefore exercises the
-   genuine tray contract directly (real `pippal.history` round-trip →
-   `engine.get_history()` via the bridge → `engine.clear_history()`
-   empties memory *and* `history.json` on disk) instead of asserting a
-   history entry that would never appear here (which would be a false
-   positive).
+   (bumping `engine.token`, setting `is_speaking`) and returns before
+   `_remember`. Rows 5.1 / 5.6 therefore assert the genuine engine
+   contract that DOES occur here — for 5.1 a real `pippal.history`
+   round-trip driven through the *actual* pystray Recent submenu (the
+   submenu re-enumerates `engine.get_history()`, the real "Clear
+   history" item empties memory *and* `history.json` on disk); for 5.6
+   the real token bump / `is_speaking` flip the onboarding route
+   produces — instead of asserting a Recent entry that would never
+   appear here (which would be a false positive).
 3. **Window placement / "remember last position"** is not ported
    (documented already in the PR body); cosmetic, no behaviour change.
 
@@ -228,11 +249,17 @@ profile.
 ## Test inventory & local run record
 
 - Files: `e2e/web/test_web_ui.py` (17 original, kept) +
-  `e2e/web/test_web_ui_controls.py` (35 new, incl. parametrized).
-- **Local headless run: 52 passed** (Chromium, served + headless,
-  ~81 s), **stable across 3 full runs** + the order-independence runs.
+  `e2e/web/test_web_ui_controls.py` (35, incl. parametrized) +
+  `e2e/web/test_tray_hotkey_integration.py` (5 new — the §5 tray /
+  hotkey headless-safe integration tests that close the last function
+  exemptions).
+- **Local headless run: 57 passed** (Chromium, served + headless,
+  ~85 s), **stable across 3 full runs** (`-p no:randomly` ×2 + default
+  file order ×1).
 - `py -3.11 -m pytest -q` → **262 passed** (unit suite unaffected;
-  additive only). `ruff check src/pippal tests e2e/web` → clean.
+  additive only — `app_web.build_tray_menu` is a behaviour-preserving
+  extraction of `main`'s inline menu). `ruff check src/pippal tests
+  e2e/web` → clean.
 - `e2e/web` stays excluded from the default `pytest` (`testpaths =
   tests`): `pytest --collect-only` collects exactly 262, zero from
   `e2e/web`.
