@@ -1,0 +1,148 @@
+"""pywebview window lifecycle for the web UI.
+
+Each PipPal surface is a pywebview window loading
+``<base_url>/index.html?view=<surface>``. The static UI in ``webui/``
+talks back through the injected ``js_api`` bridge (and the same HTTP
+``/bridge`` endpoint as a fallback / E2E transport).
+
+Native chrome stays minimal: Settings / Voice Manager / Onboarding /
+Notices keep a frameless dark window (the UI draws its own title bar,
+matching the Tk chromeless feel). The reader overlay is a frameless,
+on-top, transparent panel — the web analogue of
+``pippal.ui.overlay.Overlay``.
+
+WebView2 (Chromium) is the runtime on Windows; pywebview picks it
+automatically.
+"""
+
+from __future__ import annotations
+
+import threading
+from typing import Any
+
+import webview
+
+# Per-surface window geometry, mirroring the Tk dialogs' sizes.
+_SURFACES: dict[str, dict[str, Any]] = {
+    "settings": {"title": "PipPal", "width": 600, "height": 720},
+    "voices": {"title": "Voices", "width": 820, "height": 640},
+    "onboarding": {"title": "PipPal", "width": 540, "height": 560},
+    "notices": {"title": "PipPal - Open-source licences",
+                "width": 760, "height": 620},
+    "overlay": {"title": "PipPal", "width": 800, "height": 220,
+                "on_top": True, "transparent": True, "frameless": True},
+}
+
+
+class WebWindowManager:
+    """Creates / focuses pywebview windows and owns the GUI loop."""
+
+    def __init__(self) -> None:
+        self._base_url = ""
+        self._bridge: Any = None
+        self._windows: dict[str, Any] = {}
+        self._lock = threading.Lock()
+        self._started = False
+
+    def configure(self, base_url: str, bridge: Any) -> None:
+        self._base_url = base_url.rstrip("/")
+        self._bridge = bridge
+
+    # ------------------------------------------------------------------
+
+    def _make_window(self, surface: str) -> Any:
+        spec = _SURFACES.get(surface, _SURFACES["settings"])
+        url = f"{self._base_url}/index.html?view={surface}"
+        kwargs: dict[str, Any] = {
+            "title": spec["title"],
+            "url": url,
+            "width": spec["width"],
+            "height": spec["height"],
+            "js_api": self._bridge,
+            "background_color": "#13151c",
+            "frameless": spec.get("frameless", True),
+            "easy_drag": False,
+        }
+        if spec.get("on_top"):
+            kwargs["on_top"] = True
+        if spec.get("transparent"):
+            kwargs["transparent"] = True
+        win = webview.create_window(**kwargs)
+
+        def _closed(s: str = surface) -> None:
+            with self._lock:
+                self._windows.pop(s, None)
+
+        win.events.closed += _closed
+        return win
+
+    def open(self, surface: str) -> None:
+        """Show a surface, focusing it if already open. Thread-safe; can
+        be called from tray / hotkey / command-server threads."""
+        with self._lock:
+            existing = self._windows.get(surface)
+            if existing is not None:
+                try:
+                    existing.show()
+                    existing.restore()
+                    return
+                except Exception:
+                    self._windows.pop(surface, None)
+
+        if not self._started:
+            # First window must be created before webview.start(); queue
+            # it so run() picks it up.
+            win = self._make_window(surface)
+            with self._lock:
+                self._windows[surface] = win
+            return
+
+        win = self._make_window(surface)
+        with self._lock:
+            self._windows[surface] = win
+
+    def close_active(self) -> None:
+        """Close whichever window currently has focus (the JS 'X' / Cancel
+        button calls this through the bridge)."""
+        with self._lock:
+            wins = list(self._windows.items())
+        target = None
+        for _surface, w in wins:
+            try:
+                if getattr(w, "gui", None) is not None and w.on_top is False:
+                    target = w
+            except Exception:
+                pass
+        # Fall back to the most recently opened window.
+        if target is None and wins:
+            target = wins[-1][1]
+        if target is not None:
+            try:
+                target.destroy()
+            except Exception:
+                pass
+
+    def shutdown(self) -> None:
+        with self._lock:
+            wins = list(self._windows.values())
+        for w in wins:
+            try:
+                w.destroy()
+            except Exception:
+                pass
+        try:
+            webview.windows.clear()
+        except Exception:
+            pass
+
+    def run(self) -> None:
+        """Block on the pywebview GUI loop until all windows close."""
+        if not self._windows:
+            # Nothing queued — open Settings so the app has a face.
+            self.open("settings")
+        self._started = True
+        webview.start()
+
+
+def _resolve_close_target(win: Any) -> Any:
+    return win
