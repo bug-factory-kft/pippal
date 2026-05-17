@@ -12,6 +12,17 @@ state. It computes per-word karaoke timings with the SAME pure helpers
 ``overlay_paint.compute_word_layout`` uses, so the highlight cadence
 matches. The browser polls :meth:`snapshot` and does the painting.
 
+**Auto-hide parity.** The Tk overlay arms ``root.after(delay, hide)``
+when the engine flips it to ``done`` (delay =
+``max(OVERLAY_HIDE_MIN_MS, auto_hide_ms)``) and ``root.after(
+OVERLAY_MESSAGE_MS, hide)`` for a one-shot message. ``_NullRoot.after``
+in the web app runs callbacks inline, so a timed hide there would fire
+immediately. ``WebOverlay`` therefore owns its OWN ``threading.Timer``
+so the panel stays visible for the configured ``auto_hide_ms`` and then
+genuinely hides — matching the Tk behaviour exactly. Any new
+``set_state`` / ``start_chunk`` / explicit ``hide`` cancels a pending
+timer first, mirroring the Tk ``_cancel_hide``.
+
 This adds an alternative overlay sink; it does not change any backend
 behaviour.
 """
@@ -22,7 +33,9 @@ import threading
 import time
 from typing import Any
 
+from ..config import DEFAULT_CONFIG
 from ..text_utils import iter_word_spans, word_timing_weight
+from ..timing import OVERLAY_HIDE_MIN_MS, OVERLAY_MESSAGE_MS
 
 
 class WebOverlay:
@@ -46,6 +59,11 @@ class WebOverlay:
         self._chunk_idx: int = 0
         self._chunk_total: int = 1
 
+        # Auto-hide timer (the web analogue of the Tk overlay's
+        # ``root.after(delay, self._hide)``). Guarded by ``_lock``.
+        self._hide_timer: threading.Timer | None = None
+        self._hide_generation: int = 0
+
     # ----- engine-facing protocol (all no-ops when overlay disabled) ---
 
     def _enabled(self) -> bool:
@@ -68,21 +86,38 @@ class WebOverlay:
         if not self._enabled():
             return
         with self._lock:
+            self._cancel_hide_locked()
             self.state = state
             self.message = ""
             if state != "reading":
                 self._words = []
                 self._chunk_text = ""
+            if state == "done":
+                # Mirror Tk Overlay._set_state("done"): schedule a real
+                # auto-hide after max(OVERLAY_HIDE_MIN_MS, auto_hide_ms).
+                delay_ms = max(
+                    OVERLAY_HIDE_MIN_MS,
+                    int(self.config.get(
+                        "auto_hide_ms", DEFAULT_CONFIG["auto_hide_ms"])),
+                )
+                self._arm_hide_locked(delay_ms)
 
     def show_message(self, msg: str) -> None:
         if not self._enabled():
             return
         with self._lock:
+            self._cancel_hide_locked()
             self.message = msg
             self.state = "done"
+            self._words = []
+            self._chunk_text = ""
+            # Mirror Tk Overlay._show_message: one-shot messages self
+            # dismiss after OVERLAY_MESSAGE_MS regardless of auto_hide_ms.
+            self._arm_hide_locked(OVERLAY_MESSAGE_MS)
 
     def hide(self) -> None:
         with self._lock:
+            self._cancel_hide_locked()
             self.state = "idle"
             self.message = ""
             self._words = []
@@ -99,6 +134,9 @@ class WebOverlay:
     ) -> None:
         words = _word_timings(text, duration)
         with self._lock:
+            # A fresh chunk means a fresh reading — kill any pending
+            # auto-hide (Tk does this via _cancel_hide in _set_state).
+            self._cancel_hide_locked()
             self._chunk_text = text
             self._words = words
             self._chunk_idx = idx
@@ -107,6 +145,45 @@ class WebOverlay:
                 self._chunk_duration = duration
                 self._chunk_start = time.time() + offset_s
                 self.paused = False
+
+    # ----- auto-hide scheduling (lock held by caller) -----------------
+
+    def _cancel_hide_locked(self) -> None:
+        """Cancel a pending auto-hide. Mirrors Tk Overlay._cancel_hide.
+
+        Bumping the generation makes a timer that already fired (and is
+        waiting on ``_lock``) a no-op when it finally runs.
+        """
+        self._hide_generation += 1
+        if self._hide_timer is not None:
+            try:
+                self._hide_timer.cancel()
+            except Exception:
+                pass
+            self._hide_timer = None
+
+    def _arm_hide_locked(self, delay_ms: int) -> None:
+        """Schedule a real hide after ``delay_ms``. The web analogue of
+        ``self.root.after(delay, self._hide)`` in the Tk overlay."""
+        gen = self._hide_generation
+        timer = threading.Timer(
+            max(0, delay_ms) / 1000.0, self._on_hide_timeout, args=(gen,)
+        )
+        timer.daemon = True
+        self._hide_timer = timer
+        timer.start()
+
+    def _on_hide_timeout(self, generation: int) -> None:
+        with self._lock:
+            # A newer state transition cancelled/superseded this timer.
+            if generation != self._hide_generation:
+                return
+            self._hide_timer = None
+            self.state = "idle"
+            self.message = ""
+            self._words = []
+            self._chunk_text = ""
+            self.action_label = None
 
     # ----- web-facing snapshot ----------------------------------------
 

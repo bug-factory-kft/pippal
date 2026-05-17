@@ -25,6 +25,34 @@
 
   function fail(e) { toast(String(e && e.message || e), true); }
 
+  // Real modal confirm gate — the web analogue of Tk's
+  // messagebox.askyesno. Resolves true only when the user clicks Yes;
+  // the destructive caller MUST await this before acting. There is no
+  // auto-dismiss: the action is blocked until an explicit choice.
+  var confirmModal = document.getElementById("confirm-modal");
+  var confirmTitle = document.getElementById("confirm-title");
+  var confirmBody = document.getElementById("confirm-body");
+  var confirmOk = document.getElementById("confirm-ok");
+  var confirmCancel = document.getElementById("confirm-cancel");
+  function confirmDialog(title, body) {
+    return new Promise(function (resolve) {
+      confirmTitle.textContent = title;
+      confirmBody.textContent = body;
+      confirmModal.classList.remove("hidden");
+      function cleanup(result) {
+        confirmModal.classList.add("hidden");
+        confirmOk.removeEventListener("click", onOk);
+        confirmCancel.removeEventListener("click", onCancel);
+        resolve(result);
+      }
+      function onOk() { cleanup(true); }
+      function onCancel() { cleanup(false); }
+      confirmOk.addEventListener("click", onOk);
+      confirmCancel.addEventListener("click", onCancel);
+    });
+  }
+  window.__pippalConfirm = confirmDialog;
+
   document.getElementById("btn-window-close").addEventListener("click", function () {
     API.call("close_window").catch(function () {});
   });
@@ -253,21 +281,32 @@
       API.call("close_window").catch(function () {});
     });
     document.getElementById("btn-reset").addEventListener("click", function () {
-      var d = settingsState.defaults, c = settingsState.controls;
-      if (d.length_scale != null && c.speed)
-        c.speed.value = lengthScaleToSpeed(parseFloat(d.length_scale));
-      Object.keys(c).forEach(function (k) {
-        if (k === "speed" || k === "voice" || k === "engine") return;
-        if (d[k] == null) return;
-        var ctrl = c[k];
-        if (ctrl.type === "checkbox") ctrl.checked = !!d[k];
-        else ctrl.value = d[k];
+      // Tk parity: messagebox.askyesno("Reset to defaults", "Reset
+      // every field to its built-in default? Click Apply or Save
+      // afterwards to keep them.") — the form must NOT change until
+      // the user accepts; Cancel leaves every field as-is.
+      confirmDialog(
+        "Reset to defaults",
+        "Reset every field to its built-in default? "
+          + "Click Apply or Save afterwards to keep them."
+      ).then(function (ok) {
+        if (!ok) return;
+        var d = settingsState.defaults, c = settingsState.controls;
+        if (d.length_scale != null && c.speed)
+          c.speed.value = lengthScaleToSpeed(parseFloat(d.length_scale));
+        Object.keys(c).forEach(function (k) {
+          if (k === "speed" || k === "voice" || k === "engine") return;
+          if (d[k] == null) return;
+          var ctrl = c[k];
+          if (ctrl.type === "checkbox") ctrl.checked = !!d[k];
+          else ctrl.value = d[k];
+        });
+        ["settings-speed", "settings-noise"].forEach(function (id) {
+          var s = document.querySelector('[data-testid="' + id + '"]');
+          if (s) s.dispatchEvent(new Event("input"));
+        });
+        toast("Reset to defaults — click Apply or Save to keep them.");
       });
-      ["settings-speed", "settings-noise"].forEach(function (id) {
-        var s = document.querySelector('[data-testid="' + id + '"]');
-        if (s) s.dispatchEvent(new Event("input"));
-      });
-      toast("Reset to defaults — click Apply or Save to keep them.");
     });
   }
 
@@ -484,24 +523,35 @@
       text: v.installed ? "Remove" : "Install",
       class: v.installed ? "danger" : "",
     });
-    btn.addEventListener("click", function () {
+    function doRemove() {
       btn.disabled = true;
+      statusEl.textContent = "removing…";
+      API.call("remove_voice", v.id).then(function () {
+        onChanged();
+      }).catch(function (e) { btn.disabled = false; fail(e); });
+    }
+    function doInstall() {
+      btn.disabled = true;
+      statusEl.textContent = "downloading…";
+      statusEl.className = "vstatus";
+      API.call("install_voice", v.id).then(function () {
+        onChanged();
+      }).catch(function (e) {
+        statusEl.textContent = "failed";
+        statusEl.className = "vstatus err";
+        btn.disabled = false;
+        fail(e);
+      });
+    }
+    btn.addEventListener("click", function () {
       if (v.installed) {
-        statusEl.textContent = "removing…";
-        API.call("remove_voice", v.id).then(function () {
-          onChanged();
-        }).catch(function (e) { btn.disabled = false; fail(e); });
+        // Tk parity: messagebox.askyesno("Remove voice", "Remove
+        // {label}?") — the deletion must NOT run until the user accepts
+        // the modal. Cancel leaves the voice on disk untouched.
+        confirmDialog("Remove voice", "Remove " + v.label + "?")
+          .then(function (ok) { if (ok) doRemove(); });
       } else {
-        statusEl.textContent = "downloading…";
-        statusEl.className = "vstatus";
-        API.call("install_voice", v.id).then(function () {
-          onChanged();
-        }).catch(function (e) {
-          statusEl.textContent = "failed";
-          statusEl.className = "vstatus err";
-          btn.disabled = false;
-          fail(e);
-        });
+        doInstall();
       }
     });
     return U.el("div", { class: "card" }, [
@@ -575,12 +625,88 @@
     ]);
     view.appendChild(panel);
 
+    // ---- Drag-to-reposition (parity with Tk overlay's right-drag) ----
+    // Tk binds <ButtonPress-3>/<B3-Motion> to move the frameless panel.
+    // The web panel is a centred block; mirror that with a right-button
+    // drag that offsets it via a transform. (The desktop pywebview frame
+    // additionally has CSS `app-region: drag`; this covers served mode.)
+    var drag = { active: false, sx: 0, sy: 0, ox: 0, oy: 0 };
+    panel.addEventListener("contextmenu", function (e) { e.preventDefault(); });
+    panel.addEventListener("mousedown", function (e) {
+      if (e.button !== 2) return;            // right button only (Tk Button-3)
+      drag.active = true;
+      drag.sx = e.clientX; drag.sy = e.clientY;
+      panel.setAttribute("data-dragging", "1");
+      e.preventDefault();
+    });
+    window.addEventListener("mousemove", function (e) {
+      if (!drag.active) return;
+      var nx = drag.ox + (e.clientX - drag.sx);
+      var ny = drag.oy + (e.clientY - drag.sy);
+      panel.style.transform = "translate(" + nx + "px," + ny + "px)";
+      panel.setAttribute("data-offset", nx + "," + ny);
+    });
+    window.addEventListener("mouseup", function (e) {
+      if (!drag.active || e.button !== 2) return;
+      drag.active = false;
+      drag.ox += (e.clientX - drag.sx);
+      drag.oy += (e.clientY - drag.sy);
+      panel.removeAttribute("data-dragging");
+    });
+
+    // Karaoke colour stops + fade — a faithful port of overlay_paint.py's
+    // _word_appearance (PAST/FUTURE/PEAK RGB, smoothstep lerp, FADE_SECS).
+    var PAST = [0x60, 0x65, 0x7a], FUTURE = [0xc8, 0xcd, 0xe0],
+        PEAK = [0xff, 0xff, 0xff], FADE_SECS = 0.50;
+    function smoothstep(t) { t = t < 0 ? 0 : (t > 1 ? 1 : t); return t * t * (3 - 2 * t); }
+    function lerpRGB(a, b, t) {
+      t = smoothstep(t);
+      return "rgb(" + Math.round(a[0] + (b[0] - a[0]) * t) + ","
+                    + Math.round(a[1] + (b[1] - a[1]) * t) + ","
+                    + Math.round(a[2] + (b[2] - a[2]) * t) + ")";
+    }
+    // Mirrors overlay_paint._word_appearance: the cursor word is pure
+    // PEAK + bold; words before bleed PAST->PEAK over FADE_SECS after
+    // their te; words ahead bleed FUTURE->PEAK over FADE_SECS before ts.
+    function wordAppearance(i, cur, elapsed, w) {
+      if (i === cur) return { color: "rgb(255,255,255)", cur: true };
+      if (elapsed >= w.te) {
+        var k = Math.max(0, 1 - (elapsed - w.te) / FADE_SECS);
+        return { color: lerpRGB(PAST, PEAK, k), cur: false };
+      }
+      var k2 = Math.max(0, 1 - (w.ts - elapsed) / FADE_SECS);
+      return { color: lerpRGB(FUTURE, PEAK, k2), cur: false };
+    }
+
     // Poll the engine snapshot and re-render the karaoke line; this is
-    // the web analogue of overlay.py's tk.after animation loop.
+    // the web analogue of overlay.py's tk.after animation loop. The
+    // panel is hidden when the engine state is `idle` (the web analogue
+    // of the Tk overlay's win.withdraw()) — so the backend's real
+    // auto-hide timer (WebOverlay._on_hide_timeout) visibly hides it.
     var lastText = null;
+    function setVisible(vis) {
+      panel.classList.toggle("hidden", !vis);
+    }
     function tick() {
       API.call("engine_state").then(function (s) {
         var st = s.overlay_state || "idle";
+        // Expose state for E2E + so auto-hide is observable from the DOM.
+        document.body.setAttribute("data-overlay-state", st);
+        // Karaoke offset: positive = highlight waits, negative = leads
+        // (parity with the Tk karaoke_offset_ms config; the Tk overlay
+        // applies it as the chunk start offset_s, here we shift elapsed).
+        var koff = parseInt(s.karaoke_offset_ms != null
+          ? s.karaoke_offset_ms : 0, 10) / 1000.0;
+        if (st === "idle") {
+          // Auto-hidden (or never started): panel disappears like
+          // win.withdraw(). Nothing else to paint.
+          setVisible(false);
+          bodyEl.textContent = "";
+          barFill.style.width = "0%";
+          lastText = null;
+          return;
+        }
+        setVisible(true);
         dot.className = "overlay-dot" + (st === "reading" ? " reading"
           : st === "thinking" ? " thinking" : "");
         label.textContent = (s.brand_name || "PipPal")
@@ -596,16 +722,17 @@
               }));
             });
           }
-          var elapsed = s.elapsed || 0, cur = -1;
+          var elapsed = (s.elapsed || 0) - koff, cur = -1;
           s.words.forEach(function (w, i) { if (elapsed >= w.ts) cur = i; });
           var spans = bodyEl.querySelectorAll(".w");
           for (var i = 0; i < spans.length; i++) {
-            var ww = s.words[i];
-            spans[i].className = "w" + (i === cur ? " cur"
-              : (elapsed < ww.ts ? " future" : ""));
+            var ap = wordAppearance(i, cur, elapsed, s.words[i]);
+            var sp = spans[i];
+            sp.style.color = ap.color;
+            sp.className = "w" + (ap.cur ? " cur" : "");
           }
           var prog = s.chunk_duration > 0
-            ? Math.max(0, Math.min(1, elapsed / s.chunk_duration)) : 0;
+            ? Math.max(0, Math.min(1, (s.elapsed || 0) / s.chunk_duration)) : 0;
           barFill.style.width = (prog * 100).toFixed(1) + "%";
           counter.textContent = s.chunk_total > 1
             ? (s.chunk_idx + 1) + "/" + s.chunk_total : "";

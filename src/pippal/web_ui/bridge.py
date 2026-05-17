@@ -318,6 +318,11 @@ class PipPalBridge:
     def engine_state(self) -> dict[str, Any]:
         snap: dict[str, Any] = {
             "brand_name": self.config.get("brand_name", "PipPal"),
+            # Karaoke offset (ms): the Tk overlay applies it as the chunk
+            # start offset; the web overlay shifts the highlight cursor.
+            "karaoke_offset_ms": int(
+                self.config.get("karaoke_offset_ms", 0) or 0
+            ),
         }
         if self.overlay is not None and hasattr(self.overlay, "snapshot"):
             snap.update(self.overlay.snapshot())

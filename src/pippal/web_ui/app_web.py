@@ -240,19 +240,54 @@ def main() -> None:
 class _NullRoot:
     """Stand-in for the Tk root the engine takes for thread hops.
 
-    The engine only calls ``root.after(ms, fn)`` to bounce overlay
-    updates onto the Tk UI thread. ``WebOverlay`` is already
-    thread-safe, so run the callback inline on a worker thread instead
-    of a Tk event loop — no behaviour change for the engine.
+    The engine calls ``root.after(ms, fn)`` to bounce work onto the Tk
+    UI thread. ``WebOverlay`` is thread-safe and owns its OWN auto-hide
+    timer, so an ``ms == 0`` immediate hop runs inline (same net effect
+    as the engine's thread-hop). A ``ms > 0`` call is a genuinely
+    *delayed* callback — running it inline would fire it immediately
+    (this is exactly the ``auto_hide_ms`` regression). So a timed call
+    schedules a real ``threading.Timer`` and exposes ``after_cancel``
+    for parity with Tk's cancellable ``after`` ids.
     """
 
-    def after(self, _ms: int, fn=None, *args: Any) -> None:
+    def __init__(self) -> None:
+        self._timers: dict[int, threading.Timer] = {}
+        self._next_id = 1
+
+    def after(self, ms: int, fn=None, *args: Any) -> str | None:
         if fn is None:
+            return None
+        if not ms or ms <= 0:
+            try:
+                fn(*args)
+            except Exception:
+                pass
+            return None
+        tid = self._next_id
+        self._next_id += 1
+
+        def _run() -> None:
+            self._timers.pop(tid, None)
+            try:
+                fn(*args)
+            except Exception:
+                pass
+
+        t = threading.Timer(ms / 1000.0, _run)
+        t.daemon = True
+        self._timers[tid] = t
+        t.start()
+        return str(tid)
+
+    def after_cancel(self, tid: str | None) -> None:
+        if tid is None:
             return
         try:
-            fn(*args)
-        except Exception:
-            pass
+            t = self._timers.pop(int(tid), None)
+        except (TypeError, ValueError):
+            return
+        if t is not None:
+            t.cancel()
 
 
 if __name__ == "__main__":
