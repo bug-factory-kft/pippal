@@ -5,10 +5,14 @@ __pycache__/
 
 # Local user state
 .e2e/
+.e2e-data/
 config.json
 history.json
 temp/
 *.log
+
+# PySide6 migration-spike local venv (not part of the repo)
+.venv-qt/
 
 # Downloaded artifacts (fetched by setup.ps1 / Kokoro installer)
 piper/
