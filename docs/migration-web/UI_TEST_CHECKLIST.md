@@ -118,6 +118,7 @@ each state's buttons are driven for real.
 | 4.8 | paused chip (`overlay-paused`) shows on pause during a real read | `test_overlay_paused_chip_shows_on_pause` | [x] |
 | 4.9 | auto-hide actually hides the panel | `test_overlay_auto_hide_actually_hides` | [x] |
 | 4.10 | drag-to-reposition (right-button drag offsets the panel) | `test_overlay_drag_repositions_panel` | [x] |
+| 4.11 | FULL real read-aloud path: real synth backend (registered via the real `plugins.register_engine`) → real per-chunk **RIFF/WAVE PCM on disk** + engine `is_speaking` + reader overlay shows + karaoke cursor advances **across** chunks (chunk counter 1/N→2/N) + Recent history records the text | `test_read_aloud_full_real_path_wav_karaoke_history` | [x] |
 
 ## 5. Tray + global hotkeys (native — `app_web.py` / `tray.py`)
 
@@ -158,12 +159,12 @@ PipPal") — and even then the underlying callable is `[x]`.
 | §1 Onboarding | 14 | 14 | 0 | 0 |
 | §2 Settings | 30 | 30 | 0 | 0 |
 | §3 Voice Manager | 10 | 10 | 0 | 0 |
-| §4 Reader overlay | 10 | 10 | 0 | 0 |
+| §4 Reader overlay | 11 | 11 | 0 | 0 |
 | §5 Tray / hotkeys | 6 | 6 | 0 | 0 |
-| **Total** | **70** | **70** | **0** | **0** |
+| **Total** | **71** | **71** | **0** | **0** |
 
-- **Total enumerated interactive rows:** 70
-- **Covered by a genuine real-effect test (`[x]`):** 70
+- **Total enumerated interactive rows:** 71
+- **Covered by a genuine real-effect test (`[x]`):** 71
 - **Not-testable function exemptions (`[~]`):** 0 — every PipPal
   callable, including the native pystray menu callbacks, the tray icon
   factory and the global-hotkey dispatch handler, has a real test.
@@ -248,18 +249,33 @@ profile.
 
 ## Test inventory & local run record
 
-- Files: `e2e/web/test_web_ui.py` (17 original, kept) +
+- Files: `e2e/web/test_web_ui.py` (18 — the 17 original kept + the new
+  `test_read_aloud_full_real_path_wav_karaoke_history`, row 4.11) +
   `e2e/web/test_web_ui_controls.py` (35, incl. parametrized) +
-  `e2e/web/test_tray_hotkey_integration.py` (5 new — the §5 tray /
-  hotkey headless-safe integration tests that close the last function
+  `e2e/web/test_tray_hotkey_integration.py` (5 — the §5 tray / hotkey
+  headless-safe integration tests that close the last function
   exemptions).
-- **Local headless run: 57 passed** (Chromium, served + headless,
-  ~85 s), **stable across 3 full runs** (`-p no:randomly` ×2 + default
-  file order ×1).
+- Every test narrates its meaningful actions/assertions through the
+  `step` fixture (`e2e/web/conftest.py`) on the stdlib `logging`
+  module, so a PASSING CI run shows exactly what each test did instead
+  of "Passed … no log output captured". The `ui-web-e2e.yml` workflow
+  runs the suite with `-v -rA --log-cli-level=INFO` (the flags live in
+  the workflow command, **not** the root `pytest.ini`, so the default
+  `python -m pytest` (`tests/`) suite is unaffected and `e2e/web` stays
+  excluded from it).
+- Playwright artifacts are emitted for **every** test (not only on
+  failure): `--tracing=on --video=on --screenshot=on` →
+  per-test `trace.zip` + `.webm` video + screenshot under
+  `playwright-report/artifacts`, plus a self-contained `report.html`;
+  all uploaded by the always() `upload-artifact@v4` step. See
+  `e2e/web/README.md`.
+- **Local headless run: 58 passed** (Chromium, served + headless,
+  ~97 s with tracing+video+screenshot on), **stable across 3 full
+  runs** (default file order ×2 + `-p no:randomly` ×1).
 - `py -3.11 -m pytest -q` → **262 passed** (unit suite unaffected;
-  additive only — `app_web.build_tray_menu` is a behaviour-preserving
-  extraction of `main`'s inline menu). `ruff check src/pippal tests
-  e2e/web` → clean.
+  additive only — the new real-WAV backend is registered through the
+  genuine `plugins.register_engine` API and torn down per test).
+  `ruff check src/pippal tests e2e/web` → clean.
 - `e2e/web` stays excluded from the default `pytest` (`testpaths =
   tests`): `pytest --collect-only` collects exactly 262, zero from
   `e2e/web`.
