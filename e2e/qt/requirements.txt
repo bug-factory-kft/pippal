@@ -1,0 +1,17 @@
+# PySide6 UI E2E suite (migration spike).
+# Install into a venv, then run: pytest e2e/qt
+#
+# PySide6 is LGPLv3 — see docs/migration-qt/LICENSING.md. It is used
+# here purely as a dynamically-imported test/runtime dependency; the
+# app and this test code stay MIT.
+PySide6>=6.6
+pytest>=7
+pytest-qt>=4.4
+
+# Backend deps the app imports at runtime (already required by the
+# core package on Windows; pinned here so a fresh venv can run the
+# Qt E2E suite standalone).
+pyperclip
+pystray
+Pillow
+keyboard ; platform_system == "Windows"
