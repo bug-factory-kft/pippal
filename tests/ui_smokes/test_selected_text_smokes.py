@@ -77,8 +77,39 @@ def test_notepad_selected_text_happy_path(
             "another modal window may be in the foreground"
         )
 
-        selected = harness.send_keys_to_foreground("^a")
-        assert selected, "SendKeys ^a (select-all) into Notepad failed"
+        # Issue #84: after #75 (PR for issue #63) replaced ``AppActivate``
+        # inside ``activate_window_by_title_fragment`` with the Win32
+        # ``SetForegroundWindow`` + Alt key-up/key-down foreground-lock
+        # bypass, the top-level Notepad window is foregrounded but the
+        # title-bar / tab strip still owns keyboard focus on modern
+        # Win11 Notepad — Ctrl+A then selects nothing and the capture
+        # comes back empty 5/5 cold runs. A single left-click in the
+        # document body moves focus from the tab strip into the edit
+        # control, mirroring the pattern the VS Code smoke uses to
+        # nudge focus into the editor pane. ``vertical_ratio=0.6``
+        # lands below the tab strip but well inside the text body.
+        clicked = harness.click_into_window_center(
+            harness.notepad_window_title(fixture_path),
+            process_names=("notepad",),
+            vertical_ratio=0.6,
+        )
+        assert clicked, (
+            f"Could not click into Notepad document body for "
+            f"{fixture_path.name}; window may have been minimised or "
+            "GetWindowRect failed"
+        )
+        time.sleep(0.2)  # let Notepad receive the focus change
+
+        # Drive select-all via HID-level injection (the ``keyboard``
+        # lib). Once the click moved focus into the edit control,
+        # SendKeys ^a also works, but HID injection matches the path
+        # the capture helper uses for Ctrl+C and avoids divergence
+        # between the two halves of the select-and-copy sequence.
+        selected = harness.send_hotkey_via_keyboard_lib("ctrl+a")
+        assert selected, (
+            "keyboard.send('ctrl+a') (select-all) into Notepad failed; "
+            "the ``keyboard`` Python lib must be importable (runtime dep)"
+        )
 
         # Settle: give Notepad a tick to actually render the selection
         # before the capture helper drives Ctrl+C against it.
@@ -101,7 +132,27 @@ def test_notepad_selected_text_happy_path(
             clipboard_after_capture=clipboard_after,
             clipboard_restored=(clipboard_after == NOTEPAD_SENTINEL_HAPPY),
             duration_s=time.monotonic() - started,
-            extra={"selection_method": "SendKeys ^a", "focus_method": "AppActivate"},
+            extra={
+                # Issue #84: ``selection_method`` is now
+                # ``keyboard.send('ctrl+a')`` (HID-level injection) and
+                # ``focus_method`` records the two-step focus dance
+                # the smoke now performs:
+                # (1) ``activate_window_by_exact_title_substring`` —
+                #     Win32 ``SetForegroundWindow`` + Alt key-up/key-down
+                #     foreground-lock bypass (the #75 refactor that
+                #     replaced ``AppActivate`` inside
+                #     ``activate_window_by_title_fragment``);
+                # (2) ``click_into_window_center`` — left-click into the
+                #     Notepad document body to nudge keyboard focus off
+                #     the title bar / tab strip and into the edit
+                #     control, which the foreground-window swap alone
+                #     does not do on modern Win11 Notepad.
+                "selection_method": "keyboard.send('ctrl+a')",
+                "focus_method": (
+                    "Win32 SetForegroundWindow + Alt-tap + "
+                    "click_into_window_center"
+                ),
+            },
         )
         evidence.write(evidence_dir)
 
@@ -157,6 +208,25 @@ def test_notepad_no_selection_recovery_path(
             f"Notepad window for {fixture_path.name} did not accept focus"
         )
 
+        # Issue #84: mirror the happy-path focus dance so both Notepad
+        # smokes use the same primitives. The recovery smoke happened
+        # to be 5/5 green without the click (it sends ``{END}{HOME}``,
+        # not a Ctrl-combo, so the title-bar-owning-focus regression
+        # did not manifest there), but keeping the two smokes on the
+        # same focus path prevents the recovery smoke from going
+        # subtly red the next time anyone tweaks the foreground
+        # primitives.
+        clicked = harness.click_into_window_center(
+            harness.notepad_window_title(fixture_path),
+            process_names=("notepad",),
+            vertical_ratio=0.6,
+        )
+        assert clicked, (
+            f"Could not click into Notepad document body for "
+            f"{fixture_path.name}"
+        )
+        time.sleep(0.2)
+
         # Deliberately collapse any prior selection: send End then Home so
         # the caret sits at column 0 with no range selected. This is the
         # "known-bad-state" the smoke is asserting against.
@@ -182,8 +252,18 @@ def test_notepad_no_selection_recovery_path(
             clipboard_restored=(clipboard_after == NOTEPAD_SENTINEL_RECOVERY),
             duration_s=time.monotonic() - started,
             extra={
+                # Issue #84: recovery smoke now uses the same two-step
+                # focus dance as the happy path
+                # (``activate_window_by_exact_title_substring`` +
+                # ``click_into_window_center``). ``selection_method``
+                # stays on ``SendKeys {END}{HOME}`` — non-Ctrl keys
+                # were not part of the regression and migrating them
+                # would be churn-for-its-own-sake.
                 "selection_method": "SendKeys {END}{HOME} to collapse caret",
-                "focus_method": "AppActivate",
+                "focus_method": (
+                    "Win32 SetForegroundWindow + Alt-tap + "
+                    "click_into_window_center"
+                ),
                 "rationale": (
                     "User pressed read-selection hotkey without selecting "
                     "text; capture helper must return empty and preserve "

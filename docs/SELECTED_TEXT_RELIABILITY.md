@@ -181,14 +181,39 @@ What it adds:
 
 Surfaces covered today:
 
-- Notepad happy path: temp `.txt` fixture, `WScript.Shell.AppActivate`
-  focus, `SendKeys ^a` selection, then `capture_selection`.
-- Notepad known-bad-state recovery: same fixture, collapsed selection
-  (`{END}{HOME}`), then `capture_selection`. Asserts empty result and
-  that the clipboard sentinel survives.
+- Notepad happy path: temp `.txt` fixture, Win32 `SetForegroundWindow`
+  focus with Alt key-up/key-down foreground-lock bypass, then a
+  `click_into_window_center` nudge to move keyboard focus off the
+  title bar / tab strip and into the edit control, then HID-level
+  `keyboard.send('ctrl+a')` selection, then `capture_selection`.
+- Notepad known-bad-state recovery: same fixture, same two-step focus
+  dance for consistency, then collapsed selection
+  (`SendKeys {END}{HOME}`), then `capture_selection`. Asserts empty
+  result and that the clipboard sentinel survives.
 - Edge webpage happy path: local HTML fixture that DOM-selects a
-  paragraph on `window.load`, throwaway `--user-data-dir`,
-  `AppActivate` focus, then `capture_selection`.
+  paragraph on `window.load`, throwaway `--user-data-dir`, Win32
+  focus path, then `capture_selection`.
+
+Regression note (issue [#84](https://github.com/bug-factory-kft/pippal/issues/84)):
+On 2026-05-17 the SendKeys-based capture was migrated to HID-level
+injection after a 5/5 regression on Win11 Notepad (issue #84).
+`selection_method` in the evidence JSON now reads
+`keyboard.send('ctrl+a')`. Root cause: after #75 replaced
+`AppActivate` inside `activate_window_by_title_fragment` with the
+Win32 `SetForegroundWindow` + Alt key-up/key-down foreground-lock
+bypass, the top-level Notepad window foregrounds correctly but the
+title bar / tab strip still owns keyboard focus on modern Win11
+Notepad — so `Ctrl+A` selects nothing and `capture_selection`
+returns the empty string 5/5 cold runs. `AppActivate` happened to
+focus the inner edit control as a side-effect of how WScript.Shell
+drives SendKeys-style targeting, which is why the smoke was 5/5
+green before #75. The fix is the two-step focus dance the VS Code
+smoke (issue #61) already uses: `SetForegroundWindow` to bring the
+window forward, then `click_into_window_center` to nudge focus into
+the document body. The selection injection was also migrated from
+SendKeys to `keyboard.send` so both halves of the select-and-copy
+sequence use the same HID path (`capture_selection` already drives
+`Ctrl+C` via `keyboard.send`).
 
 Gating:
 
