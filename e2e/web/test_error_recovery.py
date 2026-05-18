@@ -27,8 +27,11 @@ rest of ``e2e/web/`` and is held strictly here:
   - registry write → the real ``install_context_menu`` runs the real
     ``reg.exe`` ``subprocess.run`` unchanged; only the *target hive*
     (``context_menu._reg_base_path``, a pure helper) is pointed at a
-    locked-down ``HKLM\\SYSTEM`` path a non-admin ``reg add`` genuinely
-    refuses (real non-zero return code → the real ``RuntimeError``);
+    **syntactically invalid root hive** (``HKXX\\…``) that ``reg.exe``
+    itself rejects with ``ERROR: Invalid key name.`` (exit 1) for *any*
+    caller — non-admin, admin, and the CI runner's LocalSystem alike,
+    with no ACL involved and **no real hive ever written** (real
+    non-zero return code → the real ``RuntimeError``);
   - hotkeys → driven through the **real** ``HotkeyManager`` + the
     **verbatim** ``app_web.bind_hotkeys`` wiring (extracted byte-for-
     byte from ``pippal.web_ui.app_web``); an invalid combo hits the
@@ -605,30 +608,41 @@ def test_settings_duplicate_hotkey_combo_surfaces_failure(
 def test_settings_ctx_install_registry_write_failure(
     page: Page, app_url: str, backend, monkeypatch, step
 ):
-    """UC-B11: when the registry write is genuinely refused (a locked-
-    down hive), the real ``install_context_menu`` must raise and the JS
-    ``.catch(fail)`` must surface the error toast — the status must NOT
-    flip to 'installed'. The real ``reg.exe`` subprocess runs unchanged;
-    only the *target hive* (a pure helper) is pointed at an HKLM\\SYSTEM
-    path a non-admin ``reg add`` really refuses (real non-zero rc → the
-    real ``RuntimeError`` at context_menu.py:75-77).
+    """UC-B11: when the registry write is genuinely refused, the real
+    ``install_context_menu`` must raise and the JS ``.catch(fail)`` must
+    surface the error toast — the status must NOT flip to 'installed'.
+    The real ``reg.exe`` subprocess runs unchanged; only the *target
+    hive* (a pure helper) is pointed at a **syntactically invalid root
+    hive** that ``reg.exe`` itself rejects (real non-zero rc → the real
+    ``RuntimeError`` at context_menu.py:75-77).
+
+    The seam is deliberately **privilege-independent**: ``HKXX`` is not
+    a valid registry root, so ``reg add``/``reg query`` fail with
+    ``ERROR: Invalid key name.`` (exit 1) for *every* caller — non-admin,
+    admin, and the CI runner's LocalSystem identity alike. No ACL is
+    involved, so the result does not depend on the caller's privilege or
+    on any host registry state, and **no real hive (HKLM/HKCU/…) is ever
+    written**. (An ACL-based seam such as ``HKLM\\SYSTEM`` would *succeed*
+    under LocalSystem — which has FullControl on ``HKLM\\SYSTEM`` — and so
+    must not be used here.)
     """
     import pippal.context_menu as ctx_mod
 
-    # A real, locked-down registry path: a non-admin `reg add` to
-    # HKLM\SYSTEM is genuinely denied (verified: exit 1, "Access is
-    # denied"). The real install_context_menu runs the real reg add and
-    # raises RuntimeError on the real non-zero return code.
+    # A syntactically invalid registry root: `reg add`/`reg query` to
+    # `HKXX\...` is rejected by reg.exe itself ("ERROR: Invalid key
+    # name.", exit 1) for ANY caller incl. LocalSystem — no ACL, no real
+    # hive touched. The real install_context_menu runs the real reg add
+    # and raises RuntimeError on the real non-zero return code.
     monkeypatch.setattr(
         ctx_mod, "_reg_base_path",
-        lambda ext: rf"HKLM\SYSTEM\PipPalRegWriteFailE2E\{ext}\shell\PipPal",
+        lambda ext: rf"HKXX\PipPalRegWriteFailE2E\{ext}\shell\PipPal",
     )
     # Sanity: the bridge calls the real installer; confirm it really
-    # raises against the locked hive (real RuntimeError, not a stub).
+    # raises against the invalid root (real RuntimeError, not a stub).
     with pytest.raises(RuntimeError):
         backend["bridge"].install_context_menu()
     step.check("real install_context_menu raised RuntimeError against the "
-               "locked-down HKLM\\SYSTEM hive (verified at the bridge)")
+               "invalid HKXX root hive (verified at the bridge)")
 
     _goto(page, app_url, "settings", step)
     status = page.get_by_test_id("settings-ctx-status")
@@ -646,16 +660,21 @@ def test_settings_ctx_install_registry_write_failure(
     # The status label must NOT claim success.
     expect(status).not_to_contain_text("✓ installed", timeout=2000)
     assert "✓ installed" not in (status.text_content() or "")
-    # Real registry state: the locked path was never created.
+    # Real registry state: the invalid path is unreadable for ANY caller
+    # (`reg query HKXX\...` → "ERROR: Invalid key name.", exit 1, the
+    # same for non-admin / admin / LocalSystem — purely syntactic, no
+    # ACL, no host state). This stays consistent with the invalid-root
+    # seam above: the install path was a no-op against a non-existent
+    # root, so nothing real was ever written.
     import subprocess
     rc = subprocess.run(
-        ["reg", "query", r"HKLM\SYSTEM\PipPalRegWriteFailE2E"],
+        ["reg", "query", r"HKXX\PipPalRegWriteFailE2E"],
         capture_output=True,
     ).returncode
-    assert rc != 0, "the locked registry path was unexpectedly created"
+    assert rc != 0, "the invalid registry root was unexpectedly readable"
     step.check(
         f"status did NOT flip to installed (still {status_before!r}); "
-        "the locked registry path was never written"
+        "the invalid registry root was never written (privilege-independent)"
     )
 
 

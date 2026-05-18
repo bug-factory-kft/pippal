@@ -86,7 +86,7 @@ set differs per state.
 | UC-B8 | Reader panel — Show panel / Show text checkboxes | User wants a quieter screen / no karaoke text | `settings-show_overlay`, `settings-show_text_in_overlay` persist; `show_overlay=False` actually suppresses the panel on a real read (`overlay_state.py:69`) | n/a | **covered** Tier-1 `test_settings_checkbox_persists[*]`; Tier-2 `test_j3_settings_persist_and_behave` proves the behavioural effect (overlay stays idle) |
 | UC-B9 | Reader panel — Auto-hide / Distance / Karaoke offset spinboxes | User tunes how long the panel lingers / where it sits / lip-sync | `settings-auto_hide_ms`, `settings-overlay_y_offset`, `settings-karaoke_offset_ms` persist | n/a | **covered** Tier-1 `test_settings_edit_persists_to_backend`, `test_settings_spinbox_persists[*]` |
 | UC-B10 | Windows integration — status reflects reality | User wants to know if the right-click entry is installed | `settings-ctx-status` reflects `context_menu_status()` all/partial/none (`context_menu.py:33`) | **partial** install state shows "⚠ Partial — re-run Install" | **covered** Tier-1 `test_settings_ctx_status_reflects_backend` (the partial-state copy branch in `app.js:235` is rendered from real status) |
-| UC-B11 | Windows integration — Install | User wants "Read with PipPal" on .txt/.md | `settings-ctx-install` → real HKCU keys created (`context_menu.py:59`) | **Registry write fails** → `RuntimeError`, JS `fail()` toast (`context_menu.py:76`) | **covered** — install Tier-1 `test_settings_ctx_install_real_effect`. Registry-write-failure path **now Tier-1** `test_error_recovery.py::test_settings_ctx_install_registry_write_failure`: the real `install_context_menu` runs the real `reg.exe` `subprocess.run` unchanged; only the *target hive* (the pure `context_menu._reg_base_path` helper) is pointed at a locked-down `HKLM\SYSTEM` path a non-admin `reg add` genuinely refuses (real non-zero rc → the real `RuntimeError` at `context_menu.py:75-77`, verified at the bridge with `pytest.raises`). Asserts the real `fail()` error toast, the status label does NOT flip to "✓ installed", and the locked registry path was never written. `context_menu.py:75-77` |
+| UC-B11 | Windows integration — Install | User wants "Read with PipPal" on .txt/.md | `settings-ctx-install` → real HKCU keys created (`context_menu.py:59`) | **Registry write fails** → `RuntimeError`, JS `fail()` toast (`context_menu.py:76`) | **covered** — install Tier-1 `test_settings_ctx_install_real_effect`. Registry-write-failure path **now Tier-1** `test_error_recovery.py::test_settings_ctx_install_registry_write_failure`: the real `install_context_menu` runs the real `reg.exe` `subprocess.run` unchanged; only the *target hive* (the pure `context_menu._reg_base_path` helper) is pointed at a **syntactically invalid root hive** `HKXX\…` that `reg.exe` itself rejects with `ERROR: Invalid key name.` (exit 1) for *every* caller — non-admin, admin, and the CI runner's LocalSystem alike — with no ACL involved and no real hive ever written (real non-zero rc → the real `RuntimeError` at `context_menu.py:75-77`, verified at the bridge with `pytest.raises`). Asserts the real `fail()` error toast, the status label does NOT flip to "✓ installed", and the invalid registry root was never readable/written. Privilege- and host-state-independent by construction. `context_menu.py:75-77` |
 | UC-B12 | Windows integration — Remove | User no longer wants the Explorer entry | `settings-ctx-remove` → keys deleted (`context_menu.py:87`) | n/a | **covered** Tier-1 `test_settings_ctx_remove_real_effect` |
 | UC-B13 | Windows integration — invoke the registered command | The whole point: right-click a file → PipPal reads it | Registered `python -m pippal.open_file "%1"` POSTs to running IPC server → real `engine.read_text_async` (`open_file.py:13`, `command_server.py:222`) | **Second instance / stale port** — hermetic per-test ephemeral port + token guards it; **wrong token refused** | **covered** Tier-1 `test_shell_integration_registry_and_command` (full registry→command→engine round-trip, hermetic) |
 | UC-B14 | Open-source notices — View licences | Licence-conscious user inspects bundled licences | `settings-view-licences` → `open_notices_window`; notices surface shows resolved text (`bridge.py:348`) | **Notices file missing** → fallback "reinstall" copy (`bridge.py:352`) | **partial** — open + real text **covered** Tier-1 `test_settings_view_licences_opens_notices`, `test_notices_window_loads_real_text`; Tier-2 `test_j5_view_open_source_notices`. **Notices-file-missing fallback (`bridge.py:352-357`) is missing** |
@@ -181,11 +181,12 @@ pronunciation surface (recorded separately as a not-a-feature note).
 > rows — UC-A7, UC-C6, UC-B7, UC-B11, UC-D8 — flipped **partial →
 > covered** by `e2e/web/test_error_recovery.py` (9 Tier-1 test
 > instances). Each induces the *real* failure at a true seam (closed /
-> RST-mid-stream socket, read-only on-disk target, locked-down `HKLM`
-> registry hive, real registered failing synth backend) and asserts the
-> *real* surfacing + recovery. Covered 37 → 42, partial 16 → 11; missing
-> unchanged at 12. UC-D8 is "covered at the real sink" with the honest
-> transient-overwrite caveat recorded inline.
+> RST-mid-stream socket, read-only on-disk target, a syntactically
+> invalid registry root hive `reg.exe` rejects for *any* caller incl.
+> the CI runner's LocalSystem, real registered failing synth backend)
+> and asserts the *real* surfacing + recovery. Covered 37 → 42, partial
+> 16 → 11; missing unchanged at 12. UC-D8 is "covered at the real sink"
+> with the honest transient-overwrite caveat recorded inline.
 
 Split by tier (where covered/partial):
 
@@ -209,13 +210,18 @@ test belongs in: **Tier-1** = per-control real-effect `e2e/web/` test;
 
 ### Phase 1 — Error/recovery on the destructive & money paths (highest user risk) — ✅ DONE
 *Why first:* these are the failures a real user is most likely to hit
-(no Wi-Fi mid-download, registry locked-down, bad hotkey) and where a
+(no Wi-Fi mid-download, registry write refused, bad hotkey) and where a
 silent failure is worst. All are pure logic reachable headless.
 
 **Status: implemented** in `e2e/web/test_error_recovery.py` (9 Tier-1
-test instances; full `e2e/web` 68 passed, stable across 3 runs / 2
-orders; 266 unit + ruff unaffected). The real failure is induced at a
-true seam in every case — never by mocking the unit under test.
+test instances; full `e2e/web` 68 passed locally — 3 runs, 2 orders;
+266 unit + ruff unaffected). The merge-required `Web UI E2E (served,
+headless Chromium)` check on the self-hosted LocalSystem runner is
+verified green on the pushed fix commit (UC-B11 included). The real
+failure is induced at a true seam in every case — never by mocking the
+unit under test, and never in a way that depends on caller privilege or
+host state (UC-B11's registry seam is a syntactically invalid root hive
+that `reg.exe` rejects identically for non-admin / admin / LocalSystem).
 
 - UC-A7 voice download **no-network / interrupted / disk-full** failure
   → `test_onboarding_install_default_voice_failure_recovers[no_network|
@@ -233,8 +239,12 @@ true seam in every case — never by mocking the unit under test.
   `HotkeyManager` + verbatim `app_web.bind_hotkeys`). ✅
 - UC-B11 Windows-integration **registry-write-failure** path →
   `test_settings_ctx_install_registry_write_failure` (real `reg.exe`
-  against a locked-down `HKLM\SYSTEM` hive a non-admin genuinely
-  refuses → the real `RuntimeError`). ✅
+  against a **syntactically invalid root hive** `HKXX\…` that `reg.exe`
+  itself rejects with `ERROR: Invalid key name.` (exit 1) for *every*
+  caller — non-admin, admin, and the CI runner's LocalSystem alike, with
+  no ACL involved and no real hive ever written → the real
+  `RuntimeError` at `context_menu.py:75-77`). Privilege- and
+  host-state-independent by construction. ✅
 - UC-D8 core **"Synthesis failed"** overlay message →
   `test_read_aloud_synthesis_failed_overlay_message` (real registered
   failing synth backend → unmodified `pippal.playback` → asserted at

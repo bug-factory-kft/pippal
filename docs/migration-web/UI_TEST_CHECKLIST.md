@@ -161,9 +161,11 @@ PipPal") — and even then the underlying callable is `[x]`.
 > the **Phase-1** error/recovery use-cases now covered by
 > `e2e/web/test_error_recovery.py`, so the new tests are visible here
 > too. Every failure is induced at a **true seam** (a real closed /
-> RST-mid-stream socket, a real read-only on-disk target, a real
-> locked-down registry hive, a real registered failing synth backend) —
-> never by mocking the unit under test — and every assertion is a real
+> RST-mid-stream socket, a real read-only on-disk target, a
+> syntactically invalid registry root hive `reg.exe` rejects for *any*
+> caller incl. the CI runner's LocalSystem, a real registered failing
+> synth backend) — never by mocking the unit under test, and never in a
+> privilege- or host-state-dependent way — and every assertion is a real
 > observable effect (real error toast / row state in the served DOM,
 > real on-disk absence, the real `HotkeyManager` map, the real
 > `show_message` sink invocation).
@@ -177,7 +179,7 @@ PipPal") — and even then the underlying callable is `[x]`.
 | 6.5 | Voice Manager **per-row Install failure** — interrupted mid-stream → same | `test_voice_manager_row_install_failure_ui[interrupted]` | [x] |
 | 6.6 | **Invalid hotkey combo** (`"ctrl+shift"`, real `parse_combo`→None) → real "Saved, but some hotkeys could not be bound." toast; real `bind_hotkeys` failure entry; real `HotkeyManager` has no handler for it | `test_settings_invalid_hotkey_combo_surfaces_failure` | [x] |
 | 6.7 | **Duplicate hotkey combo** (real `duplicate_combo_failures`) → real error toast; exactly ONE handler for the duplicated identity in the real `HotkeyManager`; real duplicate-reason failure | `test_settings_duplicate_hotkey_combo_surfaces_failure` | [x] |
-| 6.8 | Windows-integration **registry-write failure** (`context_menu.py:75-77`) — real `reg.exe` against a locked-down `HKLM\SYSTEM` hive a non-admin genuinely refuses → real `RuntimeError`, real `fail()` toast, status does NOT flip to "✓ installed", locked path never written | `test_settings_ctx_install_registry_write_failure` | [x] |
+| 6.8 | Windows-integration **registry-write failure** (`context_menu.py:75-77`) — real `reg.exe` against a **syntactically invalid root hive** `HKXX\…` that `reg.exe` itself rejects (`ERROR: Invalid key name.`, exit 1) for *every* caller — non-admin, admin, and the CI runner's LocalSystem alike, no ACL, no real hive written → real `RuntimeError`, real `fail()` toast, status does NOT flip to "✓ installed", invalid root never readable/written. Privilege- and host-state-independent by construction. | `test_settings_ctx_install_registry_write_failure` | [x] |
 | 6.9 | Core **"Synthesis failed"** (`playback.py:167`) — real registered failing synth backend → unmodified `pippal.playback` → asserted at the **real `show_message` sink** + real recovery (engine not speaking, overlay self-recovers to idle). **Honest caveat:** core overwrites `overlay.message` within µs via a trailing `set_state("done")`, so the served-DOM string is transient and is asserted at the sink, not via a flaky DOM poll (documented at UC-D8 in the backlog). | `test_read_aloud_synthesis_failed_overlay_message` | [x] (at sink, with caveat) |
 
 ---
@@ -331,18 +333,26 @@ profile.
   (Chromium, served + headless): the 59 prior + the 9 new
   `test_error_recovery.py` instances. The full `e2e/web` suite was run
   **3 consecutive times — twice in definition order and once with the
-  new file collected first (isolation check) — all 3 green (68/68 each,
-  0 failures, ~110 s each)**, confirming the new error/recovery tests
-  are order-independent (each gets its own fresh per-test profile; the
-  hotkey tests build their own real bridge/server and tear it down).
-  `py -3.11 -m pytest -q` → **266 passed** (unchanged; fully additive),
-  `ruff check src/pippal tests e2e/web e2e/journey` → clean,
+  new error/recovery file collected first (isolation check) — all 3
+  green (68/68 each, 0 failures, ~106 s each)**, confirming the new
+  error/recovery tests are order-independent (each gets its own fresh
+  per-test profile; the hotkey tests build their own real bridge/server
+  and tear it down). The merge-required **`Web UI E2E (served, headless
+  Chromium)`** check on the self-hosted **LocalSystem** runner is
+  expected to be green for the same reason (the invalid `HKXX` root
+  errors identically for LocalSystem — privilege-independent); this line
+  will be updated to the verified CI conclusion + run URL once the
+  required check has concluded on the pushed commit.
+  `py -3.11 -m pytest -q` → **266 passed** (unchanged; fully
+  additive), `ruff check src/pippal tests e2e/web e2e/journey` → clean,
   `pytest --collect-only` → exactly 266, zero from `e2e/web`. Honest
-  caveat: the registry-failure test (6.8) and the synth-failed test
-  (6.9) carry documented real-behaviour caveats (a non-admin
-  `HKLM\SYSTEM` write being the locked-hive seam; core's transient
-  `show_message` overwrite asserted at the sink) — see §6 and the
-  backlog UC-D8/UC-B11 rows.
+  caveat: the synth-failed test (6.9) carries a documented
+  real-behaviour caveat (core's transient `show_message` overwrite
+  asserted at the sink) — see §6 and the backlog UC-D8 row. UC-B11's
+  earlier `HKLM\SYSTEM` "locked-hive" seam was **incorrect** (LocalSystem
+  has FullControl on `HKLM\SYSTEM`, so the write *succeeded* on the CI
+  runner and the test wrongly failed + polluted the host); it was
+  re-seamed to the privilege-independent invalid-root form above.
 - **Prior record (pre-Phase-1, still accurate for that state): 59
   passed** (Chromium, served + headless).
   Stability proven on that code: the full `e2e/web` suite was run
