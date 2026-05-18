@@ -152,6 +152,34 @@ PipPal") — and even then the underlying callable is `[x]`.
 | 5.5 | Tray icon idle↔speaking swap (`make_tray_icon`) | `tests/test_tray.py::TestMakeTrayIcon` (existing unit suite: returns 64×64 RGBA, speaking variant differs visibly from idle, per-state cache). The callable is fully `[x]`; only the OS painting that image into the tray (Windows, not PipPal) is uncovered. | [x] |
 | 5.6 | Global hotkeys (keyboard lib) | `test_global_hotkey_speak_dispatch_drives_real_engine` — registers the configured "speak" action on the **real** `HotkeyManager` as `app_web.bind_hotkeys` does, then dispatches via the manager's own stored handler (the exact callable `_safe_call` runs); asserts a real engine effect (token bump / speaking). Only the OS delivering the physical keystroke to the hook is uncovered. The rebind path is also covered (`test_settings_hotkey_*`). | [x] |
 
+## 6. Error / recovery on the destructive & money paths (`e2e/web/test_error_recovery.py`)
+
+> **Scope.** Sections 1–5 enumerate one test **per control** (the happy
+> click). They deliberately do **not** enumerate the *error / edge /
+> recovery variant* of each control — that is the job of
+> `docs/USE_CASE_BACKLOG.md` (the use-case backlog). This section tracks
+> the **Phase-1** error/recovery use-cases now covered by
+> `e2e/web/test_error_recovery.py`, so the new tests are visible here
+> too. Every failure is induced at a **true seam** (a real closed /
+> RST-mid-stream socket, a real read-only on-disk target, a real
+> locked-down registry hive, a real registered failing synth backend) —
+> never by mocking the unit under test — and every assertion is a real
+> observable effect (real error toast / row state in the served DOM,
+> real on-disk absence, the real `HotkeyManager` map, the real
+> `show_message` sink invocation).
+
+| # | Error/recovery use-case | Playwright test | Status |
+|---|---|---|---|
+| 6.1 | Default-voice download **no-network** (real connection-refused, WinError 10061) → real `fail()` toast, status stuck "Installing…", clean disk, config unchanged | `test_onboarding_install_default_voice_failure_recovers[no_network]` | [x] |
+| 6.2 | Default-voice download **interrupted** (real RST mid-stream, WinError 10054) → same real recovery surface | `test_onboarding_install_default_voice_failure_recovers[interrupted]` | [x] |
+| 6.3 | Default-voice download **un-writable target / disk-full class** (real read-only on-disk `.part`, Errno 13) → same real recovery surface | `test_onboarding_install_default_voice_failure_recovers[unwritable_target]` | [x] |
+| 6.4 | Voice Manager **per-row Install failure** (`app.js:539`) — no-network → row "failed" (`vstatus err`), button re-enabled, error toast, catalogue still NOT installed | `test_voice_manager_row_install_failure_ui[no_network]` | [x] |
+| 6.5 | Voice Manager **per-row Install failure** — interrupted mid-stream → same | `test_voice_manager_row_install_failure_ui[interrupted]` | [x] |
+| 6.6 | **Invalid hotkey combo** (`"ctrl+shift"`, real `parse_combo`→None) → real "Saved, but some hotkeys could not be bound." toast; real `bind_hotkeys` failure entry; real `HotkeyManager` has no handler for it | `test_settings_invalid_hotkey_combo_surfaces_failure` | [x] |
+| 6.7 | **Duplicate hotkey combo** (real `duplicate_combo_failures`) → real error toast; exactly ONE handler for the duplicated identity in the real `HotkeyManager`; real duplicate-reason failure | `test_settings_duplicate_hotkey_combo_surfaces_failure` | [x] |
+| 6.8 | Windows-integration **registry-write failure** (`context_menu.py:75-77`) — real `reg.exe` against a locked-down `HKLM\SYSTEM` hive a non-admin genuinely refuses → real `RuntimeError`, real `fail()` toast, status does NOT flip to "✓ installed", locked path never written | `test_settings_ctx_install_registry_write_failure` | [x] |
+| 6.9 | Core **"Synthesis failed"** (`playback.py:167`) — real registered failing synth backend → unmodified `pippal.playback` → asserted at the **real `show_message` sink** + real recovery (engine not speaking, overlay self-recovers to idle). **Honest caveat:** core overwrites `overlay.message` within µs via a trailing `set_state("done")`, so the served-DOM string is transient and is asserted at the sink, not via a flaky DOM poll (documented at UC-D8 in the backlog). | `test_read_aloud_synthesis_failed_overlay_message` | [x] (at sink, with caveat) |
+
 ---
 
 ## Tally
@@ -257,7 +285,9 @@ profile.
   (row 2.30)) + `e2e/web/test_web_ui_controls.py` (35, incl.
   parametrized) + `e2e/web/test_tray_hotkey_integration.py` (5 — the §5
   tray / hotkey headless-safe integration tests that close the last
-  function exemptions).
+  function exemptions) + `e2e/web/test_error_recovery.py` (9 — the §6
+  Phase-1 error/recovery use-cases: 7 test functions, 9 parametrized
+  instances; real failures at true seams). **Full `e2e/web`: 68 tests.**
 - **Hermetic shell-integration harness:** the `cmd_server_identity`
   fixture (`e2e/web/conftest.py`) exports the production-safe, opt-in
   core env hooks `PIPPAL_CMD_SERVER_PORT=0` (OS-assigned ephemeral
@@ -297,8 +327,25 @@ profile.
   `playwright-report/artifacts`, plus a self-contained `report.html`;
   all uploaded by the always() `upload-artifact@v4` step. See
   `e2e/web/README.md`.
-- **Local headless run: 59 passed** (Chromium, served + headless).
-  Stability proven on the final code: the full `e2e/web` suite was run
+- **Phase-1 update (this PR update) — local headless run: 68 passed**
+  (Chromium, served + headless): the 59 prior + the 9 new
+  `test_error_recovery.py` instances. The full `e2e/web` suite was run
+  **3 consecutive times — twice in definition order and once with the
+  new file collected first (isolation check) — all 3 green (68/68 each,
+  0 failures, ~110 s each)**, confirming the new error/recovery tests
+  are order-independent (each gets its own fresh per-test profile; the
+  hotkey tests build their own real bridge/server and tear it down).
+  `py -3.11 -m pytest -q` → **266 passed** (unchanged; fully additive),
+  `ruff check src/pippal tests e2e/web e2e/journey` → clean,
+  `pytest --collect-only` → exactly 266, zero from `e2e/web`. Honest
+  caveat: the registry-failure test (6.8) and the synth-failed test
+  (6.9) carry documented real-behaviour caveats (a non-admin
+  `HKLM\SYSTEM` write being the locked-hive seam; core's transient
+  `show_message` overwrite asserted at the sink) — see §6 and the
+  backlog UC-D8/UC-B11 rows.
+- **Prior record (pre-Phase-1, still accurate for that state): 59
+  passed** (Chromium, served + headless).
+  Stability proven on that code: the full `e2e/web` suite was run
   **12 consecutive times — 4 in definition order, 3 reversed
   (`pytest-reverse`), 5 with randomized seeds (`pytest-randomly`
   seeds 7/42/1337/90909/2024) — all 12 green (59/59 each, 0

@@ -61,7 +61,7 @@ set differs per state.
 | UC-A4 | READY → Skip for now | User trusts it / will set up later | `onboarding-skip` → `close_window` (`app.js:395`) | n/a | **covered** Tier-1 `test_onboarding_ready_skip_closes_window` |
 | UC-A5 | READY → Open Settings | User wants to change voice/speed before testing | `onboarding-open-settings` → `open_settings_window` | n/a | **covered** Tier-1 `test_onboarding_ready_open_settings` |
 | UC-A6 | READY (already complete) re-entry | Returning user re-opens first-run check; sees "Close"/"Play sample again" | `get_activation_state.is_complete` true → finish button becomes "Close", play becomes "Play sample again" (`app.js:399,413`) | **is_complete branch** of the finish/play handlers | **partial** — render path covered by `test_onboarding_renders_and_closes`; the *already-complete* finish="Close" / play-again copy branch (`app.js:399-422`) is not asserted. Code: `app.js:399` |
-| UC-A7 | MISSING_VOICE → Install default voice | First user has no voice; wants the one-click path to a working read | `onboarding-install-voice` → `bridge.install_default_voice` downloads default ~120 MB voice, sets `config["voice"]` (`bridge.py:237`) | **No network / interrupted / disk full** during the ~120 MB download → `install_piper_voice` raises, JS `fail()` toasts, status stuck on "Installing…" | **partial** — happy path **covered** Tier-1 `test_onboarding_install_default_voice_real_effect`; Tier-2 J1 does a real ~60 MB download. **No-network / interrupted / disk-full failure variant: missing.** Code: `bridge.py:237` |
+| UC-A7 | MISSING_VOICE → Install default voice | First user has no voice; wants the one-click path to a working read | `onboarding-install-voice` → `bridge.install_default_voice` downloads default ~120 MB voice, sets `config["voice"]` (`bridge.py:237`) | **No network / interrupted / disk full** during the ~120 MB download → `install_piper_voice` raises, JS `fail()` toasts, status stuck on "Installing…" | **covered** — happy path Tier-1 `test_onboarding_install_default_voice_real_effect` + Tier-2 J1 (real ~60 MB download). Failure/recovery variant **now Tier-1** `test_error_recovery.py::test_onboarding_install_default_voice_failure_recovers[no_network|interrupted|unwritable_target]`: the real installer/`_streaming_download`/`urllib` runs unchanged, only the *origin* (the pure `voices.voice_url_base` helper) points at a real **closed** socket (genuine `URLError` WinError 10061 = no network), a real server that **RST-closes mid-stream** (genuine `ConnectionResetError` WinError 10054 = interrupted), or a real read-only file pre-occupying the on-disk `.part` target (genuine `PermissionError` Errno 13 = unwritable/disk-full class). Asserts the real `fail()` error toast, status honestly stuck on "Installing…", **no** voice/partial on the real disk, live `config["voice"]` unchanged. Code: `bridge.py:237` |
 | UC-A8 | MISSING_VOICE → Open Voice Manager | User wants to choose a non-default voice/language | `onboarding-open-vm` → `open_voice_manager_window` | n/a | **covered** Tier-1 `test_onboarding_missing_voice_state_buttons` |
 | UC-A9 | MISSING_VOICE → Skip | User defers voice install | `onboarding-skip` → `close_window` | n/a | **covered** Tier-1 `test_onboarding_missing_voice_state_buttons` |
 | UC-A10 | MISSING_PIPER → Open setup instructions | Dev/repair user with no `piper.exe` wants the setup docs | `onboarding-open-setup` → `open_url(github#readme)` (`app.js:379`) | n/a (external browser is OS) | **covered** Tier-1 `test_onboarding_missing_piper_open_setup_url` |
@@ -82,11 +82,11 @@ set differs per state.
 | UC-B4 | Voice card — Manage…/Install CTA | User wants to add/remove voices | `settings-manage-voices` → `open_voice_manager_window` | n/a | **covered** Tier-1 `test_settings_manage_voices_opens_vm` |
 | UC-B5 | Speech — Speed slider | User finds default pace too slow/fast | `settings-speed` live value + persists inverse `length_scale` (`app.js:65`) | n/a | **covered** Tier-1 `test_settings_edit_persists_to_backend`; Tier-2 indirectly via J3 |
 | UC-B6 | Speech — Variation slider | User wants livelier/flatter intonation | `settings-noise` → `noise_scale` persists | n/a | **covered** Tier-1 `test_settings_variation_slider_reflects_and_persists` |
-| UC-B7 | Hotkeys — rebind each of 4 fields | User's default combo clashes with another app | `settings-hotkey_speak/queue/pause/stop` → rebind + persist + `bind_hotkeys()` re-registers (`bridge.py:149`) | **Invalid combo** (`parse_combo` → None, `hotkey.py:126`) → `hotkey_failures` returned, toast "some hotkeys could not be bound" (`app.js:263`). **Duplicate combo** (`duplicate_combo_failures`, `hotkey.py:148`) → that action skipped | **partial** — happy rebind **covered** Tier-1 `test_settings_hotkey_edit_rebinds_and_persists`, `test_settings_hotkey_each_field_rebinds_and_persists[*]`. **Invalid-combo and duplicate-combo failure paths (`hotkey.py:126,148`, `bridge.py:152`) are MISSING** — no test feeds a bad/duplicate combo and asserts the failure surfacing |
+| UC-B7 | Hotkeys — rebind each of 4 fields | User's default combo clashes with another app | `settings-hotkey_speak/queue/pause/stop` → rebind + persist + `bind_hotkeys()` re-registers (`bridge.py:149`) | **Invalid combo** (`parse_combo` → None, `hotkey.py:126`) → `hotkey_failures` returned, toast "some hotkeys could not be bound" (`app.js:263`). **Duplicate combo** (`duplicate_combo_failures`, `hotkey.py:148`) → that action skipped | **covered** — happy rebind Tier-1 `test_settings_hotkey_edit_rebinds_and_persists`, `test_settings_hotkey_each_field_rebinds_and_persists[*]`. Invalid-combo and duplicate-combo failure paths **now Tier-1** `test_error_recovery.py::test_settings_invalid_hotkey_combo_surfaces_failure` and `…::test_settings_duplicate_hotkey_combo_surfaces_failure`: a fresh real bridge/server wired to a **real `HotkeyManager`** + the **verbatim `app_web.bind_hotkeys`** is driven through the real served Settings UI; an unparseable `"ctrl+shift"` hits the real `parse_combo`→None reject (`hotkey.py:126`) and a real duplicate hits the real `duplicate_combo_failures` (`hotkey.py:148`); asserts the real "Saved, but some hotkeys could not be bound." error toast, the real persisted literal, the real `bind_hotkeys` failure entry (reason text) and the real `HotkeyManager._handlers` map (no handler for the invalid combo; exactly one for the duplicated identity). `bridge.py:152` |
 | UC-B8 | Reader panel — Show panel / Show text checkboxes | User wants a quieter screen / no karaoke text | `settings-show_overlay`, `settings-show_text_in_overlay` persist; `show_overlay=False` actually suppresses the panel on a real read (`overlay_state.py:69`) | n/a | **covered** Tier-1 `test_settings_checkbox_persists[*]`; Tier-2 `test_j3_settings_persist_and_behave` proves the behavioural effect (overlay stays idle) |
 | UC-B9 | Reader panel — Auto-hide / Distance / Karaoke offset spinboxes | User tunes how long the panel lingers / where it sits / lip-sync | `settings-auto_hide_ms`, `settings-overlay_y_offset`, `settings-karaoke_offset_ms` persist | n/a | **covered** Tier-1 `test_settings_edit_persists_to_backend`, `test_settings_spinbox_persists[*]` |
 | UC-B10 | Windows integration — status reflects reality | User wants to know if the right-click entry is installed | `settings-ctx-status` reflects `context_menu_status()` all/partial/none (`context_menu.py:33`) | **partial** install state shows "⚠ Partial — re-run Install" | **covered** Tier-1 `test_settings_ctx_status_reflects_backend` (the partial-state copy branch in `app.js:235` is rendered from real status) |
-| UC-B11 | Windows integration — Install | User wants "Read with PipPal" on .txt/.md | `settings-ctx-install` → real HKCU keys created (`context_menu.py:59`) | **Registry write fails** → `RuntimeError`, JS `fail()` toast (`context_menu.py:76`) | **partial** — install **covered** Tier-1 `test_settings_ctx_install_real_effect`. **Registry-write-failure path (`context_menu.py:75-77`) is missing** |
+| UC-B11 | Windows integration — Install | User wants "Read with PipPal" on .txt/.md | `settings-ctx-install` → real HKCU keys created (`context_menu.py:59`) | **Registry write fails** → `RuntimeError`, JS `fail()` toast (`context_menu.py:76`) | **covered** — install Tier-1 `test_settings_ctx_install_real_effect`. Registry-write-failure path **now Tier-1** `test_error_recovery.py::test_settings_ctx_install_registry_write_failure`: the real `install_context_menu` runs the real `reg.exe` `subprocess.run` unchanged; only the *target hive* (the pure `context_menu._reg_base_path` helper) is pointed at a locked-down `HKLM\SYSTEM` path a non-admin `reg add` genuinely refuses (real non-zero rc → the real `RuntimeError` at `context_menu.py:75-77`, verified at the bridge with `pytest.raises`). Asserts the real `fail()` error toast, the status label does NOT flip to "✓ installed", and the locked registry path was never written. `context_menu.py:75-77` |
 | UC-B12 | Windows integration — Remove | User no longer wants the Explorer entry | `settings-ctx-remove` → keys deleted (`context_menu.py:87`) | n/a | **covered** Tier-1 `test_settings_ctx_remove_real_effect` |
 | UC-B13 | Windows integration — invoke the registered command | The whole point: right-click a file → PipPal reads it | Registered `python -m pippal.open_file "%1"` POSTs to running IPC server → real `engine.read_text_async` (`open_file.py:13`, `command_server.py:222`) | **Second instance / stale port** — hermetic per-test ephemeral port + token guards it; **wrong token refused** | **covered** Tier-1 `test_shell_integration_registry_and_command` (full registry→command→engine round-trip, hermetic) |
 | UC-B14 | Open-source notices — View licences | Licence-conscious user inspects bundled licences | `settings-view-licences` → `open_notices_window`; notices surface shows resolved text (`bridge.py:348`) | **Notices file missing** → fallback "reinstall" copy (`bridge.py:352`) | **partial** — open + real text **covered** Tier-1 `test_settings_view_licences_opens_notices`, `test_notices_window_loads_real_text`; Tier-2 `test_j5_view_open_source_notices`. **Notices-file-missing fallback (`bridge.py:352-357`) is missing** |
@@ -109,7 +109,7 @@ set differs per state.
 | UC-C3 | Quality filter | User wants high/medium/low quality | `vm-quality` filters | n/a | **covered** Tier-1 `test_voice_manager_quality_filter` |
 | UC-C4 | Status filter | User wants to see only installed / not-installed | `vm-status` filters vs real disk state | n/a | **covered** Tier-1 `test_voice_manager_status_filter` |
 | UC-C5 | Search (debounced) + empty state | User types a name to find a voice fast | `vm-search` 180 ms debounce; `vm-empty` shown when no match (`app.js:467`) | **No-match empty state** | **covered** Tier-1 `test_voice_manager_search_filter` (both the match and empty-state) |
-| UC-C6 | Per-row Install | User installs a chosen voice | `vm-action-<id>` → `bridge.install_voice` writes `.onnx`+`.onnx.json`, resets backend (`bridge.py:209`) | **Network/disk failure** → `install_voice` raises, row shows "failed", button re-enabled (`app.js:539`) | **partial** — install success **covered** Tier-1 `test_voice_manager_row_install_real_effect`; Tier-2 J1 (real ~60 MB download). **Per-row install-failure UI path (`app.js:539-544`) is missing** |
+| UC-C6 | Per-row Install | User installs a chosen voice | `vm-action-<id>` → `bridge.install_voice` writes `.onnx`+`.onnx.json`, resets backend (`bridge.py:209`) | **Network/disk failure** → `install_voice` raises, row shows "failed", button re-enabled (`app.js:539`) | **covered** — install success Tier-1 `test_voice_manager_row_install_real_effect` + Tier-2 J1. Per-row install-failure UI path **now Tier-1** `test_error_recovery.py::test_voice_manager_row_install_failure_ui[no_network|interrupted]`: the real `bridge.install_voice`→`install_piper_voice` runs unchanged, only the origin is a real closed / RST-mid-stream socket (genuine `URLError`/`ConnectionResetError`); asserts the real row status flips to "failed" (`vstatus err`), the button is re-enabled, the `fail()` error toast shows, and the real catalogue/disk still report the voice NOT installed (`app.js:539-544`) |
 | UC-C7 | Per-row Remove + confirm | User frees disk / removes an unwanted voice | `vm-action-<id>` (installed) → confirm modal → `remove_voice` deletes files (`bridge.py:221`) | **Confirm Cancel** → files untouched | **covered** Tier-1 `test_voice_remove_confirm_modal_gates_deletion` (accept AND cancel) |
 | UC-C8 | Close Voice Manager | User is done managing voices | `window-close` in voices surface → `close_window` | n/a | **covered** Tier-1 `test_voice_manager_close_button_calls_bridge` |
 | UC-C9 | Voice Manager opened from first-run with install callback | First-run user installs from VM and onboarding refreshes | Tk path wires `on_installed=panel.apply_installed_voice` (`app.py:574`) | The web path has no equivalent first-run→VM→refresh wiring | **missing** — the first-run-launched-VM install-callback flow (`app.py:574-583`, the Tk-only `_open_voice_manager_from_first_run`) has **no web equivalent and no test**; an honest parity gap (web onboarding "Open Voice Manager" just opens VM with no install-completion callback). |
@@ -127,7 +127,7 @@ set differs per state.
 | UC-D5 | Paused chip on pause | User pauses and sees it's paused | Pause during a real read → `overlay-paused` chip shows (`app.js:714`) | n/a | **covered** Tier-1 `test_overlay_paused_chip_shows_on_pause` |
 | UC-D6 | Auto-hide after reading | Panel disappears on its own when done | `set_state("done")` arms `threading.Timer(max(OVERLAY_HIDE_MIN_MS, auto_hide_ms))` → panel hides (`overlay_state.py:95`) | **A new read cancels a pending hide** (`_cancel_hide_locked`, `overlay_state.py:151`) | **partial** — auto-hide-then-hidden **covered** Tier-1 `test_overlay_auto_hide_actually_hides`. The **cancel-pending-hide-on-new-read** generation-guard branch (`overlay_state.py:151,176`) is not directly asserted |
 | UC-D7 | Drag-to-reposition | User moves the panel out of the way | Right-button drag offsets the panel via transform (`app.js:633`) | n/a | **covered** Tier-1 `test_overlay_drag_repositions_panel` |
-| UC-D8 | Full real read-aloud path (synth → WAV → karaoke → history) | The core product: select text, hear it, see karaoke, find it in Recent | Real synth backend → RIFF/WAVE PCM per chunk + `is_speaking` + overlay + Recent records text (`playback.py:59`) | **Synthesis failure** → `ov.show_message("Synthesis failed")` (`playback.py:166`) | **partial** — full real path **covered** Tier-1 `test_read_aloud_full_real_path_wav_karaoke_history`; Tier-2 J2. **The "Synthesis failed" overlay-message failure branch (`playback.py:166-168`) is MISSING in core** (pro covers an analogous path; core does not) |
+| UC-D8 | Full real read-aloud path (synth → WAV → karaoke → history) | The core product: select text, hear it, see karaoke, find it in Recent | Real synth backend → RIFF/WAVE PCM per chunk + `is_speaking` + overlay + Recent records text (`playback.py:59`) | **Synthesis failure** → `ov.show_message("Synthesis failed")` (`playback.py:166`) | **covered (at the real sink — see honest caveat)** — full real path Tier-1 `test_read_aloud_full_real_path_wav_karaoke_history` + Tier-2 J2. The "Synthesis failed" failure branch is **now Tier-1** `test_error_recovery.py::test_read_aloud_synthesis_failed_overlay_message`: a real `TTSBackend` registered via the **real `plugins.register_engine`** API (its `synthesize` genuinely returns False) drives the **unmodified `pippal.playback`** loop to the **real `WebOverlay.show_message("Synthesis failed")` sink** (`playback.py:167`); asserted at the real sink (the real method still executes — only the call is recorded, the unit-suite pattern at `tests/test_engine.py:179` lifted to E2E) + real recovery (engine no longer `is_speaking`, overlay self-recovers to idle in the served DOM, the failure string never enters Recent). **Honest caveat:** in *core* `playback.synthesize_and_play` runs an unconditional trailing `ov.set_state("done")` *immediately after* `_prepare_first_chunk`'s `show_message` (no I/O between them), clearing `overlay.message` within microseconds — so the 120 ms-polled served DOM/`snapshot()` cannot reliably observe the literal string (asserting it there would be a flake/tautology). The message is genuinely emitted at the real sink; its transient overwrite is a real core behaviour (the core/pro asymmetry the gaps section names), not a test weakness. `playback.py:166-168` |
 | UC-D9 | One-shot overlay message ("No text selected" / "Queued — N pending") | User gets feedback when a hotkey action has nothing/queued | `show_message` sets `done` + arms `OVERLAY_MESSAGE_MS` self-dismiss (`overlay_state.py:105`); engine emits these (`engine.py:472,498`) | **Message auto-dismiss timing** | **missing** — no Tier-1/Tier-2 test drives a `show_message` and asserts the user-visible banner + its `OVERLAY_MESSAGE_MS` self-dismiss for the core "No text selected"/"Queued" cases (`engine.py:472,498`; `overlay_state.py:105`). Pro asserts an analogous notice; core does not. |
 | UC-D10 | Pause/resume mid-chunk audio behaviour | User pauses, audio silences, resumes from chunk start | `pause_toggle` purges audio + freezes overlay; resume replays chunk from start (`playback.py:282`) | **Seek while paused** hands the seek back without restarting (`playback.py:316`) | **missing** — the pause→silence→resume-replays-from-start and seek-while-paused behaviours (`playback.py:305-333`) have no Tier-1/Tier-2 journey test (paused *chip* is covered, the *audio/seek behaviour* is not) |
 
@@ -169,19 +169,29 @@ pronunciation surface (recorded separately as a not-a-feature note).
 
 | Area | Use-cases | covered | partial | missing |
 |---|---|---|---|---|
-| A. Onboarding | 14 | 9 | 3 | 2 |
-| B. Settings | 21 | 13 | 6 | 2 |
-| C. Voice Manager | 9 | 7 | 1 | 1 |
-| D. Reader overlay | 10 | 5 | 2 | 3 |
+| A. Onboarding | 14 | 10 | 2 | 2 |
+| B. Settings | 21 | 15 | 4 | 2 |
+| C. Voice Manager | 9 | 8 | 0 | 1 |
+| D. Reader overlay | 10 | 6 | 1 | 3 |
 | E. Tray / hotkeys | 9 | 3 | 3 | 3 |
 | F. Command server IPC | 2 | 0 | 1 | 1 |
-| **Total** | **65** | **37** | **16** | **12** |
+| **Total** | **65** | **42** | **11** | **12** |
+
+> **Phase-1 delta (this PR update):** the 5 Phase-1 error/recovery
+> rows — UC-A7, UC-C6, UC-B7, UC-B11, UC-D8 — flipped **partial →
+> covered** by `e2e/web/test_error_recovery.py` (9 Tier-1 test
+> instances). Each induces the *real* failure at a true seam (closed /
+> RST-mid-stream socket, read-only on-disk target, locked-down `HKLM`
+> registry hive, real registered failing synth backend) and asserts the
+> *real* surfacing + recovery. Covered 37 → 42, partial 16 → 11; missing
+> unchanged at 12. UC-D8 is "covered at the real sink" with the honest
+> transient-overwrite caveat recorded inline.
 
 Split by tier (where covered/partial):
 
-- **Tier-1 (`e2e/web/`)** carries the bulk: all 37 "covered" have a
-  Tier-1 test; 16 "partial" have a Tier-1 happy-path test missing the
-  error/edge variant.
+- **Tier-1 (`e2e/web/`)** carries the bulk: all 42 "covered" have a
+  Tier-1 test; the 11 remaining "partial" have a Tier-1 happy-path test
+  missing the error/edge variant (Phases 2–4).
 - **Tier-2 (`e2e/journey/`)** independently covers the 5 core journeys
   J1–J5 (UC-A2/A3, UC-A7, UC-B5/B8, UC-B14, UC-C1/C6, UC-D1/D2/D8) on
   the *real launched desktop app*. No "missing" use-case is covered by
@@ -197,25 +207,44 @@ test belongs in: **Tier-1** = per-control real-effect `e2e/web/` test;
 **Tier-2** = full user-journey on the launched desktop app
 (`e2e/journey/`).
 
-### Phase 1 — Error/recovery on the destructive & money paths (highest user risk)
+### Phase 1 — Error/recovery on the destructive & money paths (highest user risk) — ✅ DONE
 *Why first:* these are the failures a real user is most likely to hit
 (no Wi-Fi mid-download, registry locked-down, bad hotkey) and where a
 silent failure is worst. All are pure logic reachable headless.
 
-- UC-A7 voice download **no-network / interrupted / disk-full** failure
-  (Tier-1 — drive `install_default_voice` against an unreachable/short
-  origin, assert the JS `fail()` toast + status).
-- UC-C6 per-row install **failure** UI (`app.js:539`) (Tier-1).
-- UC-B7 **invalid combo** + **duplicate combo** hotkey failure surfacing
-  (`hotkey.py:126,148`, `bridge.py:152`) (Tier-1).
-- UC-B11 Windows-integration **registry-write-failure** path (Tier-1,
-  hermetic — simulate a failing `reg add`).
-- UC-D8 core **"Synthesis failed"** overlay message (Tier-1 — backend
-  with a synth that fails, assert the message at the `show_message`
-  sink, mirroring the pro pattern).
+**Status: implemented** in `e2e/web/test_error_recovery.py` (9 Tier-1
+test instances; full `e2e/web` 68 passed, stable across 3 runs / 2
+orders; 266 unit + ruff unaffected). The real failure is induced at a
+true seam in every case — never by mocking the unit under test.
 
-*Est. size:* ~5 focused Tier-1 tests. Medium (needs fault injection
-fixtures: short-read HTTP origin, failing `reg`, failing synth backend).
+- UC-A7 voice download **no-network / interrupted / disk-full** failure
+  → `test_onboarding_install_default_voice_failure_recovers[no_network|
+  interrupted|unwritable_target]`. Real `urllib`/installer unchanged;
+  origin = real closed socket (WinError 10061), real RST-mid-stream
+  server (WinError 10054), or a real read-only on-disk `.part` target
+  (Errno 13). Asserts the real `fail()` toast + stuck status + clean
+  disk + unchanged config. ✅
+- UC-C6 per-row install **failure** UI (`app.js:539`) →
+  `test_voice_manager_row_install_failure_ui[no_network|interrupted]`. ✅
+- UC-B7 **invalid combo** + **duplicate combo** hotkey failure surfacing
+  (`hotkey.py:126,148`, `bridge.py:152`) →
+  `test_settings_invalid_hotkey_combo_surfaces_failure` +
+  `test_settings_duplicate_hotkey_combo_surfaces_failure` (real
+  `HotkeyManager` + verbatim `app_web.bind_hotkeys`). ✅
+- UC-B11 Windows-integration **registry-write-failure** path →
+  `test_settings_ctx_install_registry_write_failure` (real `reg.exe`
+  against a locked-down `HKLM\SYSTEM` hive a non-admin genuinely
+  refuses → the real `RuntimeError`). ✅
+- UC-D8 core **"Synthesis failed"** overlay message →
+  `test_read_aloud_synthesis_failed_overlay_message` (real registered
+  failing synth backend → unmodified `pippal.playback` → asserted at
+  the real `show_message` sink, with the honest transient-overwrite
+  caveat documented at UC-D8 and in the gaps section). ✅
+
+*Actual size:* 7 test functions / 9 parametrized instances. The fault
+injection is real seams (closed/short HTTP origin sockets, read-only
+disk target, locked `reg` hive, real registered failing synth backend),
+not mocks.
 
 ### Phase 2 — Untested core interaction journeys (functional gaps in the merge gate)
 *Why second:* these are everyday actions with **zero** coverage today;
@@ -298,16 +327,25 @@ journey with real effects), but additive and not a CI gate.
    *controls*, but it does NOT enumerate error/edge/recovery
    use-cases.** That is honest within its own stated scope ("one test
    per *control*"), but a reader could over-read it as full behavioural
-   coverage. The 16 partial + 12 missing rows above are the
-   use-case-level gaps the per-control tally structurally cannot show
-   (e.g. row 1.11 "install default voice" is `[x]` for the happy click
-   but the **no-network/interrupted/disk-full** variant is untested).
-3. **Core has no "Synthesis failed" / one-shot-message coverage** even
-   though the Pro checklist makes a point of asserting the analogous
-   `"Synthesis failed"` overlay message (`pro` `test_ollama_read_path_*`).
-   Core `playback.py:166` and `engine.py:472,498` emit the same class of
-   user-visible message with zero core test — an asymmetry worth closing
-   (Phase 1/2).
+   coverage. The remaining 11 partial + 12 missing rows above are the
+   use-case-level gaps the per-control tally structurally cannot show.
+   (Phase 1 closed the 5 highest-risk ones — e.g. row 1.11 "install
+   default voice" now has the real **no-network/interrupted/disk-full**
+   variant in `e2e/web/test_error_recovery.py`.)
+3. **Core "Synthesis failed" is now covered at the real sink, with a
+   real-behaviour caveat (Phase 1).**
+   `test_read_aloud_synthesis_failed_overlay_message` drives a real
+   registered failing synth backend through the unmodified
+   `pippal.playback` loop and asserts the real
+   `WebOverlay.show_message("Synthesis failed")` invocation
+   (`playback.py:167`). The honest caveat (also recorded inline at
+   UC-D8): core's `synthesize_and_play` runs an unconditional trailing
+   `set_state("done")` *immediately after* the `show_message`, clearing
+   `overlay.message` within microseconds — so the served-DOM/`snapshot()`
+   string is genuinely transient and is asserted at the sink (the
+   unit-suite pattern lifted to E2E), not via a flaky DOM poll. The
+   sibling one-shot messages `engine.py:472,498` ("No text selected" /
+   "Queued — N pending") remain a Phase-2 item.
 4. **Tier-2 (journey) breadth is narrow (J1–J5).** The PR/checklist
    presents Tier-2 as the journey lane; it currently covers only 5
    journeys and **does not** touch hotkey rebinding, Windows-integration
