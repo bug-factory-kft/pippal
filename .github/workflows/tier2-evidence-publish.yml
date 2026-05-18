@@ -1,0 +1,138 @@
+name: Tier-2 Evidence Publish
+
+# Publish the Tier-2 user-journey evidence bundle as a downloadable
+# GitHub artifact — Tier-1's equivalent of an attached report, but for
+# the release/journey lane.
+#
+# WHY THIS WORKFLOW EXISTS
+# ------------------------
+# Tier-2 (e2e/journey) drives the ACTUALLY LAUNCHED PipPal desktop app:
+# a real pywebview WebView2 window that only appears in a VISIBLE
+# interactive logged-in session. It therefore CANNOT run on the
+# Session-0 self-hosted runner (no desktop). So this workflow does NOT
+# run any journey. The logged-in user runs `e2e/journey/run-journey.ps1`
+# locally; that runner STAGES the just-produced evidence bundle (report
+# + junit + summary + step logs + per-journey screenshots + Playwright
+# trace.zip + the screen/window .mp4 / contact-sheet recordings +
+# app/cdp proof) to a FIXED per-user path on the runner host:
+#
+#     %LOCALAPPDATA%\pippal-tier2-evidence\latest\
+#
+# This single job (same self-hosted Windows host) only READS that staged
+# bundle and `actions/upload-artifact@v4`s it as `tier2-journey-evidence`.
+#
+# SCOPE GUARD (additive, non-interfering)
+# ---------------------------------------
+# * `workflow_dispatch` ONLY — never `pull_request` / `push`, so it is
+#   NOT a required check and cannot gate or interfere with the Tier-1
+#   merge gate (`ui-web-e2e.yml` -> `Web UI E2E (served, headless
+#   Chromium)`), `ci.yml`, `e2e-windows.yml`, or `bench-baseline.yml`.
+# * It runs NO tests and NO journey; it only packages a host-staged
+#   directory. It does not touch command_server.py / open_file.py /
+#   pytest.ini / e2e/web or branch protection.
+# * It is triggered by `run-journey.ps1` (best-effort `gh workflow run`)
+#   after a local logged-in run, or dispatched manually from the
+#   Actions tab.
+
+on:
+  workflow_dispatch:
+    inputs:
+      stage_root:
+        description: >-
+          Override the staging root on the runner host (default:
+          %LOCALAPPDATA%\pippal-tier2-evidence). The bundle is read from
+          <stage_root>\latest\.
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    name: Publish Tier-2 journey evidence artifact
+    # Same self-hosted Windows host the logged-in user staged the
+    # bundle on. NO desktop is needed here — this job runs no journey,
+    # it only reads the already-staged directory and uploads it.
+    runs-on: [self-hosted, windows, pippal-windows]
+
+    steps:
+      - name: Resolve + verify the staged Tier-2 evidence bundle
+        id: stage
+        shell: pwsh
+        run: |
+          $override = "${{ github.event.inputs.stage_root }}"
+          if ([string]::IsNullOrWhiteSpace($override)) {
+            $localAppData = $env:LOCALAPPDATA
+            if ([string]::IsNullOrWhiteSpace($localAppData)) {
+              $localAppData = Join-Path $env:USERPROFILE 'AppData\Local'
+            }
+            $stageRoot = Join-Path $localAppData 'pippal-tier2-evidence'
+          }
+          else {
+            $stageRoot = $override
+          }
+          $latest = Join-Path $stageRoot 'latest'
+          Write-Host "Tier-2 staging root: $stageRoot"
+          Write-Host "Reading bundle from: $latest"
+          if (-not (Test-Path $latest)) {
+            Write-Error ("No staged Tier-2 evidence at $latest. Run " +
+              "e2e\journey\run-journey.ps1 as the logged-in interactive " +
+              "user first (it stages the bundle there, then triggers " +
+              "this workflow).")
+            exit 1
+          }
+          $files = Get-ChildItem -Recurse -File $latest
+          if (-not $files -or $files.Count -eq 0) {
+            Write-Error "Staged Tier-2 evidence dir is empty: $latest"
+            exit 1
+          }
+          $totalBytes = ($files | Measure-Object Length -Sum).Sum
+          "stage_latest=$latest"            >> $env:GITHUB_OUTPUT
+          "file_count=$($files.Count)"      >> $env:GITHUB_OUTPUT
+          "total_bytes=$totalBytes"         >> $env:GITHUB_OUTPUT
+          Write-Host ("Found {0} files, {1:N0} bytes." -f $files.Count, $totalBytes)
+
+      - name: Upload Tier-2 journey evidence
+        uses: actions/upload-artifact@v4
+        with:
+          # The downloadable Tier-2 artifact (Tier-1's equivalent of an
+          # attached report): per-journey Playwright trace.zip (open
+          # with `playwright show-trace <file>`), the screen/window
+          # .mp4 (or the .frames contact-sheet fallback), report.html,
+          # junit xml, JSON summary, step logs, per-journey real-window
+          # screenshots + app.log + cdp.json proof, and the manifest.
+          name: tier2-journey-evidence
+          path: ${{ steps.stage.outputs.stage_latest }}
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Job summary
+        if: always()
+        shell: pwsh
+        run: |
+          $count = "${{ steps.stage.outputs.file_count }}"
+          $bytes = "${{ steps.stage.outputs.total_bytes }}"
+          $latest = "${{ steps.stage.outputs.stage_latest }}"
+          $lines = @(
+            "## Tier-2 journey evidence published",
+            "",
+            "Artifact: **tier2-journey-evidence**",
+            "",
+            "| | |",
+            "|---|---|",
+            "| Source (runner host) | ``$latest`` |",
+            "| Files | $count |",
+            "| Total bytes | $bytes |",
+            "",
+            "This is the **release/journey lane** evidence (the real",
+            "launched WebView2 desktop app driven over",
+            "``connect_over_cdp``). It is **not** a required check and",
+            "does not gate the Tier-1 merge gate. Each journey ships a",
+            "scrubbable Playwright **trace.zip** plus a real",
+            "screen/window **.mp4** (or a dense ``.frames.png``",
+            "contact-sheet when ffmpeg is unavailable). See",
+            "``e2e/journey/README.md`` for the honest",
+            "``connect_over_cdp`` recording caveat."
+          )
+          $lines -join "`n" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Encoding utf8 -Append

@@ -28,6 +28,21 @@
   How many times to run the full suite back-to-back (default 1). The
   release evidence expects >= 2 to demonstrate stability.
 
+.PARAMETER NoPublish
+  Skip the best-effort `gh workflow run tier2-evidence-publish.yml`
+  trigger at the end. The evidence bundle is still STAGED to the fixed
+  host path either way (so the Tier-2 Evidence Publish workflow can be
+  dispatched manually later).
+
+.PARAMETER StageRoot
+  Override the fixed staging root (default
+  `%LOCALAPPDATA%\pippal-tier2-evidence`). The just-produced bundle is
+  copied to `<StageRoot>\latest\` and a timestamped sibling. The
+  `tier2-evidence-publish.yml` workflow reads `<StageRoot>\latest\` on
+  the runner host and uploads it as the `tier2-journey-evidence`
+  GitHub artifact (Tier-1's equivalent of an attached, downloadable
+  report).
+
 .EXAMPLE
   powershell -ExecutionPolicy Bypass -File e2e\journey\run-journey.ps1 -Runs 2
 #>
@@ -35,7 +50,9 @@
 param(
     [string] $EvidenceDir,
     [string] $K,
-    [int] $Runs = 1
+    [int] $Runs = 1,
+    [switch] $NoPublish,
+    [string] $StageRoot
 )
 
 $ErrorActionPreference = 'Stop'
@@ -57,6 +74,110 @@ function Get-JUnitCounts {
     return $counts
 }
 
+function Publish-Tier2Evidence {
+    <#
+      Stage the just-produced evidence bundle to a FIXED host path so
+      the workflow_dispatch `tier2-evidence-publish.yml` (a single job
+      that runs NO journey — no desktop needed) can read it from the
+      runner host and `actions/upload-artifact@v4` it as
+      `tier2-journey-evidence` (Tier-1's equivalent of an attached,
+      downloadable report). This is purely additive: it touches only
+      this Tier-2 runner and a per-user staging dir; it does not affect
+      Tier-1 or any required check.
+
+      Best-effort + non-fatal: a staging/publish failure must NEVER
+      change the journey gate's exit code.
+    #>
+    param(
+        [Parameter(Mandatory = $true)][string] $EvidenceDir,
+        [Parameter(Mandatory = $true)][string] $StageRoot,
+        [Parameter(Mandatory = $true)][string] $RepoRoot,
+        [bool] $TriggerPublish = $true
+    )
+    try {
+        $stamp = (Get-Date).ToUniversalTime().ToString('yyyyMMddTHHmmssZ')
+        $latest = Join-Path $StageRoot 'latest'
+        $timed = Join-Path $StageRoot $stamp
+        # Fresh `latest` each run (a clean, predictable artifact source).
+        if (Test-Path $latest) { Remove-Item -Recurse -Force $latest }
+        New-Item -ItemType Directory -Force -Path $latest | Out-Null
+        New-Item -ItemType Directory -Force -Path $timed | Out-Null
+
+        # Copy the WHOLE evidence bundle (report.html, junit, summary
+        # json, step logs, per-journey screenshots, trace.zip, the new
+        # .mp4 / contact-sheet recordings, app/cdp proof).
+        Copy-Item -Recurse -Force -Path (Join-Path $EvidenceDir '*') `
+            -Destination $latest
+        Copy-Item -Recurse -Force -Path (Join-Path $EvidenceDir '*') `
+            -Destination $timed
+
+        # A small manifest so the publish job + reviewers can see at a
+        # glance what bundle this is, without opening every file.
+        $files = Get-ChildItem -Recurse -File $latest
+        $totalBytes = ($files | Measure-Object Length -Sum).Sum
+        $manifest = [ordered]@{
+            tier = 2
+            staged_at = (Get-Date).ToString('o')
+            source_evidence_dir = $EvidenceDir
+            file_count = $files.Count
+            total_bytes = [int64]$totalBytes
+            recordings = @(
+                $files |
+                    Where-Object {
+                        $_.Extension -in '.mp4', '.zip' -or
+                        $_.Name -like '*.frames.png'
+                    } |
+                    ForEach-Object {
+                        $_.FullName.Substring($latest.Length).TrimStart('\')
+                    }
+            )
+            note = 'Tier-2 user-journey evidence (REAL launched WebView2 app, driven over connect_over_cdp). Trace.zip = scrubbable recording; .mp4/.frames.png = real screen/window capture. See e2e/journey/README.md.'
+        }
+        $manifestPath = Join-Path $latest 'tier2-evidence-manifest.json'
+        $manifest | ConvertTo-Json -Depth 6 |
+            Set-Content -Encoding utf8 -Path $manifestPath
+        Copy-Item -Force -Path $manifestPath `
+            -Destination (Join-Path $timed 'tier2-evidence-manifest.json')
+
+        Write-Host "Staged Tier-2 evidence -> $latest" -ForegroundColor Cyan
+        Write-Host ("  ({0} files, {1:N0} bytes; timestamped copy: {2})" -f `
+                $files.Count, $totalBytes, $timed) -ForegroundColor Cyan
+
+        if (-not $TriggerPublish) {
+            Write-Host "Publish trigger skipped (-NoPublish)." -ForegroundColor Yellow
+            return
+        }
+
+        # Best-effort: dispatch the publish workflow. `gh` is not on
+        # PATH on this host; resolve it explicitly. A failure here is
+        # logged and ignored — the bundle is already staged so the
+        # workflow can be dispatched manually from the Actions tab.
+        $gh = $null
+        $ghCmd = Get-Command gh -ErrorAction SilentlyContinue
+        if ($ghCmd) { $gh = $ghCmd.Source }
+        elseif (Test-Path 'C:\Program Files\GitHub CLI\gh.exe') {
+            $gh = 'C:\Program Files\GitHub CLI\gh.exe'
+        }
+        if (-not $gh) {
+            Write-Host "gh CLI not found — staged only; dispatch 'Tier-2 Evidence Publish' manually." -ForegroundColor Yellow
+            return
+        }
+        $branch = (& git -C $RepoRoot rev-parse --abbrev-ref HEAD).Trim()
+        if ([string]::IsNullOrWhiteSpace($branch)) { $branch = 'feat/web-ui-migration' }
+        Write-Host "Dispatching Tier-2 Evidence Publish workflow on '$branch'…" -ForegroundColor Cyan
+        & $gh workflow run tier2-evidence-publish.yml --ref $branch
+        if ($LASTEXITCODE -eq 0) {
+            Write-Host "Triggered. Download 'tier2-journey-evidence' from the 'Tier-2 Evidence Publish' workflow run." -ForegroundColor Green
+        }
+        else {
+            Write-Host "gh workflow run returned $LASTEXITCODE — staged OK; dispatch manually if needed." -ForegroundColor Yellow
+        }
+    }
+    catch {
+        Write-Host "Tier-2 evidence staging/publish failed (non-fatal): $($_.Exception.Message)" -ForegroundColor Yellow
+    }
+}
+
 # Repo root = two levels up from e2e/journey/.
 $root = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
 $startedAt = Get-Date
@@ -66,6 +187,20 @@ if ([string]::IsNullOrWhiteSpace($EvidenceDir)) {
 }
 New-Item -ItemType Directory -Force -Path $EvidenceDir | Out-Null
 $EvidenceDir = (Resolve-Path $EvidenceDir).Path
+
+# Fixed per-user staging root the publish workflow reads from the
+# runner host (Tier-1 uploads its report as a CI artifact; Tier-2
+# can't run on the Session-0 runner so the logged-in run stages the
+# bundle here and the workflow_dispatch publish job uploads it).
+if ([string]::IsNullOrWhiteSpace($StageRoot)) {
+    $localAppData = $env:LOCALAPPDATA
+    if ([string]::IsNullOrWhiteSpace($localAppData)) {
+        $localAppData = Join-Path $env:USERPROFILE 'AppData\Local'
+    }
+    $StageRoot = Join-Path $localAppData 'pippal-tier2-evidence'
+}
+New-Item -ItemType Directory -Force -Path $StageRoot | Out-Null
+$StageRoot = (Resolve-Path $StageRoot).Path
 
 $pytestLog = Join-Path $EvidenceDir 'pytest-journey.log'
 $junitXml = Join-Path $EvidenceDir 'pytest-journey.junit.xml'
@@ -95,6 +230,15 @@ if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 & $python -m pip install --quiet pywebview
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+# Test-only: Pillow lets the recorder's no-ffmpeg fallback assemble
+# the dense contact-sheet recording. Additive + best-effort — if the
+# install fails the recorder simply keeps the numbered PNG frames (it
+# is non-fatal either way), so do NOT fail the run on it.
+& $python -m pip install --quiet pillow
+if ($LASTEXITCODE -ne 0) {
+    Write-Host "pillow install failed (non-fatal — recorder keeps numbered frames)" -ForegroundColor Yellow
+    $global:LASTEXITCODE = 0
+}
 & $python -m playwright install chromium | Out-Null
 
 # UTF-8 IO so the journey step glyphs (→ / ✓) render in a cp1252 host.
@@ -180,6 +324,9 @@ try {
         junit_xml = $junitXml
         playwright_artifacts = $artifactsDir
         html_report = $htmlReport
+        stage_root = $StageRoot
+        staged_latest = (Join-Path $StageRoot 'latest')
+        publish_workflow = 'tier2-evidence-publish.yml (workflow_dispatch only; uploads artifact tier2-journey-evidence)'
         tests = $counts.tests
         failures = $counts.failures
         errors = $counts.errors
@@ -192,6 +339,14 @@ try {
     Write-Host "Journey gate status: $status" -ForegroundColor Cyan
     Write-Host "Summary: $summaryJson" -ForegroundColor Cyan
     Write-Host "Evidence: $EvidenceDir" -ForegroundColor Cyan
+
+    # Stage the bundle to the fixed host path and (best-effort) trigger
+    # the workflow_dispatch publish so the Tier-2 evidence becomes a
+    # downloadable GitHub artifact like Tier-1's. Non-fatal: it never
+    # changes $finalExit.
+    Publish-Tier2Evidence -EvidenceDir $EvidenceDir -StageRoot $StageRoot `
+        -RepoRoot $root -TriggerPublish (-not $NoPublish.IsPresent)
+
     exit $finalExit
 }
 finally {

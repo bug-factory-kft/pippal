@@ -535,11 +535,51 @@ def real_app(request: pytest.FixtureRequest) -> Iterator[RealApp]:
             log_path=log_path,
             _pw_cm=pw_cm,
         )
+
+        # ---- Per-journey RECORDING (best-effort, never fails the
+        # journey): a Playwright trace (works over connect_over_cdp —
+        # the closest thing to a recording the CDP-attach mode allows)
+        # PLUS a real screen/window video (ffmpeg gdigrab if present,
+        # else a periodic page.screenshot grabber assembled into a .mp4
+        # / dense contact-sheet). See _recording.py for the honest
+        # connect_over_cdp limitation that motivates this design.
+        recorder = None
+        ev = os.environ.get("PIPPAL_JOURNEY_EVIDENCE_DIR")
+        if ev:
+            try:
+                from _recording import JourneyRecorder
+
+                rec_dir = Path(ev) / "journey-recordings"
+                recorder = JourneyRecorder(rec_dir, request.node.name)
+                ctx = None
+                try:
+                    ctx = page.context
+                except Exception:
+                    ctx = None
+                recorder.start(ctx, page)
+            except Exception:
+                recorder = None
+
         yield app
+
+        # Stop the recording against the CURRENT page (the journey may
+        # have re-attached to a newer real window) before dropping the
+        # rest of the evidence.
+        if recorder is not None:
+            try:
+                cur_page = app.page
+                cur_ctx = None
+                try:
+                    cur_ctx = cur_page.context
+                except Exception:
+                    cur_ctx = None
+                recorder.stop(cur_ctx, cur_page)
+            except Exception:
+                pass
+
         # ---- Per-journey evidence: a real screenshot of the live
         # desktop window + the launched app's own log, dropped under
         # the runner's evidence dir (proves a real window was driven).
-        ev = os.environ.get("PIPPAL_JOURNEY_EVIDENCE_DIR")
         if ev:
             try:
                 tname = request.node.name
@@ -557,6 +597,14 @@ def real_app(request: pytest.FixtureRequest) -> Iterator[RealApp]:
                 (edir / f"{tname}.cdp.json").write_text(
                     json.dumps(app.cdp_version, indent=2), encoding="utf-8"
                 )
+                if recorder is not None:
+                    try:
+                        (edir / f"{tname}.recording.txt").write_text(
+                            "\n".join(recorder.notes) + "\n",
+                            encoding="utf-8",
+                        )
+                    except Exception:
+                        pass
             except Exception:
                 pass
     finally:

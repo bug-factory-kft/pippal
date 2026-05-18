@@ -151,11 +151,102 @@ contract and writes, under
 | JSON summary (gate status/counts/command) | `journey-gate-summary.json` |
 | Command/context | `journey-gate-command.txt` |
 | Self-contained HTML report | `report.html` |
-| **Per-journey real-window proof** | `playwright-artifacts\journey-windows\<test>.png` (a screenshot of the live desktop window), `<test>.app.log` (the launched app's own stdout), `<test>.cdp.json` (the CDP build string — proves `Edg/…`, not headless) |
+| **Per-journey real-window proof** | `playwright-artifacts\journey-windows\<test>.png` (a screenshot of the live desktop window), `<test>.app.log` (the launched app's own stdout), `<test>.cdp.json` (the CDP build string — proves `Edg/…`, not headless), `<test>.recording.txt` (exactly what the recorder captured + how) |
+| **Per-journey recordings** | `playwright-artifacts\journey-recordings\<test>.trace.zip` (scrubbable Playwright trace), `<test>.mp4` (real screen/window video), and — only on the no-ffmpeg fallback — `<test>.frames\` (numbered PNG frames) + `<test>.frames.png` (dense contact-sheet) |
 
 `journey-gate-summary.json` reviewer rule: a journey pass requires
 `status=pass, exit_code=0, tests>0, failures=0, errors=0, skipped=0,
 runs>=2`.
+
+## Recordings (and the honest `connect_over_cdp` caveat)
+
+A journey attaches to an **already-running** WebView2 window with
+Playwright `chromium.connect_over_cdp`. We did **not** launch that
+browser (the real `app_web.main()` / pywebview / WebView2 did), so
+Playwright's **native** recording knobs do **not** work here:
+`record_video_dir` / the pytest-playwright `--video` flag only record
+contexts/pages **Playwright itself launched**. Over a foreign
+`connect_over_cdp` attach there is no Playwright-owned context to hang
+a video sink on, so a native `.webm` is **never** produced. This is a
+real, documented limitation of the CDP-attach mode — not something a
+flag fixes. So the suite produces the two recordings that *do* work
+over a foreign-CDP attach (`e2e/journey/_recording.py`):
+
+1. **Playwright trace, per journey** — `context.tracing.start(
+   screenshots=True, snapshots=True)` is wrapped around the journey
+   body and `tracing.stop(path=<test>.trace.zip)` writes a fully
+   scrubbable recording: a timeline of every action with a DOM
+   snapshot + screenshot at each step. Tracing **does** work over
+   `connect_over_cdp` (it instruments the page via CDP; it does not
+   need a Playwright-launched browser). Open it with:
+
+   ```powershell
+   py -3.11 -m playwright show-trace <test>.trace.zip
+   ```
+
+   This is the closest thing to a true "recording" the CDP-attach
+   mode allows.
+
+2. **A real screen/window video, per journey** — captured **out of
+   band** from Playwright:
+   - **Preferred:** `ffmpeg -f gdigrab` records the visible desktop
+     (the real PipPal WebView2 window is the foreground app on the
+     interactive session), started before the journey body and stopped
+     after → one genuine `<test>.mp4`.
+   - **Fallback (no ffmpeg on the host):** a background thread grabs
+     frames via `page.screenshot` at a fixed cadence for the whole
+     journey. If ffmpeg is present they are muxed into `<test>.mp4`;
+     otherwise the numbered frames are kept **and** assembled into a
+     single dense contact-sheet `<test>.frames.png` so there is still
+     a visual time-lapse recording.
+
+   The exact mechanism actually used for each journey is recorded in
+   `<test>.recording.txt`.
+
+Every capture path is **best-effort and non-fatal**: a recording
+failure is swallowed and can never fail the journey under test.
+
+## Getting the Tier-2 evidence as a downloadable GitHub artifact
+
+Tier-1 uploads its Playwright report as a CI artifact because it runs
+on the Session-0 runner. Tier-2 **cannot** run there (it needs a
+visible desktop), so the evidence becomes a downloadable artifact via
+a two-step, additive flow:
+
+1. **Run the journeys as the logged-in interactive user**:
+
+   ```powershell
+   powershell -NoProfile -ExecutionPolicy Bypass -File e2e\journey\run-journey.ps1 -Runs 2
+   ```
+
+   On finish, `run-journey.ps1` **stages** the whole evidence bundle
+   (report.html, junit, summary json, step logs, per-journey
+   screenshots, `trace.zip`, the `.mp4` / contact-sheet recordings,
+   app/cdp proof + a `tier2-evidence-manifest.json`) to a fixed
+   per-user host path:
+
+   ```
+   %LOCALAPPDATA%\pippal-tier2-evidence\latest\
+   ```
+
+   (plus a timestamped sibling), then **best-effort triggers**
+   `gh workflow run tier2-evidence-publish.yml`. Pass `-NoPublish` to
+   stage only; `-StageRoot <path>` to override the staging root.
+
+2. **The `Tier-2 Evidence Publish` workflow**
+   (`.github/workflows/tier2-evidence-publish.yml`,
+   **`workflow_dispatch` only**) runs a single job on the same
+   self-hosted Windows host. It runs **no journey** (no desktop
+   needed) — it only reads `%LOCALAPPDATA%\pippal-tier2-evidence\
+   latest\` and `actions/upload-artifact@v4`s it as
+   **`tier2-journey-evidence`** (14-day retention) plus a job summary.
+   Download that artifact from the **Tier-2 Evidence Publish** workflow
+   run in the Actions tab.
+
+It is `workflow_dispatch` **only**, so it is **not** a required check
+and cannot interfere with the Tier-1 merge gate. If `gh` is missing
+or the trigger fails the bundle is still staged — dispatch *Tier-2
+Evidence Publish* manually from the Actions tab.
 
 ## Notes / caveats
 
@@ -176,3 +267,10 @@ runs>=2`.
   discover it (see the technique above). This is a Playwright-CDP
   client behaviour, not an app behaviour — the windows driven are the
   genuine app windows.
+- **Recordings:** native Playwright video does not work over
+  `connect_over_cdp` (we did not launch the browser); the suite ships
+  a per-journey **trace.zip** (works over CDP) + a real screen/window
+  **.mp4** via `ffmpeg gdigrab` (or a screenshot-grab + contact-sheet
+  fallback when ffmpeg is absent). See *Recordings* above. The
+  staging + `tier2-evidence-publish.yml` (`workflow_dispatch` only)
+  flow is purely additive and never gates the Tier-1 merge check.

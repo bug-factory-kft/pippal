@@ -393,8 +393,44 @@ WebView2 runtime, *not* `HeadlessChrome` — plus the app's own
 - `e2e\journey\run-journey.ps1 -Runs 2` → **both runs 5/5 passed, 0
   failures, 0 errors, 0 skipped** (full suite J1–J5). Evidence bundle
   (log + JUnit + JSON summary + HTML report + per-journey
-  real-window screenshot/app-log/CDP-build) written under
-  `.e2e\evidence\journey-<UTC stamp>\`.
+  real-window screenshot/app-log/CDP-build + per-journey **recordings**)
+  written under `.e2e\evidence\journey-<UTC stamp>\`.
+
+### Tier-2 two-tier evidence model + recordings (how to get the artifact)
+
+Tier-1 uploads its Playwright report as a CI artifact because it runs
+on the Session-0 runner. Tier-2 **cannot** run there (it needs a
+visible desktop), so its evidence becomes a downloadable artifact via
+an additive, two-step flow:
+
+- **Recordings per journey** (`e2e/journey/_recording.py`): a
+  scrubbable Playwright **`trace.zip`** (works over
+  `connect_over_cdp`; open with `playwright show-trace`) **plus** a
+  real screen/window **`.mp4`** via `ffmpeg -f gdigrab` of the visible
+  desktop — or, when ffmpeg is absent, a periodic `page.screenshot`
+  grab assembled into a `.mp4` (if ffmpeg later resolves) and always a
+  dense **`.frames.png`** contact-sheet + numbered frames.
+  **Honest caveat:** Playwright's *native* video (`record_video_dir` /
+  `--video`) does **not** work over `connect_over_cdp` because the
+  browser was launched by pywebview/WebView2, not Playwright — hence
+  the trace + out-of-band screen capture. Every capture path is
+  best-effort/non-fatal (a recording failure never fails a journey).
+- **Stage + publish:** `run-journey.ps1` copies the whole bundle
+  (report, junit, summary, step logs, screenshots, `trace.zip`, the
+  `.mp4`/contact-sheet, app/cdp proof, a `tier2-evidence-manifest.json`)
+  to a fixed per-user host path
+  `%LOCALAPPDATA%\pippal-tier2-evidence\latest\` (+ a timestamped
+  copy), then best-effort `gh workflow run tier2-evidence-publish.yml`.
+- **`Tier-2 Evidence Publish`**
+  (`.github/workflows/tier2-evidence-publish.yml`) is
+  **`workflow_dispatch` only** — a single job on the same self-hosted
+  Windows host that runs **no journey** (no desktop), only reads the
+  staged dir and `actions/upload-artifact@v4`s it as
+  **`tier2-journey-evidence`**. It is **not** a required check and does
+  **not** interfere with the Tier-1 merge gate. Download the artifact
+  from that workflow run in the Actions tab. To get it: run
+  `e2e\journey\run-journey.ps1` as the logged-in user → it stages +
+  triggers publish → download `tier2-journey-evidence`.
 - J1 does a **genuine** download of the smallest catalogue voice
   (`en_US-kathleen-low`, ~60 MB on this machine, completes in a few
   seconds; assertion deadline-polls ≤180 s). J2/J4 reuse a
