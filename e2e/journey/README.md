@@ -187,6 +187,18 @@ over a foreign-CDP attach (`e2e/journey/_recording.py`):
    This is the closest thing to a true "recording" the CDP-attach
    mode allows.
 
+   *Honest sub-caveat:* journeys that follow the user opening a
+   **second** real window (J1 → Voices, J5 → Notices) call
+   `RealApp.reattach_page`, which **re-`connect_over_cdp`s** (closing
+   the old client browser) to enumerate the new window. That closes
+   the context tracing was started on, so for those journeys
+   `tracing.stop` may not produce a `trace.zip` (the recorder logs a
+   non-fatal `trace: stop failed` note in `<test>.recording.txt`) —
+   the **screen/window video below still covers the whole journey**,
+   and single-window journeys (e.g. J3) still get a full trace. This
+   is the reconnect technique interacting with CDP tracing, not an app
+   bug; the windows driven are the genuine app windows.
+
 2. **A real screen/window video, per journey** — captured **out of
    band** from Playwright:
    - **Preferred:** `ffmpeg -f gdigrab` records the visible desktop
