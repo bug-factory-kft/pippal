@@ -96,8 +96,6 @@ def _reopen_surface(app, view: str, step, timeout: int = 25000):
     URL again — a real reload of the real window's document against the
     real backend, equivalent to the user closing and reopening it.
     """
-    from _journey_helpers import bridge_call
-
     bridge_call(app.bridge_base, {
         "settings": "open_settings_window",
         "voices": "open_voice_manager_window",
