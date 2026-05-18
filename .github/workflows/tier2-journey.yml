@@ -1,6 +1,6 @@
 name: Tier-2 Journey E2E
 
-# The release / journey lane — runs the REAL Tier-2 user-journey suite.
+# The release / journey lane -- runs the REAL Tier-2 user-journey suite.
 #
 # WHY THIS WORKFLOW EXISTS
 # ------------------------
@@ -21,7 +21,7 @@ name: Tier-2 Journey E2E
 #
 # SCOPE GUARD (additive, non-interfering)
 # ---------------------------------------
-# * This is the heavier release/journey lane — separate from the
+# * This is the heavier release/journey lane -- separate from the
 #   Tier-1 per-PR merge gate (`ui-web-e2e.yml` -> `Web UI E2E (served,
 #   headless Chromium)`). It is deliberately NOT a required status
 #   check and branch protection is NOT touched, so it can never gate or
@@ -30,7 +30,7 @@ name: Tier-2 Journey E2E
 # * It does not modify command_server.py / open_file.py / pytest.ini /
 #   e2e/web, and the journey dir stays excluded from the default
 #   `python -m pytest` (pytest.ini: testpaths = tests).
-# * It runs on the dedicated `pippal-interactive` runner only — the
+# * It runs on the dedicated `pippal-interactive` runner only -- the
 #   Session-0 `pippal-windows` service runner that serves the Tier-1
 #   gate is left completely untouched.
 
@@ -39,7 +39,7 @@ on:
     branches: [main]
   workflow_dispatch:
   schedule:
-    # Nightly at 03:17 UTC — the release/journey lane runs off the
+    # Nightly at 03:17 UTC -- the release/journey lane runs off the
     # per-PR critical path so it never blocks merges.
     - cron: "17 3 * * *"
 
@@ -49,7 +49,7 @@ permissions:
 jobs:
   tier2-journey:
     name: Tier-2 user-journey suite (real WebView2 desktop)
-    # The SECOND self-hosted runner — runs IN the logged-in interactive
+    # The SECOND self-hosted runner -- runs IN the logged-in interactive
     # desktop session, so it can show + drive the real pywebview
     # WebView2 window over CDP. NOT the Session-0 `pippal-windows`
     # service runner (that one has no visible desktop).
@@ -67,19 +67,33 @@ jobs:
           # present, then runs the e2e/journey suite -Runs 2 against the
           # REAL launched PipPal WebView2 window in this interactive
           # session. ffmpeg is installed on this host so the per-journey
-          # screen recording is a real `-f gdigrab` .mp4 (not the
-          # frames contact-sheet fallback). -NoPublish: this job uploads
-          # the bundle itself (below), so it does NOT also trigger the
+          # screen recording is a real gdigrab .mp4 (not the frames
+          # contact-sheet fallback). -NoPublish: this job uploads the
+          # bundle itself (below), so it does NOT also trigger the
           # separate tier2-evidence-publish.yml. The job FAILS if
           # run-journey.ps1 exits non-zero (its exit code is the result).
+          #
+          # run-journey.ps1 is UTF-8 *without* a BOM and contains
+          # non-ASCII glyphs in string literals. Windows PowerShell 5.1
+          # (the runner host has no pwsh) decodes a no-BOM -File script
+          # with the system ANSI codepage, which mangles those bytes and
+          # yields a parser error. Force the active codepage to UTF-8
+          # (65001) for THIS process before invoking it so the script
+          # parses identically to a UTF-8 console -- WITHOUT modifying
+          # the protected run-journey.ps1.
+          chcp 65001 | Out-Null
+          $OutputEncoding = [System.Text.UTF8Encoding]::new($false)
+          [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
+          [Console]::InputEncoding = [System.Text.UTF8Encoding]::new($false)
           $evidence = Join-Path $env:RUNNER_TEMP 'tier2'
           New-Item -ItemType Directory -Force -Path $evidence | Out-Null
           powershell -NoProfile -ExecutionPolicy Bypass `
             -File e2e\journey\run-journey.ps1 `
             -Runs 2 -NoPublish -EvidenceDir $evidence
-          if ($LASTEXITCODE -ne 0) {
-            Write-Error "run-journey.ps1 exited $LASTEXITCODE"
-            exit $LASTEXITCODE
+          $rc = $LASTEXITCODE
+          if ($rc -ne 0) {
+            Write-Host "run-journey.ps1 exited $rc"
+            exit $rc
           }
 
       - name: Upload Tier-2 journey evidence
@@ -91,7 +105,7 @@ jobs:
           # junit xml, JSON summary, step logs, per-journey real-window
           # screenshots + app.log + cdp.json proof, the scrubbable
           # Playwright trace.zip, and the real screen/window .mp4
-          # recordings (ffmpeg `-f gdigrab` — installed on this host).
+          # recordings (ffmpeg gdigrab -- installed on this host).
           name: tier2-journey-evidence
           path: ${{ runner.temp }}/tier2
           if-no-files-found: error
@@ -101,10 +115,14 @@ jobs:
         if: always()
         shell: powershell
         run: |
+          # Pure ASCII only: the runner writes this inline block to a
+          # no-BOM .ps1 and Windows PowerShell 5.1 reads it with the
+          # ANSI codepage, so any non-ASCII char here would be a parser
+          # error (as seen in an earlier run). Keep it ASCII.
           $evidence = Join-Path $env:RUNNER_TEMP 'tier2'
           $files = @()
           if (Test-Path $evidence) {
-            $files = Get-ChildItem -Recurse -File $evidence
+            $files = @(Get-ChildItem -Recurse -File $evidence)
           }
           $count = $files.Count
           $bytes = ($files | Measure-Object Length -Sum).Sum
@@ -117,18 +135,17 @@ jobs:
             "",
             "| | |",
             "|---|---|",
-            "| Runner | ``self-hosted, windows, pippal-interactive`` (interactive desktop session) |",
+            "| Runner | self-hosted, windows, pippal-interactive (interactive desktop session) |",
             "| Evidence files | $count |",
             "| Total bytes | $bytes |",
             "| .mp4 recordings | $($mp4.Count) |",
             "",
-            "This is the **release/journey lane** — the REAL launched",
-            "WebView2 desktop app driven over ``connect_over_cdp`` in a",
-            "visible interactive session. It is **not** a required check",
-            "and does not gate the Tier-1 merge gate. Each journey ships",
-            "a scrubbable Playwright **trace.zip** plus a real",
-            "screen/window **.mp4** (ffmpeg ``-f gdigrab``). See",
-            "``e2e/journey/README.md`` for the ``connect_over_cdp``",
+            "This is the release/journey lane: the REAL launched WebView2",
+            "desktop app driven over connect_over_cdp in a visible",
+            "interactive session. It is NOT a required check and does not",
+            "gate the Tier-1 merge gate. Each journey ships a scrubbable",
+            "Playwright trace.zip plus a real screen/window .mp4 (ffmpeg",
+            "gdigrab). See e2e/journey/README.md for the connect_over_cdp",
             "recording caveat."
           )
-          $lines -join "`n" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Encoding utf8 -Append
+          ($lines -join "`n") | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Encoding ascii -Append
