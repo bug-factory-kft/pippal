@@ -213,15 +213,19 @@ test belongs in: **Tier-1** = per-control real-effect `e2e/web/` test;
 (no Wi-Fi mid-download, registry write refused, bad hotkey) and where a
 silent failure is worst. All are pure logic reachable headless.
 
-**Status: implemented** in `e2e/web/test_error_recovery.py` (9 Tier-1
-test instances; full `e2e/web` 68 passed locally — 3 runs, 2 orders;
-266 unit + ruff unaffected). The merge-required `Web UI E2E (served,
-headless Chromium)` check on the self-hosted LocalSystem runner is
-verified green on the pushed fix commit (UC-B11 included). The real
-failure is induced at a true seam in every case — never by mocking the
-unit under test, and never in a way that depends on caller privilege or
-host state (UC-B11's registry seam is a syntactically invalid root hive
-that `reg.exe` rejects identically for non-admin / admin / LocalSystem).
+**Status: implemented and verified green on the merge-required CI
+runner** in `e2e/web/test_error_recovery.py` (9 Tier-1 test instances;
+full `e2e/web` 68 passed locally — 3 runs, 2 orders — and **68 passed on
+the self-hosted LocalSystem runner** via the `Web UI E2E (served,
+headless Chromium)` required check on commit `4d0b3b7`
+(`actions/runs/26040463378`, SUCCESS), with
+`test_settings_ctx_install_registry_write_failure` (UC-B11) PASSED in
+that real CI run; `Lint` + `Unit tests` also green; 266 unit + ruff
+unaffected). The real failure is induced at a true seam in every case —
+never by mocking the unit under test, and never in a way that depends on
+caller privilege or host state (UC-B11's registry seam is a
+syntactically invalid root hive that `reg.exe` rejects identically for
+non-admin / admin / LocalSystem).
 
 - UC-A7 voice download **no-network / interrupted / disk-full** failure
   → `test_onboarding_install_default_voice_failure_recovers[no_network|

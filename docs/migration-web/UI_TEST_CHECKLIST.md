@@ -338,12 +338,16 @@ profile.
   error/recovery tests are order-independent (each gets its own fresh
   per-test profile; the hotkey tests build their own real bridge/server
   and tear it down). The merge-required **`Web UI E2E (served, headless
-  Chromium)`** check on the self-hosted **LocalSystem** runner is
-  expected to be green for the same reason (the invalid `HKXX` root
-  errors identically for LocalSystem — privilege-independent); this line
-  will be updated to the verified CI conclusion + run URL once the
-  required check has concluded on the pushed commit.
-  `py -3.11 -m pytest -q` → **266 passed** (unchanged; fully
+  Chromium)`** check then ran the same suite on the self-hosted
+  **LocalSystem** runner on commit `4d0b3b7` and concluded **SUCCESS —
+  68 passed in 121.46 s** (run
+  `https://github.com/bug-factory-kft/pippal/actions/runs/26040463378`),
+  with `test_error_recovery.py::test_settings_ctx_install_registry_write_failure[chromium]`
+  (UC-B11) **PASSED** in that real CI run — the CI log shows the invalid
+  `HKXX` root raising the real `RuntimeError: ERROR: Invalid key name.`
+  for the LocalSystem caller, so the result does not depend on caller
+  privilege. The required `Lint` and `Unit tests` checks stayed green on
+  the same commit. `py -3.11 -m pytest -q` → **266 passed** (unchanged; fully
   additive), `ruff check src/pippal tests e2e/web e2e/journey` → clean,
   `pytest --collect-only` → exactly 266, zero from `e2e/web`. Honest
   caveat: the synth-failed test (6.9) carries a documented
