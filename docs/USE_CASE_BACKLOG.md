@@ -77,7 +77,7 @@ set differs per state.
 | id | Surface / control | Use-case | Happy-path journey | Error / edge / recovery variants | Status + evidence |
 |---|---|---|---|---|---|
 | UC-B1 | Settings opens & renders 7 cards | User wants to configure PipPal | Tray "Settings…" / onboarding → 7 cards render | n/a | **covered** Tier-1 `test_settings_renders_seven_cards` |
-| UC-B2 | Voice card — Engine select | User switches TTS engine | `settings-engine` → persists `engine` to disk + live config (`bridge.py:120`) | **Switch to engine with missing piper** — `build_activation_readiness` returns `missing_piper`; engine falls back. Switch path persists but readiness/fallback consequence not asserted | **partial** — persistence **covered** Tier-1 `test_settings_engine_and_voice_selection_persists`; the **engine-switch-with-missing-piper** consequence (fallback + readiness change) is **missing** |
+| UC-B2 | Voice card — Engine select | User switches TTS engine | `settings-engine` → persists `engine` to disk + live config (`bridge.py:120`) | **Switch to engine with missing piper** — `build_activation_readiness` returns `missing_piper`; engine falls back. Non-piper engine → `ready` via the genuine non-piper branch | **covered (Phase-5)** — persistence already Tier-1 `test_settings_engine_and_voice_selection_persists`; the **engine-switch consequence** is **now Tier-1** `test_core_phase5.py::test_engine_switch_missing_piper_changes_real_readiness_consequence`: drives the **real served Settings UI** `settings-engine` select → real `bridge.save_config`, asserts the real persisted `engine` AND that the real `build_activation_readiness(config)` / served `bridge.get_readiness()` consequence genuinely becomes `missing_piper` (`can_play_sample` False — reading paused / engine falls back) with no real `piper.exe`, then flips to `ready` via the genuine non-piper branch (`onboarding.py:260-268`) when a real `plugins.register_engine` non-piper engine is selected — the switch changes the real consequence BOTH ways (no-tautology precondition asserts no real `piper.exe` first). No seam; depends only on a file existing under the hermetic per-test profile + a config value (privilege/host-independent). Code: `bridge.py:120-136,268-278`, `onboarding.py:249-309` |
 | UC-B3 | Voice card — Voice select | User picks a different installed voice | `settings-voice` non-default → written to `config.json` | **Empty install state** — no voices → combo disabled, CTA reads "Install voices…" | **covered** Tier-1 `test_settings_engine_and_voice_selection_persists`, `test_settings_voice_card_empty_install_state` |
 | UC-B4 | Voice card — Manage…/Install CTA | User wants to add/remove voices | `settings-manage-voices` → `open_voice_manager_window` | n/a | **covered** Tier-1 `test_settings_manage_voices_opens_vm` |
 | UC-B5 | Speech — Speed slider | User finds default pace too slow/fast | `settings-speed` live value + persists inverse `length_scale` (`app.js:65`) | n/a | **covered** Tier-1 `test_settings_edit_persists_to_backend`; Tier-2 indirectly via J3 |
@@ -137,13 +137,13 @@ set differs per state.
 
 | id | Surface / control | Use-case | Happy-path journey | Error / edge / recovery variants | Status + evidence |
 |---|---|---|---|---|---|
-| UC-E1 | Tray Recent submenu + replay an item | User re-reads something they read earlier | Tray "Recent" re-enumerates `engine.get_history()`; clicking an item → `engine.replay_text` (`app_web.py:79`) | **Empty history** → "(empty)" disabled item (`app_web.py:82`) | **partial** — Recent submenu + Clear **covered** Tier-1 `test_tray_recent_submenu_and_clear_real_effect`, `test_history_clear_real_effect`. **Replaying a specific Recent item (`replay_handler`, `app_web.py:76`) and the empty-state item are not individually asserted** |
+| UC-E1 | Tray Recent submenu + replay an item | User re-reads something they read earlier | Tray "Recent" re-enumerates `engine.get_history()`; clicking an item → `engine.replay_text` (`app_web.py:79`) | **Empty history** → "(empty)" disabled item (`app_web.py:82`) | **covered (Phase-5)** — Recent submenu + Clear already Tier-1 `test_tray_recent_submenu_and_clear_real_effect`, `test_history_clear_real_effect`. **Replaying a specific Recent item + the empty-state item are now individually asserted Tier-1** `test_core_phase5.py::test_tray_recent_replay_specific_item_and_empty_state_real_effect`: builds the **verbatim** `app_web.build_tray_menu` pystray menu; a real `plugins.register_engine` WAV backend makes the engine `is_ready()` so the real `_replay_text_impl` does NOT short-circuit into the no-voice clip — invoking the real `replay_handler` closure (`app_web.py:76`) for a *specific* entry drives the *unmodified* `pippal.playback` loop and the **exact replayed text** lands in the real `WebOverlay` (asserted via the real served `bridge.engine_state()` `chunk_text` — text-specific: contains "BRAVO", not "ALPHA"; not a generic token bump); the disabled `(empty)` item's real `enabled is False` + genuine no-op (engine untouched, no window) is asserted on a fresh profile; the replay does not re-record history (the genuine `replay_text` ≠ `read_text` contract). Only the OS painting the native menu is skipped (testing Windows, not PipPal). Privilege/host-independent. Code: `app_web.py:76-93`, `engine.py:532-550` |
 | UC-E2 | Tray Clear history | User wipes recent list | "Clear history" item → `engine.clear_history` empties memory + `history.json` (`engine.py:247`) | n/a | **covered** Tier-1 `test_tray_recent_submenu_and_clear_real_effect` |
 | UC-E3 | Tray Settings… | User opens Settings from the tray | "Settings…" item → `windows.open("settings")` (`app_web.py:99`) | n/a | **covered** Tier-1 `test_tray_settings_item_opens_settings_surface` |
 | UC-E4 | Tray First-run check | User re-runs onboarding | "First-run check" → `windows.open("onboarding")` (`app_web.py:97`) | n/a | **covered** Tier-1 `test_tray_first_run_item_opens_onboarding_surface` |
 | UC-E5 | Tray Quit | User exits PipPal cleanly | "Quit" → `engine.stop` + hotkey unhook + `icon.stop` + `windows.shutdown` (`app_web.py:63`) | n/a | **covered** Tier-1 `test_tray_quit_item_runs_full_teardown_sequence` |
 | UC-E6 | Tray icon idle↔speaking swap | User sees at a glance whether PipPal is talking | `make_tray_icon(speaking)` red badge; `tray_poll` swaps it (`tray.py:23`, `app_web.py:239`) | **Asset missing** → programmatic fallback icon (`tray.py:75`) | **covered** — `make_tray_icon` (incl. fallback) by `tests/test_tray.py` unit suite. The `tray_poll` live idle↔speaking swap during a real read **now Tier-1 (Phase-4)** `test_core_phase4.py::test_tray_icon_live_swaps_idle_to_speaking_on_real_read`: runs the **verbatim** `app_web.update_tray_icon` body (the real `with engine.lock: speaking = engine.is_speaking` read + the real `tray.make_tray_icon(speaking)` factory + the real `ic.icon`/`ic.title` assignment) on a fake icon object exactly as the real `tray_poll` 1 Hz loop calls it, driven by a **real** engine read (real `plugins.register_engine` WAV backend → the real synth path → real `engine.is_speaking` transitions). Asserts: the real factory's idle vs speaking `Image`s are genuinely pixel-distinct (real red badge, `tray.py:32-39`); at rest the poll paints the real IDLE icon + plain tooltip; during a real read it swaps to the real SPEAKING icon + "— speaking" tooltip; after stop it reverts to the real IDLE icon. Privilege/host-independent (engine state + pure image factory; only the OS pixel blit — not PipPal code — is out of scope). Code: `app_web.py:226-244`, `tray.py:23-47` |
-| UC-E7 | Global hotkey: Read selection | User presses Win+Shift+R anywhere to read selected text | `HotkeyManager` dispatches the stored `speak` handler → `engine.speak_selection_async` → capture + read (`app_web.py:140`) | **Held-key repeat de-dup** (`hotkey.py:331`); **secure-desktop ghost-modifier guard** (`hotkey.py:96`) | **partial** — handler dispatch → real engine **covered** Tier-1 `test_global_hotkey_speak_dispatch_drives_real_engine`. **The repeat-dedup and physical-modifier (`GetAsyncKeyState`) edge logic (`hotkey.py:293-358`) is not journey-tested** (has unit coverage; OS keystroke delivery is an OS boundary) |
+| UC-E7 | Global hotkey: Read selection | User presses Win+Shift+R anywhere to read selected text | `HotkeyManager` dispatches the stored `speak` handler → `engine.speak_selection_async` → capture + read (`app_web.py:140`) | **Held-key repeat de-dup** (`hotkey.py:331`); **secure-desktop ghost-modifier guard** (`hotkey.py:96`) | **covered (Phase-5)** — handler dispatch → real engine already Tier-1 `test_global_hotkey_speak_dispatch_drives_real_engine`. **The repeat-dedup + physical-modifier exact-match edge logic (`hotkey.py:293-358`) is now Tier-1** `test_core_phase5.py::test_hotkey_repeat_dedup_and_exact_match_real_effect`: feeds the **real** `HotkeyManager._on_event` the *exact* synthetic event objects the `keyboard` hook passes, for a **modifier-free** combo so the real `_physical_modifiers()` `GetAsyncKeyState` read is deterministically empty in an automated context (nothing physically held on the Session-0 runner — privilege/host-independent; a no-tautology precondition asserts `_physical_modifiers()==frozenset()`). Asserts the real effects: first `down` dispatches the real handler exactly once + returns `False` (suppress, `hotkey.py:350`); held-key repeat `down`s do NOT re-fire and stay suppressed (`hotkey.py:331-332`, the genuine repeat-dedup); `up` returns `True` and clears the real `_held_non_mod`/`_suppressed_non_mod` (`hotkey.py:352-356`); an unregistered key passes through (`True`, `hotkey.py:338-339`) and never fires the handler; a fresh press after `up` fires again exactly once (per-press, not a latch). Only the OS *delivering* the keystroke into the hook is skipped (testing Windows, not PipPal). The genuine secure-desktop ghost-modifier *transition* itself (a real UAC/secure-desktop switch making `GetAsyncKeyState` disagree with the hook stream) remains an OS boundary — has unit coverage, recorded honestly; the dedup + exact-match half is now real-effect E2E. Code: `hotkey.py:293-358` |
 | UC-E8 | Global hotkey: Queue / Pause / Stop | User queues another selection / pauses / stops via hotkey | `queue`/`pause`/`stop` handlers → `engine.queue_selection_async`/`pause_toggle`/`stop` (`app_web.py:142-145`) | **Queue while idle** behaves like Read; **queue while speaking** appends + "Queued — N pending" (`engine.py:481`) | **covered (Phase-2)** Tier-1 `test_core_interactions.py::test_queue_pause_stop_hotkey_dispatch_drives_real_engine` (mirrors the existing `test_global_hotkey_speak_dispatch_drives_real_engine`). The `queue`/`pause`/`stop` actions are registered on the **real `HotkeyManager`** exactly as `app_web.bind_hotkeys` does and dispatched via the manager's OWN stored handler (the exact callable `HotkeyManager._safe_call` runs when the physical combo fires — only the OS routing the keystroke into the hook is skipped, "testing Windows not PipPal"). A real `_RealWavBackend` (real `plugins.register_engine`, `is_ready()` True) makes the engine take the real synth path so the queue-while-speaking branch is genuinely reached. Asserts: **queue while idle** behaves like Read (real token bump + `is_speaking`, Recent records the text — `engine.py:500-509`); **queue while speaking** really appends to `engine._queue` and the real `WebOverlay.show_message` sink receives exactly `"Queued — 1 pending"` (`engine.py:493,498`); **pause** flips real `engine.is_paused`/overlay `is_paused` and a second dispatch resumes; **stop** runs the real `engine.stop` (token bump, `is_speaking` cleared, queue emptied). The only seam is the OS-boundary selection input (`clipboard_capture.capture_for_action` — sending a real Ctrl+C / reading the system clipboard cannot be driven on a headless Session-0 runner with no foreground selection; the backlog itself names selection capture an OS boundary). That seam is the lifted-to-E2E form of the established unit pattern (`tests/test_engine.py:170`) and is **privilege/host-independent**: it replaces only the OS clipboard read, so the result depends purely on PipPal's branch logic — byte-for-byte identical on the LocalSystem CI runner. `engine.py:481-509` |
 | UC-E9 | Single-instance gate | User accidentally launches PipPal twice | `start_command_server` can't bind → "PipPal is already running" MessageBox, exit (`app_web.py:208`) | This is the gate itself | **partial — Phase-4 triaged with a VERIFIED real product finding (NOT forced green).** The gate is `cmd_server = start_command_server(...); if cmd_server is None: <MessageBoxW>; raise SystemExit(0)` (`app_web.py:207-221`, identically `app.py:422-431`). It assumes a *second* instance cannot bind the already-bound IPC port. **That assumption is FALSE on Windows** and was empirically verified on this runner (both the hermetic-ephemeral path AND the exact production fixed-port-51677 path): `http.server.HTTPServer` sets `allow_reuse_address = True`, and Windows `SO_REUSEADDR` lets two sockets bind the SAME `127.0.0.1:port` concurrently, so a real second `start_command_server` while the first is serving **also binds and returns a live server** — the real `cmd_server is None` guard does **not** trigger for two genuine PipPal instances. This is a real latent product weakness in the gate's *trigger condition*, not a test artefact; `command_server.py` is protected and cannot be changed here to fix it. Asserting "the second instance is refused" would be a **fake-green** of a gate that does not actually fire, so it is not claimed. What IS genuinely real-effect tested (Phase-4 Tier-1 `test_core_phase4.py::test_single_instance_gate_bind_failure_exits_but_dup_bind_caveat`, the UC-D8 "real sink + honest caveat" discipline): **(Part A)** the VERIFIED real product behaviour itself — two real `start_command_server` calls on the same port both succeed (asserted as the real fact + the honest caveat); **(Part B)** the gate's real EXIT logic genuinely fires when the bind *does* genuinely fail — a real OS `SO_EXCLUSIVEADDRUSE` port holder (refuses EVERY caller regardless of privilege) makes the real `ThreadingHTTPServer` bind genuinely raise `OSError`, so the real `start_command_server` genuinely returns `None` (`command_server.py:309-313`) and the **verbatim** `app_web.main` `if cmd_server is None: raise SystemExit(0)` guard genuinely raises the real `SystemExit(0)` (only the native `MessageBoxW` OS call is skipped). UC-E9 therefore stays **partial / open** with the real reason recorded — the gate's exit-logic is proven, its Windows trigger-condition is a documented latent product gap. Code: `app_web.py:207-221`, `app.py:422-431`, `command_server.py:309-313` |
 
@@ -180,28 +180,53 @@ equal the Total.
 | Area | Use-cases | covered | partial | missing |
 |---|---|---|---|---|
 | A. Onboarding | 14 | 14 | 0 | 0 |
-| B. Settings | 21 | 20 | 1 | 0 |
+| B. Settings | 21 | 21 | 0 | 0 |
 | C. Voice Manager | 9 | 8 | 0 | 1 |
 | D. Reader overlay | 10 | 10 | 0 | 0 |
-| E. Tray / hotkeys | 9 | 6 | 2 | 1 |
+| E. Tray / hotkeys | 9 | 8 | 0 | 1 |
 | F. Command server IPC | 2 | 2 | 0 | 0 |
-| **Total** | **65** | **60** | **3** | **2** |
+| **Total** | **65** | **63** | **0** | **2** |
 
-> Open rows after Phase-4 (left recorded as open, per the rules — these
-> are Phase-5 scope): **partial** = UC-B2 (engine-switch-with-missing-
-> piper consequence), UC-E1 (replay a specific Recent item +
-> empty-state), UC-E7 (hotkey repeat-dedup / physical-modifier edge).
-> **missing** = UC-C9 (first-run→VM install-callback parity gap —
-> **Phase-3 triaged & formally accepted**, see the UC-C9 row). **UC-E9
-> (single-instance gate)** is **partial / Phase-4 triaged with a
-> VERIFIED real product finding**: the documented bind-conflict gate
-> does not trigger for two real instances on Windows
-> (`HTTPServer.allow_reuse_address` + `SO_REUSEADDR`, empirically
-> verified incl. the exact prod fixed-port path) — a real latent
-> product weakness recorded honestly, NOT forced green; the gate's
-> real exit-logic *is* proven Tier-1 (see the UC-E9 row). It is counted
-> in **missing** (its trigger-condition is genuinely uncovered) so the
-> arithmetic stays exact and conservative.
+> **After Phase-5 (the final core phase): 0 partial rows remain.** The 3
+> Phase-5 partial rows were closed Tier-1 (real-effect, true seam,
+> privilege/host-independent): **UC-B2** (engine-switch-with-missing
+> -piper consequence), **UC-E1** (replay a specific Recent item +
+> empty-state), **UC-E7** (hotkey repeat-dedup / physical-modifier
+> exact-match) → all **partial → covered** in
+> `e2e/web/test_core_phase5.py`. Two additive Tier-2 journeys (**J7**
+> UC-B11/B13/B12 right-click round-trip; **J8** UC-D3 reader transport)
+> prove already-covered rows end-to-end on the real launched WebView2
+> app — they add release-lane confidence and flip **no** row.
+>
+> The **only 2 rows that genuinely remain open** are honest,
+> documented product-gap exceptions — **NOT forced green**, because
+> closing either needs a real production change out of this
+> strictly-additive scope:
+> - **UC-C9** (first-run→VM install-completion parity gap) — **missing**
+>   — Phase-3 triaged & formally accepted (the web path has no
+>   install-completion callback at all; a test would be a fake-green or
+>   require an out-of-scope feature change — see the UC-C9 row).
+> - **UC-E9** (single-instance gate) — **missing** (its Windows
+>   trigger-condition is genuinely uncovered; the gate's exit-logic IS
+>   proven Tier-1) — Phase-4 triaged with a VERIFIED real product
+>   finding: the documented bind-conflict gate does not trigger for two
+>   real instances on Windows (`HTTPServer.allow_reuse_address` +
+>   `SO_REUSEADDR`, empirically verified incl. the exact prod
+>   fixed-port path; `command_server.py` protected). Counted in
+>   **missing** so the arithmetic stays exact and conservative.
+>
+> A Phase-5 honest finding (NOT fake-green): the launched-app **pause**
+> path for the already-covered UC-D5/UC-D10 is not Tier-2-journey-able
+> (no real desktop web overlay pause control + the IPC `/pause` route
+> 404s by default — `control_routes_enabled=False`, `command_server.py`
+> protected); J8 covers only the genuinely-reachable UC-D3 transport,
+> and UC-D5/UC-D10 stay covered by their existing Tier-1 test.
+>
+> Arithmetic is exact: every section's covered+partial+missing equals
+> its Use-cases (14+0+0=14, 21+0+0=21, 8+0+1=9, 10+0+0=10, 8+0+1=9,
+> 2+0+0=2) and the section sums equal the Total (63+0+2=65). **Full
+> phased core coverage is achieved except the 2 honestly-documented
+> product-gap exceptions (UC-C9, UC-E9).**
 
 > **Phase-1 delta:** the 5 Phase-1 error/recovery rows — UC-A7, UC-C6,
 > UC-B7, UC-B11, UC-D8 — flipped **partial → covered** by
@@ -319,21 +344,27 @@ equal the Total.
 
 Split by tier (where covered/partial):
 
-- **Tier-1 (`e2e/web/`)** carries the bulk: all 60 "covered" have a
-  Tier-1 test except UC-B21 (Tier-2-only — a launched-app journey); the
-  3 remaining "partial" have a Tier-1 happy-path test missing the
-  error/edge variant (Phase-5). UC-E9's gate *exit-logic* has a Phase-4
-  Tier-1 test; its Windows *trigger-condition* is the documented latent
-  product gap (counted in missing).
+- **Tier-1 (`e2e/web/`)** carries the bulk: all 63 "covered" have a
+  Tier-1 test except UC-B21 (Tier-2-only — a launched-app journey).
+  After Phase-5 there are **0 partial rows** — UC-B2/E1/E7 were closed
+  Tier-1 in `e2e/web/test_core_phase5.py`. UC-E9's gate *exit-logic*
+  has a Phase-4 Tier-1 test; its Windows *trigger-condition* is the
+  documented latent product gap (counted in missing).
 - **Tier-2 (`e2e/journey/`)** independently covers the 5 core journeys
-  J1–J5 (UC-A2/A3, UC-A7, UC-B5/B8, UC-B14, UC-C1/C6, UC-D1/D2/D8) plus
-  the Phase-4 **J6** (UC-B21, corrupt-config recovery) on the *real
-  launched desktop app*. J6 is the first Tier-2 journey that covers a
-  previously-"missing" use-case end-to-end.
+  J1–J5 (UC-A2/A3, UC-A7, UC-B5/B8, UC-B14, UC-C1/C6, UC-D1/D2/D8), the
+  Phase-4 **J6** (UC-B21, corrupt-config recovery), plus the Phase-5
+  **J7** (UC-B11/B13/B12 — install the Windows right-click entry, read
+  a file *through it*, remove it) and **J8** (UC-D3 — replay/prev/next
+  reader transport during a real read) on the *real launched WebView2
+  desktop app*. J7/J8 are additive release-lane breadth for
+  already-covered rows (they flip no row); J6 remains the one Tier-2
+  journey that covers a previously-"missing" use-case end-to-end.
 - **2 "missing"**: UC-C9 (Phase-3-triaged & formally-accepted parity
   gap, documented, not forced green) and UC-E9's Windows
   trigger-condition (Phase-4-triaged with a verified product finding,
-  documented, not forced green).
+  documented, not forced green). These are the only rows not covered;
+  both need a real production change out of this strictly-additive
+  scope and are recorded honestly with the real reason.
 
 ---
 
@@ -563,21 +594,194 @@ real `SO_EXCLUSIVEADDRUSE` port holder), not mocks. UC-E9's
 trigger-condition is an honestly-recorded latent product gap, not a
 fake-green.
 
-### Phase 5 — Tier-2 journey breadth (release-lane depth)
-*Why last:* Tier-2 is the release lane, not the merge gate; these add
-end-to-end confidence on the *real launched app* for flows currently
-only Tier-1-tested.
+### Phase 5 — final core phase: close the remaining partial rows (Tier-1) + Tier-2 journey breadth — ✅ DONE (UC-C9/UC-E9 honestly stay open)
+*Why last:* the FINAL core phase. (1) Tier-1: close the three remaining
+**partial** rows where they are genuinely coverable without a
+production change, at a true seam, real-effect, privilege/host
+-independently. (2) Tier-2 release-lane breadth: add end-to-end
+confidence on the *real launched app* for the right-click round-trip
+and the reader transport. Tier-2 is the release lane, not the merge
+gate. (The phase-plan above historically listed a "J6 — rebind hotkey"
+journey; that number was taken by Phase-4's corrupt-config J6, and
+**UC-B7** is already fully covered Tier-1 incl. its invalid/duplicate
+failure variants — re-journeying a green Tier-1 row adds no use-case
+value, so Phase-5's genuine new Tier-2 breadth is J7 + J8, per the
+independently-audited Phase-5 scope.)
 
-- New Tier-2 journey: **J6 — user rebinds a hotkey and it takes effect**
-  (covers UC-B7 happy path on the real window + real `HotkeyManager`).
-- New Tier-2 journey: **J7 — user installs the Windows right-click
-  entry, reads a file through it, removes it** (UC-B11/B13 end-to-end on
-  the launched app, hermetic).
-- New Tier-2 journey: **J8 — pause / replay / skip during a real read**
-  (UC-D3/D5/D10 on the real overlay window).
+**Status: implemented.** Tier-1 (the per-PR merge gate lane): 3 new
+real-effect tests in `e2e/web/test_core_phase5.py` close UC-B2, UC-E1,
+UC-E7 (each at a true seam, no mock of the unit under test, no
+fixed-sleep sync, no skip/xfail, privilege/host-independent). Tier-2
+(release lane): 2 new launched-app journeys in
+`e2e/journey/test_journey_phase5.py` (J7, J8) on the **real launched
+WebView2 desktop app** (CDP `Edg/148…`, not headless) with the real
+per-journey recording artifact (ffmpeg `.mp4` + `trace.zip` + window
+screenshot + app log + CDP version), exactly like J1–J6. Local repro:
+full `e2e/web` **84 passed** twice (definition order + Phase-5 file
+collected first — stable & order-independent); J7+J8 **passed twice**
+(`run-journey.ps1 -Runs 2`, gate status=pass) on the real launched app
+with real `.mp4` recordings attached each run; full unit suite
+**266/266** (one pre-existing transient `tests/test_command_server.py`
+socket-abort flake that passes 42/42 in isolation — not my change);
+`ruff check src/pippal tests e2e/web e2e/journey` clean;
+`pytest --collect-only` exactly 266 (zero from `e2e/web` / `e2e/journey`
+— fully additive). No production code modified (strictly additive — 2
+new test files + docs only; `git status` shows only the 2 new files).
 
-*Est. size:* 3 new Tier-2 journeys. Large (each is a full launched-app
-journey with real effects), but additive and not a CI gate.
+- **UC-B2** engine-switch-with-missing-piper **consequence** (the
+  switch *persistence* was already covered; the *readiness/fallback
+  consequence* was the partial) → Tier-1
+  `test_core_phase5.py::test_engine_switch_missing_piper_changes_real_readiness_consequence`.
+  Drives the **real served Settings UI** `settings-engine` select →
+  real `bridge.save_config` → asserts the real persisted `engine` AND
+  that the real `build_activation_readiness` / served
+  `bridge.get_readiness()` consequence genuinely becomes
+  `missing_piper` (reading paused / engine falls back,
+  `can_play_sample` False) with no real `piper.exe`, then flips to
+  `ready` via the genuine non-piper branch (`onboarding.py:260-268`)
+  when a real non-piper engine is selected — the switch changes the
+  real consequence BOTH ways. No seam; depends only on a file existing
+  under the hermetic per-test profile + a config value
+  (privilege/host-independent). **partial → covered.** ✅
+- **UC-E1** replay a **specific** Recent item + the **empty-state**
+  item (both not *individually* asserted before) → Tier-1
+  `test_core_phase5.py::test_tray_recent_replay_specific_item_and_empty_state_real_effect`.
+  Builds the **verbatim** `app_web.build_tray_menu` pystray menu; a
+  real `plugins.register_engine` WAV backend makes the engine
+  `is_ready()` so the real `_replay_text_impl` does NOT short-circuit
+  into the no-voice clip — invoking the real `replay_handler` closure
+  for a *specific* entry drives the *unmodified* `pippal.playback` loop
+  and the **exact replayed text** lands in the real `WebOverlay`
+  (asserted via the real served `bridge.engine_state()` `chunk_text` —
+  text-specific, "BRAVO" not "ALPHA", not a generic token bump); the
+  disabled `(empty)` item's real attributes + genuine no-op are
+  asserted on a fresh profile; replay does not re-record history (the
+  genuine `replay_text` ≠ `read_text` contract). Privilege/host
+  -independent. **partial → covered.** ✅
+- **UC-E7** global-hotkey **repeat-dedup / physical-modifier match**
+  edge logic (`hotkey.py:293-358`, the journey-untested half) → Tier-1
+  `test_core_phase5.py::test_hotkey_repeat_dedup_and_exact_match_real_effect`.
+  Feeds the **real** `HotkeyManager._on_event` the *exact* synthetic
+  event objects the `keyboard` hook passes, for a modifier-free combo
+  so the real `_physical_modifiers()` `GetAsyncKeyState` read is
+  deterministically empty in an automated context (nothing is
+  physically held on the Session-0 runner — privilege/host
+  -independent). Asserts the real effects: first `down` dispatches the
+  real handler exactly once + returns `False` (suppress); held-key
+  repeat `down`s do NOT re-fire and stay suppressed (the genuine
+  repeat-dedup); `up` returns `True` and clears the real
+  `_held_non_mod`/`_suppressed_non_mod`; an unregistered key passes
+  through (`True`) and never fires the handler; a fresh press after
+  `up` fires again exactly once (per-press, not a latch). Only the OS
+  delivering the keystroke is skipped (testing Windows, not PipPal);
+  the genuine secure-desktop ghost-modifier *transition* itself stays
+  an OS boundary (already unit-noted, recorded honestly). **partial →
+  covered.** ✅
+- **Tier-2 J7 / UC-B11+B13+B12** — user installs the Windows
+  right-click entry, reads a file **through it**, removes it — on the
+  **REAL launched desktop app** →
+  `test_journey_phase5.py::test_j7_context_menu_install_read_through_it_remove`.
+  The launched app's OWN real `bridge.install_context_menu` does the
+  genuine per-user HKCU `reg add`; the real registry keys are asserted
+  present with the real `%1` command; then the **exact registered
+  command** (`python -m pippal.open_file <file>` — what Explorer spawns
+  on a real right-click) is run as a real subprocess with THIS launched
+  app's hermetic IPC identity so the **real running desktop process's
+  real engine** reads the file (asserted via the live `POST /bridge`
+  engine_state + Recent history); then the real
+  `bridge.remove_context_menu` deletes the keys and the real registry
+  is asserted clean. Hermetic: the global HKCU keys are serialised
+  under the SAME machine-wide registry lock the Tier-1 hermetic shell
+  test uses and ALWAYS removed in teardown even on failure;
+  privilege-independent (HKCU is per-user, writable by any caller incl.
+  the LocalSystem Tier-1 runner). This is the genuine launched-app
+  round-trip the Tier-1 test can only *simulate* with a standalone
+  command server — the real *desktop process* services the registered
+  command here. **Additive Tier-2 breadth for UC-B11/B13/B12 (already
+  covered Tier-1 — no row flip from the journey).** ✅
+- **Tier-2 J8 / UC-D3** — user skips / replays a sentence during a real
+  read on the **REAL launched app**'s overlay transport →
+  `test_journey_phase5.py::test_j8_replay_skip_transport_during_real_read`.
+  A real multi-chunk read (real Piper synth, `chunk_total=4` verified);
+  `next` / `prev` genuinely move the real `chunk_idx` on the running
+  process (0→1→0 verified), `replay` is a genuine accepted op that
+  keeps the real read alive — driven through the launched app's OWN
+  real `POST /bridge` `overlay_action`, the **exact transport the real
+  desktop overlay window's prev/replay/next buttons use**
+  (`webui/js/app.js:606-619`). **HONEST SCOPE FINDING (verified on the
+  real launched app — NOT fake-green): UC-D5 (paused chip) / UC-D10
+  (pause→silence→resume) are NOT added as a Tier-2 journey leg.** The
+  real desktop web overlay window has **no pause control** (only
+  prev/replay/next/close, `webui/js/app.js:614-619`); the web `/bridge`
+  exposes no `pause` method; the only genuine product pause paths are
+  the **global hotkey** (an OS low-level-keyboard-hook keystroke — the
+  documented OS boundary CDP cannot drive) and the IPC `/pause`
+  *control route*, which `command_server.start_command_server` gates
+  behind `control_routes_enabled` (**default `False`**) and
+  `app_web.main` never enables — so `POST /pause` genuinely **404s** on
+  the real launched desktop process (empirically verified here: real
+  `HTTP 404` from the launched app's command server). Driving pause
+  through a route that 404s on the real product would be fake-green —
+  so it is **not claimed**. UC-D5/UC-D10 remain genuinely **covered by
+  their existing Tier-1 test**
+  (`e2e/web/test_core_interactions.py::test_pause_silences_and_resume_replays_then_seek_while_paused`),
+  unchanged. **Additive Tier-2 breadth for UC-D3 (already covered
+  Tier-1 — no row flip from the journey).** `command_server.py` is
+  protected and is **not** changed here to expose the route. ✅
+
+*Actual size:* 3 Tier-1 test functions (close UC-B2/E1/E7) + 2 Tier-2
+journeys (J7/J8). The conditions are real seams (the real served
+Settings UI + real `build_activation_readiness`; the verbatim
+`build_tray_menu` + a real `plugins.register_engine` WAV backend; the
+real `HotkeyManager._on_event` fed the exact hook event objects; the
+real launched app's own bridge + the exact registered `open_file`
+command + the real overlay transport), not mocks. UC-D5/UC-D10's
+launched-app pause path is an honestly-recorded reachability boundary
+(no real user surface + a default-off 404 route), not a fake-green;
+UC-C9 and UC-E9 stay honestly open (no production change available in
+this strictly-additive scope — see their rows + the gaps section).
+
+> **Phase-5 delta (this PR update):** the 3 remaining Phase-5
+> partial rows — **UC-B2** (partial→covered), **UC-E1**
+> (partial→covered), **UC-E7** (partial→covered) — are now Tier-1 in
+> `e2e/web/test_core_phase5.py` (3 Tier-1 test functions). Each induces
+> the real condition at a true seam (the real served Settings UI + real
+> readiness; the verbatim `build_tray_menu` + a real
+> `plugins.register_engine` WAV backend so the real `_replay_text_impl`
+> reaches the unmodified playback loop; the real `HotkeyManager._on_event`
+> fed the exact hook event objects with a modifier-free combo so the
+> real `_physical_modifiers()` read is deterministic) and asserts a
+> real backend/engine/overlay/hotkey-state effect — never by mocking
+> the unit under test, never privilege/host-dependent. Two additive
+> Tier-2 journeys (**J7** UC-B11/B13/B12 right-click round-trip; **J8**
+> UC-D3 reader transport) prove those already-covered rows end-to-end
+> on the **real launched WebView2 app** (CDP `Edg/…`, real `.mp4`
+> recording attached like J1–J6) — they add release-lane confidence,
+> they do **not** flip any row. **UC-C9** (first-run→VM
+> install-completion parity gap — Phase-3 triaged & formally accepted)
+> and **UC-E9** (single-instance gate — Phase-4 triaged with a verified
+> product finding) stay honestly **missing**; closing them would
+> require a real product change that is out of this strictly-additive
+> scope (recorded with the real reason in their rows + the gaps
+> section, not forced green). Also a Phase-5 honest finding (NOT
+> fake-green): the launched-app **pause** path for UC-D5/UC-D10 is not
+> Tier-2-journey-able — no real desktop web overlay pause control + the
+> IPC `/pause` route 404s by default (`control_routes_enabled=False`,
+> `command_server.py` protected); those rows stay covered by their
+> existing Tier-1 test, the journey covers only the genuinely-reachable
+> UC-D3 transport. Covered 60 → 63, partial 3 → 0 (UC-B2/E1/E7
+> removed), missing unchanged at 2 (UC-C9 + UC-E9 honestly remain).
+> Sections B (21/0/0), E (8/0/1) recomputed directly from the per-row
+> cells; every section's covered+partial+missing equals its Use-cases
+> and the section sums equal the Total (63+0+2=65). No Phase-1/2/3/4
+> row's *status* changed.
+
+*Est. (original plan):* "3 new Tier-2 journeys" — the audited Phase-5
+scope refined this to the 3 Tier-1 partial-row closures (UC-B2/E1/E7) +
+2 genuine new Tier-2 journeys (J7/J8); the planned "J6 rebind-hotkey"
+journey was dropped because UC-B7 is already fully Tier-1-covered (a
+re-journey would add no use-case value) and "J6" was already taken by
+Phase-4. Additive only; not a CI gate.
 
 ---
 

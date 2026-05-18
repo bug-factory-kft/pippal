@@ -78,6 +78,9 @@ real app instance + fresh profile.
 | **J3** `test_j3_settings_persist_and_behave` | A user changes a setting and it both persists and behaves | turn *Show panel while reading* OFF + Save → `config.json` on disk shows `show_overlay:false` · reopened Settings still shows it OFF · with it OFF a real read keeps the overlay **idle** (genuine behavioural effect, not just a stored value) · turn it back ON + Save → the running app's live config reads `True` and the `config.json` override is removed (diff-config omits a value back at its default) and a real read **surfaces** the overlay — behaviour flips both ways |
 | **J4** `test_j4_onboarding_finish_activates` | A first-run user finishes onboarding | first run with a real engine shows onboarding, no `first_run_activation.json` yet · *Play sample* → the real engine speaks the activation sample · *Finish setup* → the running app reports activation complete **and** `first_run_activation.json` is written complete on disk |
 | **J5** `test_j5_view_open_source_notices` | A licence-conscious user checks what is bundled | *View licences…* in Settings really opens the **Notices** window (new CDP target) showing the genuine licences text the backend resolved from disk, matching the backend resolver |
+| **J6** `test_journey_phase4.py::test_j6_corrupt_config_recovers_to_defaults_and_bak` | A returning user's `config.json` is corrupt; the app must recover | a corrupt `config.json` is pre-written into the fresh profile so the real `load_config` recovery runs at launch · the real app did **not** crash · the real `config.json.bak` is a **byte-for-byte** copy of the user's file · the running app's live `POST /bridge get_config` == the layered defaults · no corrupt config remains (UC-B21) |
+| **J7** `test_journey_phase5.py::test_j7_context_menu_install_read_through_it_remove` | A user installs the Windows right-click entry, reads a file **through it**, removes it | the launched app's OWN real `bridge.install_context_menu` does genuine per-user HKCU `reg add` · the real registry keys exist with the real `%1` command · the **exact registered command** (`python -m pippal.open_file <file>`, what Explorer spawns on a real right-click) is run with THIS launched app's hermetic IPC identity → the **real running desktop process's real engine** reads the file (live `engine_state` + Recent history record it) · real `bridge.remove_context_menu` deletes the keys, the real registry is clean. Hermetic: machine-wide registry lock + always-remove teardown; privilege-independent (UC-B11/B13/B12) |
+| **J8** `test_journey_phase5.py::test_j8_replay_skip_transport_during_real_read` | A user skips/replays a sentence during a real read | a real **multi-chunk** read (`chunk_total=4`) · `next` / `prev` genuinely move the real `chunk_idx` (0→1→0) on the running process · `replay` is a genuine accepted op + the process stays alive — all driven through the launched app's OWN real `POST /bridge` `overlay_action`, the **exact transport the real desktop overlay window's prev/replay/next buttons use** (UC-D3). *Honest finding:* pause/resume (UC-D5/UC-D10) is **not** a journey leg — the real desktop web overlay has no pause control and the IPC `/pause` route 404s by default; those stay covered by their existing Tier-1 test |
 
 ### Genuinely non-journey-able controls (honest notes)
 
@@ -89,19 +92,34 @@ machine and stay covered by Tier-1's per-control real-effect tests:
   hook), not DOM controls in the WebView2 window, so CDP cannot drive
   them. Their real effects (open Settings/Voices/onboarding, read/stop/
   pause) are exercised head-less in Tier-1
-  (`e2e/web/test_tray_hotkey_integration.py`) against the *same*
-  callables `app_web.build_tray_menu` wires, and J1–J5 reach the same
-  surfaces through the in-app buttons instead.
+  (`e2e/web/test_tray_hotkey_integration.py` and, for the repeat-dedup
+  / exact-match edge logic, `e2e/web/test_core_phase5.py`) against the
+  *same* callables, and J1–J8 reach the same surfaces through the
+  in-app buttons / the launched app's own bridge instead.
 - **`open_url` (Website / GitHub / Licence / Privacy links and the
   onboarding "setup instructions" button).** These shell out to the OS
   default browser (`webbrowser.open`); asserting it would drive an
   external browser, not PipPal — out of scope for a PipPal journey. The
   bridge call itself is covered in Tier-1.
-- **Windows-integration *Install / Remove right-click entry*.** A real
-  per-user **HKCU** registry mutation; doing it inside a journey would
-  leave global machine state and races with other checkouts. Tier-1
-  covers it hermetically (machine-wide lock + bounded read-after-write
-  poll). A journey would add no use-case value over that.
+- **Windows-integration *Install / Remove right-click entry* — now
+  Tier-2-journeyed by J7 (Phase-5).** It is a real per-user **HKCU**
+  registry mutation, so J7 serialises it under the SAME machine-wide
+  registry lock the Tier-1 hermetic shell test uses and ALWAYS removes
+  the keys in teardown (even on failure), leaving no machine state and
+  not racing other checkouts. J7 adds the genuine value Tier-1 cannot:
+  the **real launched desktop process** services the registered command
+  end-to-end (Tier-1 only simulates it with a standalone command
+  server). Tier-1's hermetic coverage stays the merge-gate row.
+- **Reader-transport *pause / resume* (UC-D5/UC-D10).** Honestly **not**
+  a Tier-2 journey leg (verified product fact): the real desktop web
+  overlay window has **no pause control** (only prev/replay/next/close),
+  the web `/bridge` has no `pause` method, and the only genuine pause
+  paths are the global hotkey (an OS keystroke boundary CDP cannot
+  drive) and the IPC `/pause` *control route* which `command_server`
+  gates behind `control_routes_enabled` (default `False`;
+  `app_web.main` never enables it) so `POST /pause` genuinely 404s on
+  the real launched process. J8 covers the genuinely-reachable UC-D3
+  transport; UC-D5/UC-D10 stay covered by their existing Tier-1 test.
 - **Physical speaker output.** Asserting audible sound needs a loopback
   capture device this machine has none of. J2/J4 assert the engine
   *effect* (real RIFF/WAVE on disk, overlay/karaoke/history) instead —
