@@ -322,3 +322,89 @@ profile.
 - `e2e/web` stays excluded from the default `pytest` (`testpaths =
   tests`): `pytest --collect-only` collects exactly 266, zero from
   `e2e/web`.
+
+---
+
+## Tier-2 — user-journey suite on the REAL launched desktop app (`e2e/journey`)
+
+Everything above is **Tier-1**: per-control real-effect E2E in
+**served / headless** mode — the **per-PR merge gate**
+(`ui-web-e2e.yml` → required check *Web UI E2E (served, headless
+Chromium)*). It stays exactly that and is **not** modified.
+
+**Tier-2** is a *second*, additive lane: genuine **use-case journeys**
+on the **actually launched desktop app** — a real `reader_app_web.py`
+process whose real pywebview **WebView2** window appears in the
+interactive logged-in session, attached to by Playwright over CDP and
+driven with real clicks/keystrokes on the real window. It is the
+**release / journey lane**, run on demand by the logged-in user via
+`e2e/journey/run-journey.ps1` (or a user-session scheduled task) — it
+**cannot** run on the Session-0 CI runner (no visible desktop), so it
+is *not* a CI gate and does *not* touch branch protection. Tier-1
+remains the merge gate; Tier-2 proves the journeys work end-to-end on
+the genuine product. See `e2e/journey/README.md` for the
+launch/attach technique and evidence layout.
+
+Each journey step asserts a **real effect** on the running process
+(disk / engine / overlay / history / catalogue), deadline-polled, no
+mocks of the thing under test. Every journey first proves it is
+attached to the **real** app (CDP build string `Edg/<ver>` — the
+WebView2 runtime, *not* `HeadlessChrome` — plus the app's own
+`#brand-name` / `data-ready` DOM markers).
+
+| # | Journey (use-case) | Test | Real effect asserted per step | Status |
+|---|---|---|---|---|
+| J1 | First-run user installs a voice so PipPal can read | `test_j1_first_run_install_voice` | first launch really shows the setup/onboarding surface · zero voices on disk · *Open Voice Manager* opens the **real** Voices window (new CDP target) · *Install* on the smallest catalogue voice (`en_US-kathleen-low`) **really downloads** the real `.onnx` (~60 MB) **+** `.onnx.json` to disk · running app's live catalogue + `get_installed_voices()` show it installed · reopened Settings offers it, Save records `voice` in `config.json` | [x] |
+| J2 | Set-up user reads text aloud | `test_j2_read_aloud_speaks` | running app has the real voice · read via the real UI → **real Piper engine speaks**: genuine **RIFF/WAVE** chunk on disk (stdlib `wave`) · overlay reaches `reading`/`done`, karaoke cursor (`elapsed`) advances · Recent history (live **and** `history.json`) records the text | [x] |
+| J3 | User changes a setting; it persists *and* behaves | `test_j3_settings_persist_and_behave` | *Show panel* OFF + Save → `config.json` `show_overlay:false` · reopen still OFF · OFF → a real read keeps overlay **idle** (genuine behavioural effect) · back ON + Save → live config `True`, the `config.json` override removed (diff-config omits a default-valued key) and a real read **surfaces** the overlay — flips both ways | [x] |
+| J4 | First-run user finishes onboarding | `test_j4_onboarding_finish_activates` | first run, no `first_run_activation.json` · *Play sample* → real engine speaks the activation sample · *Finish setup* → running app reports activation complete **and** `first_run_activation.json` written complete on disk | [x] |
+| J5 | Licence-conscious user checks bundled licences | `test_j5_view_open_source_notices` | *View licences…* opens the **real** Notices window (new CDP target) with the genuine resolved licences text, matching the backend resolver | [x] |
+
+### Tier-2 non-journey-able controls (honest notes)
+
+- **Native tray (`pystray`) clicks + global hotkeys (`keyboard`)** —
+  OS-level, not DOM in the WebView2 window, so CDP cannot drive them.
+  Already covered head-less in Tier-1
+  (`e2e/web/test_tray_hotkey_integration.py`, §5) against the same
+  callables; J1–J5 reach the same surfaces via in-app buttons.
+- **`open_url`** (About links, onboarding "setup instructions") —
+  shells out to the OS browser; driving it would test the browser, not
+  PipPal. Bridge call covered in Tier-1.
+- **Windows-integration Install/Remove right-click entry** — global
+  per-user HKCU mutation; a journey would leave machine state and race
+  other checkouts. Tier-1 covers it hermetically.
+- **Physical speaker output** — needs a loopback capture device this
+  host lacks; J2/J4 assert the engine *effect* (real RIFF/WAVE +
+  overlay/karaoke/history), only the acoustic capture is out of scope.
+
+### Tier-2 local run record (this machine)
+
+- Technique proven: `webview.settings['REMOTE_DEBUGGING_PORT']` set by
+  the test-only `e2e/journey/app_launcher.py` **before** the unmodified
+  `app_web.main()` runs `webview.start()` → the real WebView2 window
+  exposes a CDP endpoint; Playwright `connect_over_cdp` attaches and
+  drives the real window. Proof it is the real app, not headless: CDP
+  `/json/version` → `"Browser": "Edg/148.0.3967.70"` (WebView2 runtime;
+  headless would be `HeadlessChrome`), real per-journey window
+  screenshots captured under the evidence dir. A second pywebview
+  window (e.g. Voices) is a new CDP target the initial connection does
+  not auto-surface; the fixture **reconnects** `connect_over_cdp` to
+  discover and drive it.
+- `e2e\journey\run-journey.ps1 -Runs 2` → **both runs 5/5 passed, 0
+  failures, 0 errors, 0 skipped** (full suite J1–J5). Evidence bundle
+  (log + JUnit + JSON summary + HTML report + per-journey
+  real-window screenshot/app-log/CDP-build) written under
+  `.e2e\evidence\journey-<UTC stamp>\`.
+- J1 does a **genuine** download of the smallest catalogue voice
+  (`en_US-kathleen-low`, ~60 MB on this machine, completes in a few
+  seconds; assertion deadline-polls ≤180 s). J2/J4 reuse a
+  locally-cached real `en_US-ryan-high` voice + the cached real
+  `piper.exe` so they exercise a real synth without a download every
+  run — J1 alone proves the real download path end-to-end.
+- Additive only: `e2e/journey` is **excluded from the default
+  `pytest`** (`testpaths = tests`) and from Tier-1 `e2e/web`;
+  `command_server.py` / `open_file.py`, `ci.yml` / `e2e-windows.yml` /
+  `bench-baseline.yml` / `ui-web-e2e.yml`, and branch protection are
+  untouched. `ruff check src/pippal tests e2e/web e2e/journey` → clean;
+  `py -3.11 -m pytest -q` still collects exactly the unit suite (zero
+  from `e2e/journey`).
