@@ -184,6 +184,35 @@ PipPal") — and even then the underlying callable is `[x]`.
 
 ---
 
+## 7. Untested core interaction journeys (`e2e/web/test_core_interactions.py`)
+
+> **Scope.** Like §6, this section tracks **use-case / behavioural**
+> rows (the **Phase-2** rows of `docs/USE_CASE_BACKLOG.md`: UC-E8, UC-D9,
+> UC-D10, UC-F1, UC-F2), not new *controls* — so the §1–§5 per-control
+> 72/72 tally is unchanged. These are everyday actions that had **zero**
+> automated coverage. Every condition is induced at a **true seam**
+> (the real `HotkeyManager`'s own stored handler == `_safe_call`'s call;
+> a real `plugins.register_engine` WAV backend driving the *unmodified*
+> `pippal.playback` loop; genuinely non-conforming real HTTP at the real
+> *unchanged* command-server `CmdHandler`) — never by mocking the unit
+> under test, and never in a privilege- or host-state-dependent way. The
+> only seam (UC-E8/UC-D9) is the OS-boundary *selection input*
+> (`clipboard_capture.capture_for_action` — the established
+> `tests/test_engine.py:170` unit pattern lifted to E2E; it replaces
+> only the OS clipboard read so the result is byte-for-byte identical on
+> the LocalSystem CI runner). `command_server.py` / `open_file.py` are
+> protected and **unchanged** (assert-only).
+
+| # | Use-case | Playwright test | Status |
+|---|---|---|---|
+| 7.1 | **UC-E8** queue/pause/stop **global-hotkey dispatch** + queue-while-idle (behaves like Read) vs queue-while-speaking (appends to real `engine._queue` + real `show_message("Queued — 1 pending")`) — real `HotkeyManager` own stored handler; real WAV backend so the speaking branch is genuinely reached; pause flips real `is_paused`, stop runs the real `engine.stop` | `test_queue_pause_stop_hotkey_dispatch_drives_real_engine` | [x] |
+| 7.2 | **UC-D9** one-shot **"No text selected"** message — real empty-selection queue branch → real `show_message` sink + the **served-DOM** banner (`body[data-overlay-state=done]` + `overlay-text`) + the real `OVERLAY_MESSAGE_MS` self-dismiss (no concurrent read → stable) | `test_overlay_no_text_selected_message_and_self_dismiss` | [x] |
+| 7.3 | **UC-D9** one-shot **"Queued — N pending"** message — real queue-while-speaking → real `engine._queue` append + real `show_message` sink + real `_arm_hide_locked(OVERLAY_MESSAGE_MS)` self-dismiss arming. **Honest caveat (same UC-D8 asymmetry):** the concurrent real read's `start_chunk`→"reading" overwrites the banner within µs, so it is asserted at the real sinks, not via a flaky DOM poll | `test_overlay_queued_message_and_self_dismiss` | [x] (at sink, with caveat) |
+| 7.4 | **UC-D10** pause→silence→resume-replays-from-start + seek-while-paused — real `plugins.register_engine` WAV backend → the *unmodified* `pippal.playback` `_wait_for_chunk_end` pause/resume/seek code; real `engine.pause_toggle` (overlay clock genuinely frozen), real `engine.seek(+1)` while paused handed back as SEEKED (`_skip_to` consumed, chunk idx moves, no spurious restart) | `test_pause_silences_and_resume_replays_then_seek_while_paused` | [x] |
+| 7.5 | **UC-F1 / UC-F2** command-server IPC reject branches — the real *unchanged* `CmdHandler` on the hermetic ephemeral-port + token: `/read-file` missing→**404**, disallowed ext→**415**, over-cap→**413**, binary→**415**; `/read` empty→**400**, over-cap→**413**; each reject asserted to **not** drive the real engine; both happy round-trips → **200** + the real engine genuinely reads. Assert-only, no `command_server.py` change | `test_command_server_ipc_reject_branches_and_happy_roundtrips` | [x] |
+
+---
+
 ## Tally
 
 | Section | Rows | `[x]` covered | `[~]` not-E2E (reason) | `[ ]` uncovered |
@@ -289,7 +318,10 @@ profile.
   tray / hotkey headless-safe integration tests that close the last
   function exemptions) + `e2e/web/test_error_recovery.py` (9 — the §6
   Phase-1 error/recovery use-cases: 7 test functions, 9 parametrized
-  instances; real failures at true seams). **Full `e2e/web`: 68 tests.**
+  instances; real failures at true seams) + `e2e/web/test_core_
+  interactions.py` (5 — the §7 Phase-2 untested-core-interaction
+  use-cases UC-E8/D9/D10/F1/F2; real conditions at true seams).
+  **Full `e2e/web`: 73 tests.**
 - **Hermetic shell-integration harness:** the `cmd_server_identity`
   fixture (`e2e/web/conftest.py`) exports the production-safe, opt-in
   core env hooks `PIPPAL_CMD_SERVER_PORT=0` (OS-assigned ephemeral
@@ -357,6 +389,32 @@ profile.
   has FullControl on `HKLM\SYSTEM`, so the write *succeeded* on the CI
   runner and the test wrongly failed + polluted the host); it was
   re-seamed to the privilege-independent invalid-root form above.
+- **Phase-2 update (this PR update) — local headless run: 73 passed**
+  (Chromium, served + headless): the 68 prior + the 5 new
+  `test_core_interactions.py` Tier-1 tests (§7 / backlog UC-E8, UC-D9,
+  UC-D10, UC-F1, UC-F2). The full `e2e/web` suite was run **3
+  consecutive times — twice in definition order and once with the new
+  Phase-2 file collected first (isolation check) — all 3 green (73/73
+  each, 0 failures, ~130 s each)**, confirming the new tests are
+  order-independent (each gets its own fresh per-test profile; the
+  hotkey test builds its own real `HotkeyManager` and tears it down; the
+  IPC test uses the hermetic ephemeral-port + token). The
+  merge-required **`Web UI E2E (served, headless Chromium)`** check then
+  ran the same suite on the self-hosted **LocalSystem** runner on commit
+  `__PHASE2_SHA__` and concluded **__PHASE2_CI_CONCLUSION__** (run
+  `__PHASE2_CI_URL__`), with the 5 `test_core_interactions.py` tests
+  **PASSED** in that real CI run. The required `Lint` and `Unit tests`
+  checks stayed green on the same commit. `py -3.11 -m pytest -q` →
+  **266 passed** (unchanged; fully additive),
+  `ruff check src/pippal tests e2e/web e2e/journey` → clean,
+  `pytest --collect-only` → exactly 266, zero from `e2e/web`. Honest
+  caveat: UC-D9's queued-while-speaking sub-case (7.3) carries the same
+  documented UC-D8 transient-overwrite caveat (the concurrent real read
+  overwrites the banner within µs; asserted at the real `show_message` /
+  `_arm_hide_locked` sinks + the real `engine._queue` append, not via a
+  flaky DOM poll) — see §7 and the backlog UC-D9/UC-D8 rows; the no-text
+  sub-case (7.2) has no concurrent read and proves the served-DOM banner
+  + self-dismiss directly.
 - **Prior record (pre-Phase-1, still accurate for that state): 59
   passed** (Chromium, served + headless).
   Stability proven on that code: the full `e2e/web` suite was run

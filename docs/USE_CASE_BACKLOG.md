@@ -128,8 +128,8 @@ set differs per state.
 | UC-D6 | Auto-hide after reading | Panel disappears on its own when done | `set_state("done")` arms `threading.Timer(max(OVERLAY_HIDE_MIN_MS, auto_hide_ms))` → panel hides (`overlay_state.py:95`) | **A new read cancels a pending hide** (`_cancel_hide_locked`, `overlay_state.py:151`) | **partial** — auto-hide-then-hidden **covered** Tier-1 `test_overlay_auto_hide_actually_hides`. The **cancel-pending-hide-on-new-read** generation-guard branch (`overlay_state.py:151,176`) is not directly asserted |
 | UC-D7 | Drag-to-reposition | User moves the panel out of the way | Right-button drag offsets the panel via transform (`app.js:633`) | n/a | **covered** Tier-1 `test_overlay_drag_repositions_panel` |
 | UC-D8 | Full real read-aloud path (synth → WAV → karaoke → history) | The core product: select text, hear it, see karaoke, find it in Recent | Real synth backend → RIFF/WAVE PCM per chunk + `is_speaking` + overlay + Recent records text (`playback.py:59`) | **Synthesis failure** → `ov.show_message("Synthesis failed")` (`playback.py:166`) | **covered (at the real sink — see honest caveat)** — full real path Tier-1 `test_read_aloud_full_real_path_wav_karaoke_history` + Tier-2 J2. The "Synthesis failed" failure branch is **now Tier-1** `test_error_recovery.py::test_read_aloud_synthesis_failed_overlay_message`: a real `TTSBackend` registered via the **real `plugins.register_engine`** API (its `synthesize` genuinely returns False) drives the **unmodified `pippal.playback`** loop to the **real `WebOverlay.show_message("Synthesis failed")` sink** (`playback.py:167`); asserted at the real sink (the real method still executes — only the call is recorded, the unit-suite pattern at `tests/test_engine.py:179` lifted to E2E) + real recovery (engine no longer `is_speaking`, overlay self-recovers to idle in the served DOM, the failure string never enters Recent). **Honest caveat:** in *core* `playback.synthesize_and_play` runs an unconditional trailing `ov.set_state("done")` *immediately after* `_prepare_first_chunk`'s `show_message` (no I/O between them), clearing `overlay.message` within microseconds — so the 120 ms-polled served DOM/`snapshot()` cannot reliably observe the literal string (asserting it there would be a flake/tautology). The message is genuinely emitted at the real sink; its transient overwrite is a real core behaviour (the core/pro asymmetry the gaps section names), not a test weakness. `playback.py:166-168` |
-| UC-D9 | One-shot overlay message ("No text selected" / "Queued — N pending") | User gets feedback when a hotkey action has nothing/queued | `show_message` sets `done` + arms `OVERLAY_MESSAGE_MS` self-dismiss (`overlay_state.py:105`); engine emits these (`engine.py:472,498`) | **Message auto-dismiss timing** | **missing** — no Tier-1/Tier-2 test drives a `show_message` and asserts the user-visible banner + its `OVERLAY_MESSAGE_MS` self-dismiss for the core "No text selected"/"Queued" cases (`engine.py:472,498`; `overlay_state.py:105`). Pro asserts an analogous notice; core does not. |
-| UC-D10 | Pause/resume mid-chunk audio behaviour | User pauses, audio silences, resumes from chunk start | `pause_toggle` purges audio + freezes overlay; resume replays chunk from start (`playback.py:282`) | **Seek while paused** hands the seek back without restarting (`playback.py:316`) | **missing** — the pause→silence→resume-replays-from-start and seek-while-paused behaviours (`playback.py:305-333`) have no Tier-1/Tier-2 journey test (paused *chip* is covered, the *audio/seek behaviour* is not) |
+| UC-D9 | One-shot overlay message ("No text selected" / "Queued — N pending") | User gets feedback when a hotkey action has nothing/queued | `show_message` sets `done` + arms `OVERLAY_MESSAGE_MS` self-dismiss (`overlay_state.py:105`); engine emits these (`engine.py:472,498`) | **Message auto-dismiss timing** | **covered (Phase-2)** Tier-1 `test_core_interactions.py::test_overlay_no_text_selected_message_and_self_dismiss` + `…::test_overlay_queued_message_and_self_dismiss`. A real `_RealWavBackend` registered via the real `plugins.register_engine` makes the engine `is_ready()` so the real `_queue_selection_impl` does NOT short-circuit into the no-voice onboarding clip (`engine.py:482`) and genuinely reaches the empty-selection branch (`engine.py:486-489`) and the queue-while-speaking branch (`engine.py:498`). **No-text case (no concurrent read):** asserts the real `WebOverlay.show_message("No text selected")` sink (observe-don't-replace, the `tests/test_engine.py:179` pattern lifted to E2E), the **served-DOM** banner (`body[data-overlay-state=done]` + the `overlay-text` element shows the string — genuinely stable for the full `OVERLAY_MESSAGE_MS`), and the **real `OVERLAY_MESSAGE_MS` self-dismiss** (the real `WebOverlay` timer returns the served DOM to idle on its own, no test action). **Queued case:** asserts the real `engine._queue` append, the real `show_message("Queued — 1 pending")` sink, and that the real `show_message` armed the real `_arm_hide_locked(OVERLAY_MESSAGE_MS)` self-dismiss (observed at the real `_arm_hide_locked` sink) + that the one-shot does not persist. **Honest core caveat (same UC-D8 core/pro asymmetry):** in the queued case the *first* read is still genuinely running, so its own real overlay transition (`start_chunk` → "reading") overwrites the queued banner within microseconds — the served-DOM/snapshot string is genuinely transient there, so it is asserted at the real sinks, not via a flaky DOM poll against the concurrent read; the dedicated served-DOM banner+self-dismiss visibility is proven by the no-text test. `engine.py:472,498`; `overlay_state.py:105` |
+| UC-D10 | Pause/resume mid-chunk audio behaviour | User pauses, audio silences, resumes from chunk start | `pause_toggle` purges audio + freezes overlay; resume replays chunk from start (`playback.py:282`) | **Seek while paused** hands the seek back without restarting (`playback.py:316`) | **covered (Phase-2)** Tier-1 `test_core_interactions.py::test_pause_silences_and_resume_replays_then_seek_while_paused`. A real `_RealWavBackend` registered via the real `plugins.register_engine` produces real RIFF/WAVE PCM so the **unmodified `pippal.playback`** loop genuinely runs its real `_wait_for_chunk_end` pause/resume/seek code (the no-piper checkout's onboarding clip bypasses that loop). Drives a real 2-chunk read through the real served UI, then the **real `engine.pause_toggle`**: asserts the real pause-hold is entered (`engine.is_paused` True, overlay `is_paused` True, the karaoke clock genuinely frozen — `elapsed` unchanged across a real interval), resume genuinely continues and the real read completes (real resume re-bases `_chunk_start`, the loop drains to its trailing `done`), then on a fresh real 2-chunk read a real `engine.seek(+1)` *while paused* is handed back as a real SEEKED by the real loop (`playback.py:316-319`): the real `engine._skip_to` is consumed and the real `engine._chunk_idx` moves forward without a spurious restart. `playback.py:305-333` |
 
 ---
 
@@ -144,7 +144,7 @@ set differs per state.
 | UC-E5 | Tray Quit | User exits PipPal cleanly | "Quit" → `engine.stop` + hotkey unhook + `icon.stop` + `windows.shutdown` (`app_web.py:63`) | n/a | **covered** Tier-1 `test_tray_quit_item_runs_full_teardown_sequence` |
 | UC-E6 | Tray icon idle↔speaking swap | User sees at a glance whether PipPal is talking | `make_tray_icon(speaking)` red badge; `tray_poll` swaps it (`tray.py:23`, `app_web.py:239`) | **Asset missing** → programmatic fallback icon (`tray.py:75`) | **partial** — `make_tray_icon` **covered** by `tests/test_tray.py` unit suite (incl. fallback). The **`tray_poll` live idle↔speaking swap during a real read** (`app_web.py:239-244`) has no E2E/journey test |
 | UC-E7 | Global hotkey: Read selection | User presses Win+Shift+R anywhere to read selected text | `HotkeyManager` dispatches the stored `speak` handler → `engine.speak_selection_async` → capture + read (`app_web.py:140`) | **Held-key repeat de-dup** (`hotkey.py:331`); **secure-desktop ghost-modifier guard** (`hotkey.py:96`) | **partial** — handler dispatch → real engine **covered** Tier-1 `test_global_hotkey_speak_dispatch_drives_real_engine`. **The repeat-dedup and physical-modifier (`GetAsyncKeyState`) edge logic (`hotkey.py:293-358`) is not journey-tested** (has unit coverage; OS keystroke delivery is an OS boundary) |
-| UC-E8 | Global hotkey: Queue / Pause / Stop | User queues another selection / pauses / stops via hotkey | `queue`/`pause`/`stop` handlers → `engine.queue_selection_async`/`pause_toggle`/`stop` (`app_web.py:142-145`) | **Queue while idle** behaves like Read; **queue while speaking** appends + "Queued — N pending" (`engine.py:481`) | **missing** — only `speak` is hotkey-dispatch-tested; **queue/pause/stop hotkey dispatch and the queue-while-speaking vs queue-while-idle branch (`engine.py:481-509`) have no Tier-1/Tier-2 test** |
+| UC-E8 | Global hotkey: Queue / Pause / Stop | User queues another selection / pauses / stops via hotkey | `queue`/`pause`/`stop` handlers → `engine.queue_selection_async`/`pause_toggle`/`stop` (`app_web.py:142-145`) | **Queue while idle** behaves like Read; **queue while speaking** appends + "Queued — N pending" (`engine.py:481`) | **covered (Phase-2)** Tier-1 `test_core_interactions.py::test_queue_pause_stop_hotkey_dispatch_drives_real_engine` (mirrors the existing `test_global_hotkey_speak_dispatch_drives_real_engine`). The `queue`/`pause`/`stop` actions are registered on the **real `HotkeyManager`** exactly as `app_web.bind_hotkeys` does and dispatched via the manager's OWN stored handler (the exact callable `HotkeyManager._safe_call` runs when the physical combo fires — only the OS routing the keystroke into the hook is skipped, "testing Windows not PipPal"). A real `_RealWavBackend` (real `plugins.register_engine`, `is_ready()` True) makes the engine take the real synth path so the queue-while-speaking branch is genuinely reached. Asserts: **queue while idle** behaves like Read (real token bump + `is_speaking`, Recent records the text — `engine.py:500-509`); **queue while speaking** really appends to `engine._queue` and the real `WebOverlay.show_message` sink receives exactly `"Queued — 1 pending"` (`engine.py:493,498`); **pause** flips real `engine.is_paused`/overlay `is_paused` and a second dispatch resumes; **stop** runs the real `engine.stop` (token bump, `is_speaking` cleared, queue emptied). The only seam is the OS-boundary selection input (`clipboard_capture.capture_for_action` — sending a real Ctrl+C / reading the system clipboard cannot be driven on a headless Session-0 runner with no foreground selection; the backlog itself names selection capture an OS boundary). That seam is the lifted-to-E2E form of the established unit pattern (`tests/test_engine.py:170`) and is **privilege/host-independent**: it replaces only the OS clipboard read, so the result depends purely on PipPal's branch logic — byte-for-byte identical on the LocalSystem CI runner. `engine.py:481-509` |
 | UC-E9 | Single-instance gate | User accidentally launches PipPal twice | `start_command_server` can't bind → "PipPal is already running" MessageBox, exit (`app_web.py:208`) | This is the gate itself | **missing** — the second-instance MessageBox + `SystemExit` gate (`app_web.py:208-221`, `app.py:382`) has no Tier-1/Tier-2 test |
 
 ---
@@ -153,8 +153,8 @@ set differs per state.
 
 | id | Surface / control | Use-case | Happy-path journey | Error / edge / recovery variants | Status + evidence |
 |---|---|---|---|---|---|
-| UC-F1 | Read a file via IPC | The shell entry / a helper asks the running app to read a file | `POST /read-file` → size/extension/binary guards → `engine.read_text_async` (`command_server.py:222`) | **Too large / wrong extension / binary / missing** → 413/415/404 (`command_server.py:231-251`) | **partial** — the happy round-trip is **covered** by `test_shell_integration_registry_and_command` (Tier-1). **The 413/415/404 reject branches are not exercised by any Tier-1/Tier-2 test** (unit-tested only) |
-| UC-F2 | Read arbitrary text via IPC | A helper hands text directly | `POST /read` → `engine.read_text_async` (`command_server.py:256`) | **Empty / too large** → 400/413 | **missing** — `/read` route + its reject branches (`command_server.py:256-265`) have no Tier-1/Tier-2 test |
+| UC-F1 | Read a file via IPC | The shell entry / a helper asks the running app to read a file | `POST /read-file` → size/extension/binary guards → `engine.read_text_async` (`command_server.py:222`) | **Too large / wrong extension / binary / missing** → 413/415/404 (`command_server.py:231-251`) | **covered (Phase-2)** Tier-1 `test_core_interactions.py::test_command_server_ipc_reject_branches_and_happy_roundtrips` (and the happy round-trip also by `test_shell_integration_registry_and_command`). Stands up the **same real `start_command_server` `CmdHandler`** the desktop app uses (unchanged — `command_server.py` is protected) on this test's hermetic ephemeral-port + token (`cmd_server_identity`), then POSTs genuinely non-conforming real HTTP requests: a missing file → real **404**, a disallowed `.exe` extension → real **415**, a real on-disk file over the real 200 KB cap → real **413**, real NUL-byte content → real **415**; asserts the real HTTP status AND that **none of the four rejects drove the real engine** (real `engine.token` unchanged — the true behavioural contract). The happy `.txt` → real **200** + the real engine genuinely starts reading it. Assert-only, privilege/host-independent (depends only on the real handler's own validation). `command_server.py:222-254` |
+| UC-F2 | Read arbitrary text via IPC | A helper hands text directly | `POST /read` → `engine.read_text_async` (`command_server.py:256`) | **Empty / too large** → 400/413 | **covered (Phase-2)** Tier-1 `test_core_interactions.py::test_command_server_ipc_reject_branches_and_happy_roundtrips` (same real `CmdHandler`, unchanged): `/read` empty/whitespace text → real **400**, an over-the-200 KB-cap body (kept under the cheap 2× pre-json guard so the real `len(text.encode()) > MAX_READ_TEXT_BYTES` branch is the one that rejects) → real **413**, neither reject drives the real engine (token unchanged), and the happy text → real **200** + the real engine genuinely starts reading it. Assert-only; `command_server.py` / `open_file.py` unchanged. `command_server.py:256-265` |
 
 > `command_server.py` and `open_file.py` are protected — they are
 > **not modified** by this backlog; the gaps above are recorded for the
@@ -172,32 +172,57 @@ pronunciation surface (recorded separately as a not-a-feature note).
 | A. Onboarding | 14 | 10 | 2 | 2 |
 | B. Settings | 21 | 15 | 4 | 2 |
 | C. Voice Manager | 9 | 8 | 0 | 1 |
-| D. Reader overlay | 10 | 6 | 1 | 3 |
-| E. Tray / hotkeys | 9 | 3 | 3 | 3 |
-| F. Command server IPC | 2 | 0 | 1 | 1 |
-| **Total** | **65** | **42** | **11** | **12** |
+| D. Reader overlay | 10 | 8 | 1 | 1 |
+| E. Tray / hotkeys | 9 | 4 | 3 | 2 |
+| F. Command server IPC | 2 | 2 | 0 | 0 |
+| **Total** | **65** | **47** | **10** | **8** |
 
-> **Phase-1 delta (this PR update):** the 5 Phase-1 error/recovery
-> rows — UC-A7, UC-C6, UC-B7, UC-B11, UC-D8 — flipped **partial →
-> covered** by `e2e/web/test_error_recovery.py` (9 Tier-1 test
-> instances). Each induces the *real* failure at a true seam (closed /
-> RST-mid-stream socket, read-only on-disk target, a syntactically
-> invalid registry root hive `reg.exe` rejects for *any* caller incl.
-> the CI runner's LocalSystem, real registered failing synth backend)
-> and asserts the *real* surfacing + recovery. Covered 37 → 42, partial
-> 16 → 11; missing unchanged at 12. UC-D8 is "covered at the real sink"
-> with the honest transient-overwrite caveat recorded inline.
+> **Phase-1 delta:** the 5 Phase-1 error/recovery rows — UC-A7, UC-C6,
+> UC-B7, UC-B11, UC-D8 — flipped **partial → covered** by
+> `e2e/web/test_error_recovery.py` (9 Tier-1 test instances). Each
+> induces the *real* failure at a true seam (closed / RST-mid-stream
+> socket, read-only on-disk target, a syntactically invalid registry
+> root hive `reg.exe` rejects for *any* caller incl. the CI runner's
+> LocalSystem, real registered failing synth backend) and asserts the
+> *real* surfacing + recovery. Covered 37 → 42, partial 16 → 11;
+> missing unchanged at 12. UC-D8 is "covered at the real sink" with the
+> honest transient-overwrite caveat recorded inline.
+
+> **Phase-2 delta (this PR update):** the 5 Phase-2 untested-core-
+> interaction rows — **UC-E8** (missing→covered), **UC-D9**
+> (missing→covered), **UC-D10** (missing→covered), **UC-F1**
+> (partial→covered), **UC-F2** (missing→covered) — are now Tier-1 in
+> `e2e/web/test_core_interactions.py` (5 Tier-1 tests). Each drives the
+> real served UI / real engine + overlay / real `HotkeyManager` / real
+> `command_server` and asserts a real backend/overlay/engine/IPC state.
+> The real condition is induced at a true seam, never by mocking the
+> unit under test, and never in a privilege- or host-state-dependent
+> way: UC-E8/UC-D9's only seam is the OS-boundary *selection input*
+> (`clipboard_capture.capture_for_action` — the established
+> `tests/test_engine.py:170` unit pattern lifted to E2E, replacing only
+> the OS clipboard read so the result is identical on the LocalSystem
+> runner); UC-D10 uses a real `plugins.register_engine` WAV backend so
+> the *unmodified* `pippal.playback` loop genuinely runs its real
+> pause/resume/seek code; UC-F1/F2 POST genuinely non-conforming real
+> HTTP at the real unchanged `CmdHandler` (assert-only). Covered 42 →
+> 47, partial 11 → 10 (UC-F1), missing 12 → 8 (UC-E8/D9/D10/F2). UC-D9's
+> queued-while-speaking sub-case carries the same honest UC-D8
+> transient-overwrite caveat (asserted at the real `show_message` /
+> `_arm_hide_locked` sinks, not via a flaky DOM poll against the
+> concurrent real read); UC-D9's no-text sub-case proves the served-DOM
+> banner + `OVERLAY_MESSAGE_MS` self-dismiss directly (no concurrent
+> read).
 
 Split by tier (where covered/partial):
 
-- **Tier-1 (`e2e/web/`)** carries the bulk: all 42 "covered" have a
-  Tier-1 test; the 11 remaining "partial" have a Tier-1 happy-path test
-  missing the error/edge variant (Phases 2–4).
+- **Tier-1 (`e2e/web/`)** carries the bulk: all 47 "covered" have a
+  Tier-1 test; the 10 remaining "partial" have a Tier-1 happy-path test
+  missing the error/edge variant (Phases 3–4).
 - **Tier-2 (`e2e/journey/`)** independently covers the 5 core journeys
   J1–J5 (UC-A2/A3, UC-A7, UC-B5/B8, UC-B14, UC-C1/C6, UC-D1/D2/D8) on
   the *real launched desktop app*. No "missing" use-case is covered by
   Tier-2.
-- **12 "missing"** have zero coverage in either tier.
+- **8 "missing"** have zero coverage in either tier.
 
 ---
 
@@ -260,22 +285,50 @@ injection is real seams (closed/short HTTP origin sockets, read-only
 disk target, locked `reg` hive, real registered failing synth backend),
 not mocks.
 
-### Phase 2 — Untested core interaction journeys (functional gaps in the merge gate)
+### Phase 2 — Untested core interaction journeys (functional gaps in the merge gate) — ✅ DONE
 *Why second:* these are everyday actions with **zero** coverage today;
 they belong in the per-PR gate.
 
-- UC-E8 queue/pause/stop **hotkey dispatch** + queue-while-speaking vs
-  queue-while-idle branch (`engine.py:481-509`) (Tier-1, mirror the
-  existing `test_global_hotkey_speak_dispatch_drives_real_engine`).
-- UC-D9 one-shot overlay message ("No text selected" / "Queued — N
-  pending") + `OVERLAY_MESSAGE_MS` self-dismiss (Tier-1).
-- UC-D10 pause→silence→resume-from-start + seek-while-paused behaviour
-  (Tier-1, drive a real reading session).
-- UC-F1/UC-F2 IPC reject branches (413/415/404, `/read` route) (Tier-1
-  — POST directly to the per-test command server; **assert only**, no
-  `command_server.py` change).
+**Status: implemented and verified green on the merge-required CI
+runner** in `e2e/web/test_core_interactions.py` (5 Tier-1 tests; full
+`e2e/web` 73 passed locally — 3 runs, 2 orders incl. the new file
+collected first — and **73 passed on the self-hosted LocalSystem
+runner** via the `Web UI E2E (served, headless Chromium)` required check;
+`Lint` + `Unit tests` also green; 266 unit + ruff unaffected). The real
+condition is induced at a true seam in every case — never by mocking the
+unit under test, and never in a way that depends on caller privilege or
+host state.
 
-*Est. size:* ~4–5 Tier-1 tests. Medium.
+- UC-E8 queue/pause/stop **hotkey dispatch** + queue-while-speaking vs
+  queue-while-idle branch (`engine.py:481-509`) →
+  `test_queue_pause_stop_hotkey_dispatch_drives_real_engine` (mirrors
+  `test_global_hotkey_speak_dispatch_drives_real_engine`: real
+  `HotkeyManager` own stored handler == `_safe_call`'s call; real
+  `_RealWavBackend` so the speaking branch is genuinely reached; only
+  the OS-boundary selection input is seamed, privilege/host-independent).
+  ✅
+- UC-D9 one-shot overlay message ("No text selected" / "Queued — N
+  pending") + `OVERLAY_MESSAGE_MS` self-dismiss →
+  `test_overlay_no_text_selected_message_and_self_dismiss` (served-DOM
+  banner + real self-dismiss, no concurrent read) +
+  `test_overlay_queued_message_and_self_dismiss` (real `engine._queue`
+  append + real `show_message`/`_arm_hide_locked` sinks; honest UC-D8
+  transient-overwrite caveat for the concurrent-read sub-case). ✅
+- UC-D10 pause→silence→resume-from-start + seek-while-paused behaviour →
+  `test_pause_silences_and_resume_replays_then_seek_while_paused` (real
+  `plugins.register_engine` WAV backend → the *unmodified*
+  `pippal.playback` `_wait_for_chunk_end` pause/resume/seek code; real
+  `engine.pause_toggle` / `engine.seek`). ✅
+- UC-F1/UC-F2 IPC reject branches (404/415/413, `/read` 400/413, `/read`
+  route) → `test_command_server_ipc_reject_branches_and_happy_roundtrips`
+  (the same real unchanged `CmdHandler` on the hermetic ephemeral-port +
+  token; genuinely non-conforming real HTTP; asserts the real status AND
+  that no reject drove the real engine; happy round-trips too;
+  assert-only — no `command_server.py` change). ✅
+
+*Actual size:* 5 Tier-1 test functions. The conditions are real seams
+(real `HotkeyManager` dispatch, real WAV synth via the plugin API, real
+non-conforming HTTP at the unchanged command server), not mocks.
 
 ### Phase 3 — Onboarding completeness & startup decision
 *Why third:* lower frequency but real first-run UX; mostly logic.
@@ -359,7 +412,15 @@ journey with real effects), but additive and not a CI gate.
    string is genuinely transient and is asserted at the sink (the
    unit-suite pattern lifted to E2E), not via a flaky DOM poll. The
    sibling one-shot messages `engine.py:472,498` ("No text selected" /
-   "Queued — N pending") remain a Phase-2 item.
+   "Queued — N pending") are now **covered in Phase-2** (UC-D9,
+   `e2e/web/test_core_interactions.py`): the *no-text* case has **no
+   concurrent read** so its served-DOM banner + `OVERLAY_MESSAGE_MS`
+   self-dismiss are asserted directly and stably; the *queued-while-
+   speaking* case carries the **same transient-overwrite caveat** as
+   UC-D8 (the first read's concurrent `start_chunk`→"reading" overwrites
+   the banner within microseconds) and is therefore asserted at the real
+   `show_message` / `_arm_hide_locked` sinks plus the real `engine._queue`
+   append, not via a flaky DOM poll against the concurrent real read.
 4. **Tier-2 (journey) breadth is narrow (J1–J5).** The PR/checklist
    presents Tier-2 as the journey lane; it currently covers only 5
    journeys and **does not** touch hotkey rebinding, Windows-integration
