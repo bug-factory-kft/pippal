@@ -506,12 +506,25 @@ profile.
   The merge-required **`Web UI E2E (served, headless Chromium)`** check
   then ran the same suite on the self-hosted **LocalSystem** runner
   (`runs-on: [self-hosted, windows, pippal-windows]`, runner
-  `pippal-ci-ACER-LAPTOP`) on commit `__PHASE3_HEAD_SHA__` and concluded
-  **SUCCESS — 77 passed** (run `__PHASE3_E2E_RUN__`, job
-  `__PHASE3_E2E_JOB__`), with all 4 `test_core_phase3.py` tests
-  **PASSED** in that real CI run. The required `Lint`
-  (`__PHASE3_LINT__`) and `Unit tests` (`__PHASE3_UNIT__`) checks stayed
-  green on the same commit. `py -3.11 -m pytest -q` → **266 passed**
+  `pippal-ci-ACER-LAPTOP`) on the PR-#90 head commit
+  `d5274b8cd30528e0ebd41752c2e147e9b4e97626` and concluded **SUCCESS —
+  77 passed in 147.37 s** (run `26059080180` attempt 2, job
+  `76615308301`), with all 4 `test_core_phase3.py` tests **PASSED** in
+  that real CI run (`test_selected_text_activation_completes_on_real_selection_read[chromium]`,
+  `test_selected_text_capture_failure_records_recovery_message[chromium]`,
+  `test_onboarding_already_complete_reentry_close_and_play_again[chromium]`,
+  `test_startup_auto_open_decision_real_composition_gate`). Attempt 1
+  (job `76614399543`) had all 4 Phase-3 tests PASS but the run was red
+  on a single **pre-existing, unrelated** flake —
+  `test_web_ui.py::test_read_aloud_full_real_path_wav_karaoke_history[chromium]`
+  (a Phase-0 real-Piper-synth karaoke-cursor timing test, row 4.11, in
+  an **untouched** file; it was green on the immediately-prior PR head
+  `6378295` and flakes independently of content); the `--failed` rerun
+  (attempt 2) passed it and the whole suite cleanly, confirming it was
+  not a regression and not introduced by this strictly-additive change.
+  The required `Lint` (CI run `26059080040`, job `76614399544`) and
+  `Unit tests` (job `76614399550`) checks were **SUCCESS** on the same
+  head commit. `py -3.11 -m pytest -q` → **266 passed**
   (unchanged; fully additive — `test_core_phase3.py` is a new file, no
   production code touched), `ruff check src/pippal tests e2e/web
   e2e/journey` → clean, `pytest --collect-only` → exactly 266, zero from
