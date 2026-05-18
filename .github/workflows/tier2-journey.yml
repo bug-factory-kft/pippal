@@ -59,7 +59,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Run Tier-2 journey suite (real launched WebView2 app)
-        shell: pwsh
+        shell: powershell
         run: |
           # run-journey.ps1 builds its OWN isolated py -3.11 venv
           # (.e2e\.venv-journey), installs the package + web e2e deps +
@@ -99,7 +99,7 @@ jobs:
 
       - name: Job summary
         if: always()
-        shell: pwsh
+        shell: powershell
         run: |
           $evidence = Join-Path $env:RUNNER_TEMP 'tier2'
           $files = @()
