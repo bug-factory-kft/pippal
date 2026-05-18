@@ -73,24 +73,38 @@ jobs:
           # separate tier2-evidence-publish.yml. The job FAILS if
           # run-journey.ps1 exits non-zero (its exit code is the result).
           #
-          # run-journey.ps1 is UTF-8 *without* a BOM and contains
-          # non-ASCII glyphs in string literals. Windows PowerShell 5.1
-          # (the runner host has no pwsh) decodes a no-BOM -File script
-          # with the system ANSI codepage, which mangles those bytes and
-          # yields a parser error. Force the active codepage to UTF-8
-          # (65001) for THIS process before invoking it so the script
-          # parses identically to a UTF-8 console -- WITHOUT modifying
-          # the protected run-journey.ps1.
-          chcp 65001 | Out-Null
-          $OutputEncoding = [System.Text.UTF8Encoding]::new($false)
-          [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
-          [Console]::InputEncoding = [System.Text.UTF8Encoding]::new($false)
+          # run-journey.ps1 is UTF-8 *WITHOUT* a BOM and has non-ASCII
+          # glyphs in string literals. Windows PowerShell 5.1 (this
+          # runner host has no pwsh) decodes a no-BOM `powershell -File`
+          # script with the spawned process's OEM/ANSI codepage, which
+          # mangles the em-dash and raises a MissingEndCurlyBrace parser
+          # error before any code runs (chcp in the parent does not fix
+          # how a separately-spawned powershell.exe decodes the file).
+          #
+          # Fix WITHOUT modifying the protected run-journey.ps1: read it
+          # as UTF-8 and write a BOM-prefixed UTF-8 copy as a sibling in
+          # e2e\journey\ (a throwaway file in the per-run workspace, not
+          # a source edit). A UTF-8 BOM forces Windows PowerShell 5.1 to
+          # decode it as UTF-8 regardless of codepage, so the glyphs
+          # parse correctly. The copy sits in the SAME dir, so its
+          # $PSScriptRoot (and the script's `$root = $PSScriptRoot\..\..`
+          # repo-root resolution) is byte-identical to the original.
+          $src = 'e2e\journey\run-journey.ps1'
+          $bom = 'e2e\journey\run-journey.bom.ps1'
+          $text = [System.IO.File]::ReadAllText(
+            (Resolve-Path $src).Path,
+            [System.Text.UTF8Encoding]::new($false))
+          [System.IO.File]::WriteAllText(
+            (Join-Path (Get-Location) $bom),
+            $text,
+            [System.Text.UTF8Encoding]::new($true))   # $true => emit BOM
           $evidence = Join-Path $env:RUNNER_TEMP 'tier2'
           New-Item -ItemType Directory -Force -Path $evidence | Out-Null
           powershell -NoProfile -ExecutionPolicy Bypass `
-            -File e2e\journey\run-journey.ps1 `
+            -File $bom `
             -Runs 2 -NoPublish -EvidenceDir $evidence
           $rc = $LASTEXITCODE
+          Remove-Item -Force -ErrorAction SilentlyContinue $bom
           if ($rc -ne 0) {
             Write-Host "run-journey.ps1 exited $rc"
             exit $rc
