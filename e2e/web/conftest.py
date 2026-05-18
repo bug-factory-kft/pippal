@@ -59,6 +59,7 @@ import contextlib
 import importlib
 import logging
 import os
+import secrets
 import shutil
 import sys
 import tempfile
@@ -293,6 +294,57 @@ def require_live_windows():
     requirement: a browser-capable host (Playwright provides one).
     """
     return None
+
+
+@pytest.fixture
+def cmd_server_identity() -> Iterator[dict[str, str]]:
+    """A hermetic, per-test identity for the shell-integration IPC.
+
+    The shell-integration command server (``pippal.command_server``,
+    the one the right-click "Read with PipPal" entry talks to via
+    ``python -m pippal.open_file``) normally binds the FIXED well-known
+    port ``CMD_SERVER_PORT`` (51677) with no instance identity. Under a
+    repeated / parallel / reordered E2E run that is a real isolation
+    hazard: a stale or ``TIME_WAIT`` listener from a *previous* test can
+    answer ``open_file``'s POST with returncode 0 while THIS test's
+    fresh per-test engine never reacts — exactly the historical ~15 %
+    flake of ``test_shell_integration_registry_and_command``.
+
+    This fixture uses the (production-unchanged, strictly opt-in) core
+    hooks already landed in ``command_server.py`` / ``open_file.py``
+    (``PIPPAL_CMD_SERVER_PORT`` / ``PIPPAL_CMD_SERVER_TOKEN``):
+
+    * port ``0`` => the OS hands out a free ephemeral port (no fixed
+      port to collide on); ``start_command_server`` writes the
+      actually-bound port back into ``PIPPAL_CMD_SERVER_PORT`` so the
+      harness — and the ``open_file`` subprocess, which inherits this
+      env — target exactly THIS instance;
+    * a 128-bit random per-test token => the server REQUIRES the
+      matching ``X-PipPal-Token`` header and 404s anything else, and
+      the ``open_file`` subprocess sends it.
+
+    A stale listener from another test is therefore on a different
+    port AND lacks this token, so it physically cannot satisfy this
+    test's request. The two env vars are fully restored at test end,
+    so nothing leaks to the next test or to production (which never
+    sets them — behaviour stays byte-for-byte identical there).
+    """
+    prev_port = os.environ.get("PIPPAL_CMD_SERVER_PORT")
+    prev_token = os.environ.get("PIPPAL_CMD_SERVER_TOKEN")
+    token = secrets.token_hex(16)
+    os.environ["PIPPAL_CMD_SERVER_PORT"] = "0"  # OS-assigned ephemeral
+    os.environ["PIPPAL_CMD_SERVER_TOKEN"] = token
+    try:
+        yield {"token": token}
+    finally:
+        if prev_port is None:
+            os.environ.pop("PIPPAL_CMD_SERVER_PORT", None)
+        else:
+            os.environ["PIPPAL_CMD_SERVER_PORT"] = prev_port
+        if prev_token is None:
+            os.environ.pop("PIPPAL_CMD_SERVER_TOKEN", None)
+        else:
+            os.environ["PIPPAL_CMD_SERVER_TOKEN"] = prev_token
 
 
 @pytest.fixture

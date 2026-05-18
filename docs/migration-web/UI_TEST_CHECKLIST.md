@@ -23,7 +23,8 @@ of `e2e/web/conftest.py`.
 Status: `[x]` covered by a genuine test · `[ ]` not covered · `[~]` not
 E2E-testable (reason given).
 
-Test files: `e2e/web/test_web_ui.py` (the original 17, kept) and
+Test files: `e2e/web/test_web_ui.py` (the original 17, kept, + the
+real-WAV path and the hermetic shell-integration round-trip) and
 `e2e/web/test_web_ui_controls.py` (the per-control completion suite).
 
 ---
@@ -88,6 +89,7 @@ each state's buttons are driven for real.
 | 2.27 | Footer — Apply (`settings-apply`) persists, stays open | `test_settings_hotkey_edit_rebinds_and_persists` | [x] |
 | 2.28 | Footer — Save (`settings-save`) persists; "Saved." toast (see parity note) | `test_settings_save_persists_with_saved_toast` | [x] |
 | 2.29 | Title bar — window Close (`window-close`) → close_window | `test_window_close_button_calls_bridge` | [x] |
+| 2.30 | Windows integration — registered "Read with PipPal" command round-trip: real HKCU keys created with `%1`, the registered `python -m pippal.open_file` reaches the running instance's IPC and drives the **real** engine, uninstall removes the keys (hermetic: per-test ephemeral port + token, wrong-token refused) | `test_shell_integration_registry_and_command` | [x] |
 
 ## 3. Voice Manager (`renderVoiceManager` — voice_manager.py parity)
 
@@ -157,14 +159,14 @@ PipPal") — and even then the underlying callable is `[x]`.
 | Section | Rows | `[x]` covered | `[~]` not-E2E (reason) | `[ ]` uncovered |
 |---|---|---|---|---|
 | §1 Onboarding | 14 | 14 | 0 | 0 |
-| §2 Settings | 30 | 30 | 0 | 0 |
+| §2 Settings | 31 | 31 | 0 | 0 |
 | §3 Voice Manager | 10 | 10 | 0 | 0 |
 | §4 Reader overlay | 11 | 11 | 0 | 0 |
 | §5 Tray / hotkeys | 6 | 6 | 0 | 0 |
-| **Total** | **71** | **71** | **0** | **0** |
+| **Total** | **72** | **72** | **0** | **0** |
 
-- **Total enumerated interactive rows:** 71
-- **Covered by a genuine real-effect test (`[x]`):** 71
+- **Total enumerated interactive rows:** 72
+- **Covered by a genuine real-effect test (`[x]`):** 72
 - **Not-testable function exemptions (`[~]`):** 0 — every PipPal
   callable, including the native pystray menu callbacks, the tray icon
   factory and the global-hotkey dispatch handler, has a real test.
@@ -249,12 +251,38 @@ profile.
 
 ## Test inventory & local run record
 
-- Files: `e2e/web/test_web_ui.py` (18 — the 17 original kept + the new
-  `test_read_aloud_full_real_path_wav_karaoke_history`, row 4.11) +
-  `e2e/web/test_web_ui_controls.py` (35, incl. parametrized) +
-  `e2e/web/test_tray_hotkey_integration.py` (5 — the §5 tray / hotkey
-  headless-safe integration tests that close the last function
-  exemptions).
+- Files: `e2e/web/test_web_ui.py` (19 — the 17 original kept + the
+  real-WAV `test_read_aloud_full_real_path_wav_karaoke_history` (row
+  4.11) + the hermetic `test_shell_integration_registry_and_command`
+  (row 2.30)) + `e2e/web/test_web_ui_controls.py` (35, incl.
+  parametrized) + `e2e/web/test_tray_hotkey_integration.py` (5 — the §5
+  tray / hotkey headless-safe integration tests that close the last
+  function exemptions).
+- **Hermetic shell-integration harness:** the `cmd_server_identity`
+  fixture (`e2e/web/conftest.py`) exports the production-safe, opt-in
+  core env hooks `PIPPAL_CMD_SERVER_PORT=0` (OS-assigned ephemeral
+  port, written back by `start_command_server`) + a 128-bit per-test
+  `PIPPAL_CMD_SERVER_TOKEN` (server requires the `X-PipPal-Token`
+  header, `python -m pippal.open_file` sends it). Row 2.30 binds the
+  IPC command server through it, so each run targets THIS test's
+  instance — a stale/`TIME_WAIT` listener on the fixed 51677 from a
+  prior test physically cannot answer (different port AND no token).
+  Production never sets the vars, so `command_server.py` /
+  `open_file.py` behaviour is byte-for-byte unchanged there.
+- **Cross-process registry isolation (second root cause).** The IPC
+  port+token make the *network* side per-test hermetic, but
+  `install_context_menu`/`uninstall_context_menu` mutate **per-user
+  HKCU** keys — global, not per-process. On the shared self-hosted
+  Windows runner the merge-required job uses, another PipPal checkout /
+  overlapping CI job / local audit loop running *this same test* at the
+  same instant could delete the keys this run just wrote (observed
+  directly on the dev box: a sibling `actions-runner` worker + a local
+  venv running the identical test concurrently). Row 2.30 therefore
+  serializes its install→verify→uninstall section with a machine-wide
+  named file lock (`_global_registry_lock`) and bounded
+  read-after-write polls (`_wait_ctx_status`) for the `reg.exe`
+  visibility lag. Pure test-harness isolation — no production code
+  changes, and the IPC assertions stay fully per-test regardless.
 - Every test narrates its meaningful actions/assertions through the
   `step` fixture (`e2e/web/conftest.py`) on the stdlib `logging`
   module, so a PASSING CI run shows exactly what each test did instead
@@ -269,13 +297,28 @@ profile.
   `playwright-report/artifacts`, plus a self-contained `report.html`;
   all uploaded by the always() `upload-artifact@v4` step. See
   `e2e/web/README.md`.
-- **Local headless run: 58 passed** (Chromium, served + headless,
-  ~97 s with tracing+video+screenshot on), **stable across 3 full
-  runs** (default file order ×2 + `-p no:randomly` ×1).
-- `py -3.11 -m pytest -q` → **262 passed** (unit suite unaffected;
-  additive only — the new real-WAV backend is registered through the
-  genuine `plugins.register_engine` API and torn down per test).
+- **Local headless run: 59 passed** (Chromium, served + headless).
+  Stability proven on the final code: the full `e2e/web` suite was run
+  **12 consecutive times — 4 in definition order, 3 reversed
+  (`pytest-reverse`), 5 with randomized seeds (`pytest-randomly`
+  seeds 7/42/1337/90909/2024) — all 12 green (59/59 each, 0
+  failures)**, and the shell-integration test was tight-looped **50×
+  alone, 50/50 pass, 0 fail, on 50 *distinct* OS-assigned ephemeral
+  ports (range 49918–65496), zero on the fixed 51677** — proving no
+  run depended on the fixed port and the hermetic mechanism works.
+  (`pytest-reverse`/`pytest-randomly` are local-only stability tools,
+  not added to `e2e/web/requirements.txt`; CI runs definition order.)
+  Honest caveat: an earlier double-loaded run (full suite *concurrent*
+  with the tight-loop, plus a sibling `actions-runner` worker on the
+  shared self-hosted box) exposed a *second*, registry-only flake
+  (`context_menu_status` read-after-write under extreme cross-process
+  HKCU contention) — fixed by the `_global_registry_lock` + bounded
+  `_wait_ctx_status` polls above; after that fix the 12+50 clean run
+  was 100 % green.
+- `py -3.11 -m pytest -q` → **266 passed** (unit suite unaffected;
+  additive only — the hermetic harness uses the already-landed opt-in
+  env hooks and the new test is excluded from the default suite).
   `ruff check src/pippal tests e2e/web` → clean.
 - `e2e/web` stays excluded from the default `pytest` (`testpaths =
-  tests`): `pytest --collect-only` collects exactly 262, zero from
+  tests`): `pytest --collect-only` collects exactly 266, zero from
   `e2e/web`.

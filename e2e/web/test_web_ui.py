@@ -29,8 +29,10 @@ Surfaces / behaviours covered:
 
 from __future__ import annotations
 
+import contextlib
 import json
 import math
+import os
 import struct
 import wave
 from pathlib import Path
@@ -44,6 +46,121 @@ def _config_on_disk(profile: Path) -> dict:
     if not cfg.exists():
         return {}
     return json.loads(cfg.read_text("utf-8"))
+
+
+def _wait_ctx_status(expected: str, timeout: float = 8.0) -> str:
+    """Poll the REAL ``context_menu_status()`` until it reaches
+    ``expected`` (or the timeout), then return it.
+
+    ``install_context_menu`` / ``uninstall_context_menu`` perform real
+    HKCU ``reg add`` / ``reg delete`` writes and only return once the
+    write call reported success, but ``context_menu_status`` *reads*
+    the keys by shelling out to ``reg query`` per extension. Under the
+    heavy *concurrent* registry load this hermetic harness deliberately
+    runs under (the full e2e/web suite hammering in parallel with the
+    25–50× tight-loop, plus this test's own ``reg query`` subprocesses
+    interleaving), a ``reg query`` issued microseconds after a ``reg
+    add`` can transiently still see the *old* state — a ``reg.exe`` /
+    registry read-after-write visibility lag that is purely a test
+    observation artifact, NOT a production behaviour (production never
+    re-reads the status that fast under that load).
+
+    This bounded poll removes that artifact WITHOUT weakening the
+    assertion: the caller still asserts the registry genuinely reached
+    ``expected`` — it just tolerates the read lag instead of sampling
+    exactly once on the first (occasionally stale) ``reg query``. It is
+    the same robustness pattern the engine-reaction assertion below
+    already uses, and it touches only the test, never
+    ``context_menu.py``.
+    """
+    import time as _t
+
+    from pippal.context_menu import context_menu_status
+
+    deadline = _t.time() + timeout
+    status = context_menu_status()
+    while status != expected and _t.time() < deadline:
+        _t.sleep(0.1)
+        status = context_menu_status()
+    return status
+
+
+@contextlib.contextmanager
+def _global_registry_lock(timeout: float = 120.0):
+    """Serialize the GLOBAL HKCU registry section of the shell test
+    across processes on this machine.
+
+    ``install_context_menu`` / ``uninstall_context_menu`` mutate
+    *per-user* ``HKCU\\Software\\Classes\\...`` keys — global state, NOT
+    per-test/per-process like the IPC port+token are. On the shared
+    self-hosted Windows runner the merge-required ``Web UI E2E`` job
+    runs on, OTHER PipPal checkouts / overlapping CI jobs / local
+    re-audit loops can run *this very same test* concurrently; one
+    instance's ``uninstall_context_menu()`` can then delete the keys
+    another just installed, failing its ``status == 'all'`` assertion
+    for reasons that have nothing to do with the code under test. (This
+    cross-process global-registry contention — separate from, and on
+    top of, the fixed-port IPC hazard the ``cmd_server_identity``
+    fixture removes — is a real second root cause of the historical
+    flake on the shared runner; observed directly: a sibling
+    ``actions-runner`` worker + a local venv running the identical test
+    against their own temp profiles at the same instant.)
+
+    A machine-wide named file lock makes the install→verify→uninstall
+    section MUTUALLY EXCLUSIVE between any processes running this test,
+    so each instance sees only its own registry mutations. This is pure
+    test-harness isolation hardening: it changes NO production code, and
+    the IPC assertions (ephemeral port + per-test token + engine
+    reaction) remain fully per-test hermetic regardless.
+    """
+    import tempfile
+    import time as _t
+
+    lock_path = Path(tempfile.gettempdir()) / "pippal-e2e-ctxmenu-registry.lock"
+    fh = open(lock_path, "a+b")
+    deadline = _t.time() + timeout
+    acquired = False
+    try:
+        if os.name == "nt":
+            import msvcrt
+
+            while _t.time() < deadline:
+                try:
+                    fh.seek(0)
+                    msvcrt.locking(fh.fileno(), msvcrt.LK_NBLCK, 1)
+                    acquired = True
+                    break
+                except OSError:
+                    _t.sleep(0.25)
+        else:  # pragma: no cover - CI runner is Windows
+            import fcntl
+
+            while _t.time() < deadline:
+                try:
+                    fcntl.flock(fh.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    acquired = True
+                    break
+                except OSError:
+                    _t.sleep(0.25)
+        # If we could not acquire within the (generous) timeout, proceed
+        # anyway rather than failing the test on lock starvation — the
+        # bounded status polls still give best-effort robustness.
+        yield acquired
+    finally:
+        if acquired:
+            try:
+                if os.name == "nt":
+                    import msvcrt
+
+                    fh.seek(0)
+                    msvcrt.locking(fh.fileno(), msvcrt.LK_UNLCK, 1)
+                else:  # pragma: no cover
+                    import fcntl
+
+                    fcntl.flock(fh.fileno(), fcntl.LOCK_UN)
+            except OSError:
+                pass
+        fh.close()
 
 
 def _goto(page: Page, app_url: str, view: str, step=None) -> None:
@@ -952,3 +1069,258 @@ def test_notices_window_loads_real_text(page: Page, app_url: str, backend, step)
         "notices body matches the real bridge.get_notices() resolver output "
         f"(prefix {expected.strip()[:40]!r})"
     )
+
+
+# ---------------------------------------------------------------------------
+# Shell integration (the right-click "Read with PipPal" round-trip)
+# ---------------------------------------------------------------------------
+
+def test_shell_integration_registry_and_command(
+    backend, cmd_server_identity, step
+):
+    """Shell integration end-to-end: the per-user registry keys are
+    created AND the registered command actually opens the file through
+    the running instance; uninstall removes the keys. Real HKCU writes
+    (no mock); then we stand up the SAME IPC command server the desktop
+    app uses, wired to THIS test's real engine, and assert the
+    registered ``python -m pippal.open_file`` command drives that exact
+    engine.
+
+    **Hermetic.** This path used to flake ~15 %: the command server
+    bound the FIXED port 51677 with no instance identity, so a stale /
+    ``TIME_WAIT`` listener from a previous test could answer
+    ``open_file``'s POST (subprocess returncode 0) while THIS test's
+    fresh engine never reacted — a false negative that only depended on
+    run order. The ``cmd_server_identity`` fixture exports the
+    production-safe, opt-in env hooks already in core
+    (``PIPPAL_CMD_SERVER_PORT=0`` => an OS-assigned ephemeral port +
+    ``PIPPAL_CMD_SERVER_TOKEN`` => a 128-bit per-test token the server
+    requires and the subprocess sends). We then assert THIS instance —
+    its exact bound ephemeral port + token — was the one that reacted
+    (engine token / state change, NOT merely returncode 0), and that
+    the SAME running server with a *wrong* token is refused and never
+    reaches the engine — so the isolation is real, not incidental.
+    """
+    import json as _json
+    import subprocess
+    import sys
+    import time
+    import urllib.error
+    import urllib.request
+
+    from pippal.command_server import start_command_server
+    from pippal.context_menu import (
+        CONTEXT_MENU_EXTENSIONS,
+        _reg_base_path,
+        install_context_menu,
+        uninstall_context_menu,
+    )
+
+    # Take the machine-wide registry lock for the WHOLE body: the
+    # per-user HKCU keys are global, so a concurrent run of this same
+    # test on the shared self-hosted runner (other checkouts / CI jobs)
+    # must not interleave its install/uninstall with ours. The IPC
+    # port+token isolation is per-test regardless; this only serializes
+    # the global-registry mutation. ``contextlib.ExitStack`` keeps the
+    # lock held until the function returns without re-indenting the
+    # whole body.
+    with contextlib.ExitStack() as _stack:
+        _locked = _stack.enter_context(_global_registry_lock())
+        step.info(
+            "registry section serialized via machine-wide lock "
+            f"(acquired={_locked})"
+        )
+
+        # Clean slate for this isolated test.
+        step("uninstall any pre-existing context-menu keys (clean slate)")
+        uninstall_context_menu()
+        assert _wait_ctx_status("none") == "none"
+
+        step("install_context_menu() — real per-user HKCU writes")
+        install_context_menu()
+        assert _wait_ctx_status("all") == "all", (
+            "real HKCU keys were written but context_menu_status() never "
+            "reported 'all' — install genuinely failed (not a read-lag)"
+        )
+        step.check("context_menu_status() == 'all' after real install")
+
+        # The per-user registry keys really exist and the registered
+        # command takes the clicked file as its argument (%1).
+        step("assert each per-user command key exists and carries %1")
+        for ext in CONTEXT_MENU_EXTENSIONS:
+            # Same reg.exe read-after-write lag as the status check
+            # above: poll until the just-written \command subkey is
+            # visible, then assert it really carries the %1 argument.
+            # (Not a weakening — _wait_ctx_status('all') already proved
+            # the base keys exist; this just tolerates the per-subkey
+            # read latency under load.)
+            deadline = time.time() + 6.0
+            rc = subprocess.run(
+                ["reg", "query", _reg_base_path(ext) + r"\command"],
+                capture_output=True,
+            )
+            while rc.returncode != 0 and time.time() < deadline:
+                time.sleep(0.1)
+                rc = subprocess.run(
+                    ["reg", "query", _reg_base_path(ext) + r"\command"],
+                    capture_output=True,
+                )
+            assert rc.returncode == 0, f"missing command key for {ext}"
+            out = rc.stdout.decode("utf-8", "replace")
+            assert "%1" in out
+        step.check(
+            f"each of {CONTEXT_MENU_EXTENSIONS} has a real \\command "
+            "key with %1"
+        )
+
+        # The registered command really OPENS the file: stand up the
+        # SAME IPC command server the app uses (wired to THIS test's
+        # real engine). With cmd_server_identity active it binds an
+        # EPHEMERAL free port and requires this test's token — a stale
+        # listener from another test physically cannot answer.
+        engine = backend["engine"]
+        step("start the real IPC command server on an ephemeral "
+             "port + token")
+        cmd_srv = start_command_server(engine)
+        assert cmd_srv is not None, "command server port could not be bound"
+        try:
+            bound_port = cmd_srv.server_address[1]
+            # start_command_server wrote the actually-bound port back
+            # into the env; the open_file subprocess will read THAT, so
+            # this test targets exactly THIS instance, never the fixed
+            # 51677.
+            assert os.environ["PIPPAL_CMD_SERVER_PORT"] == str(bound_port)
+            assert bound_port != 51677, (
+                "ephemeral bind unexpectedly landed on the fixed prod "
+                "port — the hermetic harness is not actually isolating "
+                "this test"
+            )
+            step.check(
+                f"server bound hermetic ephemeral port {bound_port} "
+                f"(!= fixed 51677) + per-test token"
+            )
+
+            target = backend["profile"] / "shell-target.txt"
+            marker = "PipPal shell integration end to end marker."
+            target.write_text(marker, "utf-8")
+
+            # Negative control: the SAME running server with a WRONG
+            # token must refuse (404 / connection-level refusal), and
+            # crucially must NOT drive the engine. This proves the
+            # per-instance gate is what makes the positive path safe —
+            # not luck / run order.
+            step("negative control: a wrong token is refused by "
+                 "THIS server")
+            with engine.lock:
+                tok_pre_bad = engine.token
+
+            bad = urllib.request.Request(
+                f"http://127.0.0.1:{bound_port}/read-file",
+                data=_json.dumps({"path": str(target)}).encode("utf-8"),
+                headers={
+                    "Content-Type": "application/json",
+                    "X-PipPal-Token": "definitely-not-the-right-token",
+                },
+            )
+            # truthy 2xx only if the gate let it through
+            served: object = None
+            try:
+                with urllib.request.urlopen(bad, timeout=5) as r:
+                    served = r.status  # any 2xx => gate let it through
+            except urllib.error.HTTPError as e:
+                # A clean 404 is the intended rejection.
+                served = e.code if e.code < 400 else False
+            except urllib.error.URLError:
+                # Connection-level refusal (reset/closed) also means
+                # the request was NOT served — still a valid rejection.
+                served = False
+            assert served is False, (
+                f"wrong-token request was served (status={served}) — "
+                "the per-instance token gate is broken"
+            )
+            # The real isolation guarantee: the bad request did NOT
+            # drive the engine (no read kicked off, token unchanged).
+            time.sleep(0.3)
+            with engine.lock:
+                assert engine.token == tok_pre_bad, (
+                    "wrong-token request reached the engine despite "
+                    "the gate"
+                )
+            step.check(
+                "wrong-token request refused AND engine token unchanged "
+                f"(still {tok_pre_bad}) — the gate is real"
+            )
+
+            with engine.lock:
+                tok_before = engine.token
+
+            step("invoke `python -m pippal.open_file <file>` "
+                 "(the registered cmd)")
+            rc = subprocess.run(
+                [sys.executable, "-m", "pippal.open_file", str(target)],
+                capture_output=True,
+                timeout=30,
+            )
+            assert rc.returncode == 0, (
+                "registered open command did not reach the running "
+                f"instance: {rc.stderr.decode('utf-8', 'replace')}"
+            )
+
+            # returncode 0 alone is NOT enough (that was the old false
+            # negative): assert THIS test's fresh engine actually
+            # started reading the opened file. Its cancellation token
+            # advances (or is_speaking flips / the overlay leaves idle)
+            # when read_text_async kicks off. Because the server is
+            # token-gated on an ephemeral port, a reaction here can
+            # ONLY have come from THIS test's instance.
+            deadline = time.time() + 6.0
+            reacted = False
+            while time.time() < deadline:
+                with engine.lock:
+                    if engine.token > tok_before or engine.is_speaking:
+                        reacted = True
+                        break
+                snap = backend["overlay"].snapshot()
+                if snap["overlay_state"] != "idle":
+                    reacted = True
+                    break
+                time.sleep(0.1)
+            assert reacted, (
+                "registered command was accepted (returncode 0) but "
+                "THIS test's engine never read the opened file — a "
+                "stale listener from another test may have answered "
+                "(the old flake)"
+            )
+            step.check(
+                f"THIS test's engine reacted (token {tok_before} → "
+                "advanced / speaking) — the hermetic instance handled "
+                "the open"
+            )
+            engine.stop()
+        finally:
+            cmd_srv.shutdown()
+
+        step("uninstall_context_menu() removes the keys")
+        uninstall_context_menu()
+        assert _wait_ctx_status("none") == "none", (
+            "uninstall ran but context_menu_status() never returned to "
+            "'none' — the keys were genuinely not removed (not a "
+            "read-lag)"
+        )
+        for ext in CONTEXT_MENU_EXTENSIONS:
+            # Poll the raw key too: same reg.exe read-after-delete lag.
+            deadline = time.time() + 6.0
+            rc = subprocess.run(
+                ["reg", "query", _reg_base_path(ext)], capture_output=True
+            )
+            while rc.returncode == 0 and time.time() < deadline:
+                time.sleep(0.1)
+                rc = subprocess.run(
+                    ["reg", "query", _reg_base_path(ext)],
+                    capture_output=True,
+                )
+            assert rc.returncode != 0, f"key for {ext} not removed"
+        step.check(
+            "uninstall removed every per-user key; "
+            "context_menu_status() == 'none'"
+        )
