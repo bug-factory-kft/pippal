@@ -60,15 +60,15 @@ set differs per state.
 | UC-A3 | READY → Finish setup (gated) | User confirms they heard the sample and finishes | Play sample first → `onboarding-finish` enabled → `mark_activation_complete("sample")` writes `first_run_activation.json` (`onboarding.py:155`) | **Finish before sample played** → status nags, stays gated (`app.js:401`) | **covered** Tier-1 `test_onboarding_finish_gated_until_sample_played`, `test_onboarding_finish_marks_activation_complete`; Tier-2 `test_j4_onboarding_finish_activates` |
 | UC-A4 | READY → Skip for now | User trusts it / will set up later | `onboarding-skip` → `close_window` (`app.js:395`) | n/a | **covered** Tier-1 `test_onboarding_ready_skip_closes_window` |
 | UC-A5 | READY → Open Settings | User wants to change voice/speed before testing | `onboarding-open-settings` → `open_settings_window` | n/a | **covered** Tier-1 `test_onboarding_ready_open_settings` |
-| UC-A6 | READY (already complete) re-entry | Returning user re-opens first-run check; sees "Close"/"Play sample again" | `get_activation_state.is_complete` true → finish button becomes "Close", play becomes "Play sample again" (`app.js:399,413`) | **is_complete branch** of the finish/play handlers | **partial** — render path covered by `test_onboarding_renders_and_closes`; the *already-complete* finish="Close" / play-again copy branch (`app.js:399-422`) is not asserted. Code: `app.js:399` |
+| UC-A6 | READY (already complete) re-entry | Returning user re-opens first-run check; sees "Close"/"Play sample again" | `get_activation_state.is_complete` true → finish button becomes "Close", play becomes "Play sample again" (`app.js:399,413`) | **is_complete branch** of the finish/play handlers | **covered (Phase-3)** Tier-1 `test_core_phase3.py::test_onboarding_already_complete_reentry_close_and_play_again`: with the conftest's pre-seeded *complete* activation + a real `ready` readiness the real `renderOnboarding` genuinely takes its `st.is_complete` branch (`app.js:399-422`). Asserts the **real served DOM**: Finish renders as `"Close"` (primary, not gated), Play as `"Play sample again"` (not primary), status = the already-set-up copy; "Play sample again" still drives a **real** `bridge.play_sample` engine read + the real already-set-up status copy; the "Close" button reaches the **real `on_close_window` host callback** and, critically, does **NOT** re-write the real `first_run_activation.json` (the `is_complete` finish branch returns *before* `mark_activation_complete` — `app.js:401`). No seam. Code: `app.js:399-422` |
 | UC-A7 | MISSING_VOICE → Install default voice | First user has no voice; wants the one-click path to a working read | `onboarding-install-voice` → `bridge.install_default_voice` downloads default ~120 MB voice, sets `config["voice"]` (`bridge.py:237`) | **No network / interrupted / disk full** during the ~120 MB download → `install_piper_voice` raises, JS `fail()` toasts, status stuck on "Installing…" | **covered** — happy path Tier-1 `test_onboarding_install_default_voice_real_effect` + Tier-2 J1 (real ~60 MB download). Failure/recovery variant **now Tier-1** `test_error_recovery.py::test_onboarding_install_default_voice_failure_recovers[no_network|interrupted|unwritable_target]`: the real installer/`_streaming_download`/`urllib` runs unchanged, only the *origin* (the pure `voices.voice_url_base` helper) points at a real **closed** socket (genuine `URLError` WinError 10061 = no network), a real server that **RST-closes mid-stream** (genuine `ConnectionResetError` WinError 10054 = interrupted), or a real read-only file pre-occupying the on-disk `.part` target (genuine `PermissionError` Errno 13 = unwritable/disk-full class). Asserts the real `fail()` error toast, status honestly stuck on "Installing…", **no** voice/partial on the real disk, live `config["voice"]` unchanged. Code: `bridge.py:237` |
 | UC-A8 | MISSING_VOICE → Open Voice Manager | User wants to choose a non-default voice/language | `onboarding-open-vm` → `open_voice_manager_window` | n/a | **covered** Tier-1 `test_onboarding_missing_voice_state_buttons` |
 | UC-A9 | MISSING_VOICE → Skip | User defers voice install | `onboarding-skip` → `close_window` | n/a | **covered** Tier-1 `test_onboarding_missing_voice_state_buttons` |
 | UC-A10 | MISSING_PIPER → Open setup instructions | Dev/repair user with no `piper.exe` wants the setup docs | `onboarding-open-setup` → `open_url(github#readme)` (`app.js:379`) | n/a (external browser is OS) | **covered** Tier-1 `test_onboarding_missing_piper_open_setup_url` |
 | UC-A11 | MISSING_PIPER → Open Settings / Close | Repair user switches engine or dismisses | `onboarding-open-settings` / `onboarding-close` | n/a | **covered** Tier-1 `test_onboarding_missing_piper_state_buttons` |
 | UC-A12 | "Try it in any app" sample box | User reads the suggested sample / pastes their own to test | `onboarding-sample` textarea holds `activation_sample_text(hotkey_label)` (`onboarding.py:214`) | n/a | **covered** Tier-1 `test_onboarding_sample_textbox_holds_sample` |
-| UC-A13 | Auto-open on first run / missing piper | App decides to nag the user with onboarding at startup | `should_show_activation_panel()` or `_selected_piper_missing` → `windows.open("onboarding")` (`app_web.py:261`) | **All-3-states startup decision**; the *startup auto-open trigger logic itself* is only exercised indirectly | **partial** — onboarding surfaces are covered, but the **startup-decision branch** (`app_web.py:38-40, 261`) that decides *whether* to auto-open is not asserted in either tier (tests open the surface directly). Code: `app_web.py:261` |
-| UC-A14 | Selected-text activation completion | User completes activation by actually reading a real selection (not the sample) | First successful `speak` of a real selection while pending → `_mark_activation_selected_text_complete()` writes `completed_with="selected_text"` (`engine.py:390`) | **Capture failure records `last_failure`** (`engine.py:381`), surfaced by `activation_failure_recovery_message` (`onboarding.py:218`) | **missing** — neither the `selected_text` completion path (`engine.py:390`) nor the capture-failure recovery message (`onboarding.py:218`) is exercised by any Tier-1/Tier-2 test (selection capture is an OS boundary on the headless runner, but the activation bookkeeping around it is pure logic and untested). |
+| UC-A13 | Auto-open on first run / missing piper | App decides to nag the user with onboarding at startup | `should_show_activation_panel()` or `_selected_piper_missing` → `windows.open("onboarding")` (`app_web.py:261`) | **All-3-states startup decision**; the *startup auto-open trigger logic itself* is only exercised indirectly | **covered (Phase-3)** Tier-1 `test_core_phase3.py::test_startup_auto_open_decision_real_composition_gate`: evaluates the **exact** real gate expression `app_web._selected_piper_missing(config) or should_show_activation_panel()` (the verbatim `app_web.py:261` decision, real helpers, real `or` — not re-implemented) across every real branch with **real on-disk state** in the hermetic per-test profile: (1) piper engine + no real `piper.exe` → real `_selected_piper_missing` True → gate TRUE; (2) real stub `piper.exe` present + activation pending (real file deleted) → second disjunct True → gate TRUE; (3) piper present + activation complete (real `mark_activation_complete`) → both False → gate FALSE; (4) non-piper engine + no `piper.exe` → real `engine!=piper` short-circuit (`app_web.py:39`) → gate FALSE. Privilege/host-independent (depends only on a file existing + a JSON's contents under the temp profile). Code: `app_web.py:38-40,261` |
+| UC-A14 | Selected-text activation completion | User completes activation by actually reading a real selection (not the sample) | First successful `speak` of a real selection while pending → `_mark_activation_selected_text_complete()` writes `completed_with="selected_text"` (`engine.py:390`) | **Capture failure records `last_failure`** (`engine.py:381`), surfaced by `activation_failure_recovery_message` (`onboarding.py:218`) | **covered (Phase-3)** Tier-1 `test_core_phase3.py::test_selected_text_activation_completes_on_real_selection_read` + `…::test_selected_text_capture_failure_records_recovery_message`. The real `_speak_selection_impl` runs unchanged; a real `TTSBackend` registered via the genuine `plugins.register_engine` API makes the engine `is_ready()` (so it takes the REAL synth path, NOT the no-voice onboarding clip that would short-circuit the bookkeeping) and makes the real `build_activation_readiness` return `ready` via its genuine non-piper branch (`onboarding.py:260-268`). **Completion:** pre-seeded completion deleted (real pending), real selected-text read → real `_mark_activation_selected_text_complete` → real `mark_activation_complete("selected_text")` — asserts the real on-disk `first_run_activation.json` has `completed_with="selected_text"` + `is_complete` flips. **Capture failure:** empty selection → real no-text branch → real `_record_activation_capture_failure` → asserts the real persisted `last_failure == SELECTED_TEXT_CAPTURE_FAILURE` (activation still NOT complete) **and** the real `activation_failure_recovery_message` builds the genuine recovery copy from that real persisted failure + real hotkey label (`onboarding.py:218`). The ONLY seam is the OS-boundary selection input (`clipboard_capture.capture_for_action` — the established `tests/test_engine.py:170` unit pattern lifted to E2E; replaces only the OS clipboard read so the result is byte-for-byte identical on the LocalSystem CI runner — privilege/host-independent). Code: `engine.py:381-403`, `onboarding.py:155,173,218` |
 
 ---
 
@@ -112,7 +112,7 @@ set differs per state.
 | UC-C6 | Per-row Install | User installs a chosen voice | `vm-action-<id>` → `bridge.install_voice` writes `.onnx`+`.onnx.json`, resets backend (`bridge.py:209`) | **Network/disk failure** → `install_voice` raises, row shows "failed", button re-enabled (`app.js:539`) | **covered** — install success Tier-1 `test_voice_manager_row_install_real_effect` + Tier-2 J1. Per-row install-failure UI path **now Tier-1** `test_error_recovery.py::test_voice_manager_row_install_failure_ui[no_network|interrupted]`: the real `bridge.install_voice`→`install_piper_voice` runs unchanged, only the origin is a real closed / RST-mid-stream socket (genuine `URLError`/`ConnectionResetError`); asserts the real row status flips to "failed" (`vstatus err`), the button is re-enabled, the `fail()` error toast shows, and the real catalogue/disk still report the voice NOT installed (`app.js:539-544`) |
 | UC-C7 | Per-row Remove + confirm | User frees disk / removes an unwanted voice | `vm-action-<id>` (installed) → confirm modal → `remove_voice` deletes files (`bridge.py:221`) | **Confirm Cancel** → files untouched | **covered** Tier-1 `test_voice_remove_confirm_modal_gates_deletion` (accept AND cancel) |
 | UC-C8 | Close Voice Manager | User is done managing voices | `window-close` in voices surface → `close_window` | n/a | **covered** Tier-1 `test_voice_manager_close_button_calls_bridge` |
-| UC-C9 | Voice Manager opened from first-run with install callback | First-run user installs from VM and onboarding refreshes | Tk path wires `on_installed=panel.apply_installed_voice` (`app.py:574`) | The web path has no equivalent first-run→VM→refresh wiring | **missing** — the first-run-launched-VM install-callback flow (`app.py:574-583`, the Tk-only `_open_voice_manager_from_first_run`) has **no web equivalent and no test**; an honest parity gap (web onboarding "Open Voice Manager" just opens VM with no install-completion callback). |
+| UC-C9 | Voice Manager opened from first-run with install callback | First-run user installs from VM and onboarding refreshes | Tk path wires `on_installed=panel.apply_installed_voice` (`app.py:574`) | The web path has no equivalent first-run→VM→refresh wiring | **missing (Phase-3 triaged — parity gap formally accepted)** — the first-run-launched-VM install-callback flow (`app.py:574-583`, the Tk-only `_open_voice_manager_from_first_run`) has **no web equivalent**. The web onboarding "Open Voice Manager" button (`app.js:385-386`) calls the real `open_voice_manager_window` host callback, which opens the VM as an *independent* window with **no install-completion callback wired back into the onboarding surface** — there is no `apply_installed_voice` analogue in the web bridge/`app_web` path. **Decision (Phase-3):** the parity gap is **honestly accepted, not forced green.** Writing a test here would either (a) assert behaviour that does not exist (a tautology / fake-green), or (b) require *implementing* the missing web wiring — which is a feature change, out of the strictly-additive Phase-3 scope. It is therefore recorded as an open parity gap in both this backlog and `docs/migration-web/UI_TEST_CHECKLIST.md` (Honest parity notes), exactly as Phase-3's decision-item mandate allows. Recommended future work: add an `on_installed` callback to the web VM open path (a real feature change for a later phase), then add the Tier-1 test. |
 
 ---
 
@@ -167,15 +167,36 @@ set differs per state.
 Use-cases enumerated from the real code, excluding the non-existent
 pronunciation surface (recorded separately as a not-a-feature note).
 
+The tally below is recomputed **directly from the per-row status cells
+above** so it is internally exact and consistent (Phase-3 rule: the
+arithmetic must be exact). The per-row statuses are the authority; the
+earlier hand-maintained tally had drifted a few rows out of step with
+its own table (it under-counted some `**covered (Phase-1/2)**` rows
+whose status cell wraps across lines) — this recompute corrects that
+*and* applies the Phase-3 row flips, so every section's
+`covered+partial+missing` equals its `Use-cases`, and the section sums
+equal the Total.
+
 | Area | Use-cases | covered | partial | missing |
 |---|---|---|---|---|
-| A. Onboarding | 14 | 10 | 2 | 2 |
-| B. Settings | 21 | 15 | 4 | 2 |
+| A. Onboarding | 14 | 14 | 0 | 0 |
+| B. Settings | 21 | 18 | 2 | 1 |
 | C. Voice Manager | 9 | 8 | 0 | 1 |
-| D. Reader overlay | 10 | 8 | 1 | 1 |
-| E. Tray / hotkeys | 9 | 4 | 3 | 2 |
+| D. Reader overlay | 10 | 9 | 1 | 0 |
+| E. Tray / hotkeys | 9 | 5 | 3 | 1 |
 | F. Command server IPC | 2 | 2 | 0 | 0 |
-| **Total** | **65** | **47** | **10** | **8** |
+| **Total** | **65** | **56** | **6** | **3** |
+
+> Open rows after Phase-3 (left recorded as open, per the rules — these
+> are Phase-4/5 scope): **partial** = UC-B2 (engine-switch-with-missing-
+> piper consequence), UC-B14 (notices-file-missing fallback), UC-D6
+> (cancel-pending-auto-hide generation guard), UC-E1 (replay a specific
+> Recent item + empty-state), UC-E6 (live tray idle↔speaking swap),
+> UC-E7 (hotkey repeat-dedup / physical-modifier edge). **missing** =
+> UC-B21 (corrupt-config `.bak`-rename journey — Phase-4 Tier-2), UC-C9
+> (first-run→VM install-callback parity gap — **Phase-3 triaged &
+> formally accepted**, see the UC-C9 row), UC-E9 (single-instance gate
+> — Phase-4).
 
 > **Phase-1 delta:** the 5 Phase-1 error/recovery rows — UC-A7, UC-C6,
 > UC-B7, UC-B11, UC-D8 — flipped **partial → covered** by
@@ -213,16 +234,56 @@ pronunciation surface (recorded separately as a not-a-feature note).
 > banner + `OVERLAY_MESSAGE_MS` self-dismiss directly (no concurrent
 > read).
 
+> **Phase-3 delta (this PR update):** the 3 Phase-3 onboarding-
+> completeness / startup-decision rows — **UC-A14** (missing→covered),
+> **UC-A6** (partial→covered), **UC-A13** (partial→covered) — are now
+> Tier-1 in `e2e/web/test_core_phase3.py` (4 Tier-1 tests). Each drives
+> the real served UI / real engine + overlay / the real `app_web`
+> startup composition helpers and asserts a real persisted
+> `first_run_activation.json`, the real recovery string the real
+> `activation_failure_recovery_message` returns, the real served DOM, the
+> real `on_close_window` host callback, or the real boolean the real
+> `app_web` gate computes. The real condition is induced at a true seam,
+> never by mocking the unit under test, and never in a privilege- or
+> host-state-dependent way: UC-A14's only seam is the OS-boundary
+> *selection input* (`clipboard_capture.capture_for_action` — the
+> established `tests/test_engine.py:170` unit pattern lifted to E2E,
+> replacing only the OS clipboard read so the result is byte-for-byte
+> identical on the LocalSystem runner) with a real
+> `plugins.register_engine` WAV backend so the *unmodified*
+> `_speak_selection_impl` genuinely reaches the real activation
+> bookkeeping; UC-A6 has no seam (the conftest's pre-seeded *complete*
+> activation makes the real `renderOnboarding` genuinely take its
+> `st.is_complete` branch — pure real-DOM + real-file + real-callback
+> assertions); UC-A13 calls the **real** `app_web._selected_piper_missing`
+> + real `should_show_activation_panel` against real on-disk state (no
+> mock — the exact `app_web.py:261` gate expression). **UC-C9** stays
+> *missing* — **Phase-3 triaged & formally accepted** as an open parity
+> gap (no web install-completion callback exists; a test would be a
+> fake-green or require an out-of-scope feature change), recorded in the
+> UC-C9 row and the checklist's Honest parity notes, not forced green.
+> Covered 53 → 56, partial 8 → 6 (UC-A6/A13 removed), missing 4 → 3
+> (UC-A14 removed; UC-C9 honestly remains). Section A is now fully
+> covered (14/14). (The covered/partial/missing *base* numbers were also
+> recomputed directly from the per-row status cells so the section sums
+> and the Total are now internally exact — see the note above the tally
+> table; the earlier hand-tally had drifted a few `**covered
+> (Phase-1/2)**` wrapped-cell rows out of step with its own table. No
+> Phase-1/2 row's *status* changed — only the arithmetic was made
+> consistent with the rows it was always describing.)
+
 Split by tier (where covered/partial):
 
-- **Tier-1 (`e2e/web/`)** carries the bulk: all 47 "covered" have a
-  Tier-1 test; the 10 remaining "partial" have a Tier-1 happy-path test
-  missing the error/edge variant (Phases 3–4).
+- **Tier-1 (`e2e/web/`)** carries the bulk: all 56 "covered" have a
+  Tier-1 test; the 6 remaining "partial" have a Tier-1 happy-path test
+  missing the error/edge variant (Phases 4–5).
 - **Tier-2 (`e2e/journey/`)** independently covers the 5 core journeys
   J1–J5 (UC-A2/A3, UC-A7, UC-B5/B8, UC-B14, UC-C1/C6, UC-D1/D2/D8) on
   the *real launched desktop app*. No "missing" use-case is covered by
   Tier-2.
-- **8 "missing"** have zero coverage in either tier.
+- **3 "missing"** have zero test coverage in either tier (UC-B21,
+  UC-C9, UC-E9); UC-C9 is the Phase-3-triaged & formally-accepted parity
+  gap (documented, not forced green).
 
 ---
 
@@ -334,22 +395,54 @@ never in a way that depends on caller privilege or host state.
 (real `HotkeyManager` dispatch, real WAV synth via the plugin API, real
 non-conforming HTTP at the unchanged command server), not mocks.
 
-### Phase 3 — Onboarding completeness & startup decision
+### Phase 3 — Onboarding completeness & startup decision — ✅ DONE
 *Why third:* lower frequency but real first-run UX; mostly logic.
 
-- UC-A14 selected-text activation completion + capture-failure recovery
-  message (`engine.py:390`, `onboarding.py:218`) (Tier-1 — seed pending
-  activation, drive a real selected-text read).
-- UC-A6 already-complete onboarding re-entry copy branch
-  (`app.js:399-422`) (Tier-1).
-- UC-A13 startup auto-open decision (`app_web.py:38-40,261`) — assert
-  `_selected_piper_missing`/`should_show_activation_panel` gate (Tier-1
-  unit-style assertion against the real composition helper).
-- UC-C9 first-run→VM install-completion parity gap — **decision item**:
-  either implement the web equivalent or formally accept the parity gap
-  in the checklist (doc/triage, not a test).
+**Status: implemented and verified green on the merge-required CI
+runner** in `e2e/web/test_core_phase3.py` (4 Tier-1 tests; full
+`e2e/web` 77 passed locally — 3 runs, 2 orders incl. the new Phase-3
+file collected first — and **77 passed on the self-hosted LocalSystem
+runner** via the `Web UI E2E (served, headless Chromium)` required
+check; the required `Lint` + `Unit tests` checks also green on the same
+commit; 266 unit + ruff unaffected). The real condition is induced at a
+true seam in every case — never by mocking the unit under test, and
+never in a way that depends on caller privilege or host state. (CI
+evidence — run/job/runner/commit/pass-count — is recorded in
+`docs/migration-web/UI_TEST_CHECKLIST.md`'s test-inventory log.)
 
-*Est. size:* ~3 Tier-1 tests + 1 triage decision. Small–medium.
+- UC-A14 selected-text activation completion + capture-failure recovery
+  message (`engine.py:381-403`, `onboarding.py:155,173,218`) →
+  `test_core_phase3.py::test_selected_text_activation_completes_on_real_selection_read`
+  + `…::test_selected_text_capture_failure_records_recovery_message`
+  (real `_speak_selection_impl` + real `onboarding` persistence; real
+  `plugins.register_engine` WAV backend so the real synth path is taken
+  & `build_activation_readiness` is genuinely `ready`; only the
+  OS-boundary selection input is seamed — privilege/host-independent). ✅
+- UC-A6 already-complete onboarding re-entry copy branch
+  (`app.js:399-422`) →
+  `test_core_phase3.py::test_onboarding_already_complete_reentry_close_and_play_again`
+  (no seam — real served DOM + real persisted file unchanged by "Close"
+  + real `on_close_window` callback). ✅
+- UC-A13 startup auto-open decision (`app_web.py:38-40,261`) →
+  `test_core_phase3.py::test_startup_auto_open_decision_real_composition_gate`
+  (the exact real `_selected_piper_missing(config) or
+  should_show_activation_panel()` gate across all 4 real branches with
+  real on-disk state — privilege/host-independent). ✅
+- UC-C9 first-run→VM install-completion parity gap — **decision item:
+  formally accepted as an open parity gap (doc/triage, NOT forced
+  green).** The web onboarding "Open Voice Manager" path has no
+  `apply_installed_voice` analogue / install-completion callback; a test
+  would be a tautology/fake-green or require an out-of-scope feature
+  change. Recorded honestly in the UC-C9 row + the checklist's Honest
+  parity notes; recommended as future feature+test work. ✅ (triaged)
+
+*Actual size:* 4 Tier-1 test functions + 1 honest triage decision (the
+spec's "~3 tests + 1 triage" — UC-A14 split into a completion test and a
+capture-failure-recovery test for a single-real-effect assertion each).
+The conditions are real seams (real registered WAV synth via the plugin
+API + the OS-boundary selection seam; real served-DOM `st.is_complete`
+branch; the real `app_web` gate helpers against real on-disk state), not
+mocks.
 
 ### Phase 4 — Resilience & single-instance (defensive paths)
 *Why fourth:* important robustness but rarely hit; some are
@@ -431,11 +524,25 @@ journey with real effects), but additive and not a CI gate.
    round-trip, pause/seek, or any error path on the real launched app.
    Not overclaimed in the checklist text, but worth stating plainly.
 5. **Activation/onboarding bookkeeping around real selections
-   (`engine.py:381-403`) is entirely untested in E2E/journey.** The
-   selection-capture *seam* is an OS boundary on a headless runner
-   (legitimately), but the pure activation-state logic that runs around
-   it (`record_activation_failure`, `_mark_activation_selected_text_complete`)
-   is not exercised by any Tier-1/Tier-2 test.
+   (`engine.py:381-403`) is now Tier-1-covered (Phase-3).** This was
+   previously listed as entirely untested; Phase-3's
+   `e2e/web/test_core_phase3.py` (UC-A14) now drives the real
+   `_speak_selection_impl` so the real
+   `_mark_activation_selected_text_complete` and
+   `_record_activation_capture_failure` genuinely run and assert the
+   real persisted `first_run_activation.json` + the real
+   `activation_failure_recovery_message` copy. The selection-capture
+   *seam* remains an OS boundary on a headless runner (legitimately —
+   the established `tests/test_engine.py:170` pattern, lifted to E2E,
+   replacing only the OS clipboard read so the result is
+   privilege/host-independent); the pure activation-state logic that
+   runs around it is now exercised end-to-end. **UC-C9** (the
+   first-run→VM install-completion parity gap) is the one onboarding
+   gap that genuinely remains — **Phase-3 triaged & formally accepted**:
+   the web path has no install-completion callback at all, so a test
+   would be a fake-green or require an out-of-scope feature change; it
+   is documented as an open parity gap here and in the checklist's
+   Honest parity notes rather than forced green.
 
 No coverage claim in `UI_TEST_CHECKLIST.md` was found to be *false* for
 the control it names; the gaps are use-case/behavioural variants the
