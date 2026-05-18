@@ -400,11 +400,21 @@ profile.
   hotkey test builds its own real `HotkeyManager` and tears it down; the
   IPC test uses the hermetic ephemeral-port + token). The
   merge-required **`Web UI E2E (served, headless Chromium)`** check then
-  ran the same suite on the self-hosted **LocalSystem** runner on commit
-  `__PHASE2_SHA__` and concluded **__PHASE2_CI_CONCLUSION__** (run
-  `__PHASE2_CI_URL__`), with the 5 `test_core_interactions.py` tests
-  **PASSED** in that real CI run. The required `Lint` and `Unit tests`
-  checks stayed green on the same commit. `py -3.11 -m pytest -q` →
+  ran the same suite on the self-hosted **LocalSystem** runner
+  (`runs-on: [self-hosted, windows, pippal-windows]`, runner
+  `pippal-ci-ACER-LAPTOP`) on commit `c3a1f44` and concluded **SUCCESS —
+  73 passed in 143.43 s** (run
+  `https://github.com/bug-factory-kft/pippal/actions/runs/26056179324`,
+  job `…/job/76604725633`), with all 5 `test_core_interactions.py` tests
+  **PASSED** in that real CI run — the CI log shows
+  `PASSED e2e/web/test_core_interactions.py::test_queue_pause_stop_hotkey_dispatch_drives_real_engine[chromium]`,
+  `…::test_overlay_no_text_selected_message_and_self_dismiss[chromium]`,
+  `…::test_overlay_queued_message_and_self_dismiss[chromium]`,
+  `…::test_pause_silences_and_resume_replays_then_seek_while_paused[chromium]`,
+  `…::test_command_server_ipc_reject_branches_and_happy_roundtrips[chromium]`.
+  The required `Lint` (pass, run 26056179322 job 76604725577) and
+  `Unit tests` (pass, run 26056179322 job 76604725563) checks stayed
+  green on the same commit. `py -3.11 -m pytest -q` →
   **266 passed** (unchanged; fully additive),
   `ruff check src/pippal tests e2e/web e2e/journey` → clean,
   `pytest --collect-only` → exactly 266, zero from `e2e/web`. Honest

@@ -292,12 +292,16 @@ they belong in the per-PR gate.
 **Status: implemented and verified green on the merge-required CI
 runner** in `e2e/web/test_core_interactions.py` (5 Tier-1 tests; full
 `e2e/web` 73 passed locally — 3 runs, 2 orders incl. the new file
-collected first — and **73 passed on the self-hosted LocalSystem
-runner** via the `Web UI E2E (served, headless Chromium)` required check;
-`Lint` + `Unit tests` also green; 266 unit + ruff unaffected). The real
-condition is induced at a true seam in every case — never by mocking the
-unit under test, and never in a way that depends on caller privilege or
-host state.
+collected first — and **73 passed in 143.43 s on the self-hosted
+LocalSystem runner** (`runs-on: [self-hosted, windows, pippal-windows]`,
+runner `pippal-ci-ACER-LAPTOP`) via the `Web UI E2E (served, headless
+Chromium)` required check on commit `c3a1f44`
+(`https://github.com/bug-factory-kft/pippal/actions/runs/26056179324`,
+SUCCESS), with all 5 `test_core_interactions.py` tests PASSED in that
+real CI run; the required `Lint` + `Unit tests` checks also green on the
+same commit; 266 unit + ruff unaffected). The real condition is induced
+at a true seam in every case — never by mocking the unit under test, and
+never in a way that depends on caller privilege or host state.
 
 - UC-E8 queue/pause/stop **hotkey dispatch** + queue-while-speaking vs
   queue-while-idle branch (`engine.py:481-509`) →
