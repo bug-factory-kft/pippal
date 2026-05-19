@@ -108,12 +108,23 @@ def _reopen_surface(app, view: str, step, timeout: int = 25000):
     in-memory form) we navigate the attached real page to the surface
     URL again — a real reload of the real window's document against the
     real backend, equivalent to the user closing and reopening it.
+
+    ``onboarding`` is special: it has no ``open_onboarding_window``
+    bridge host callback (the real app opens it from the tray /
+    startup gate via ``windows.open("onboarding")``, not the bridge —
+    see ``app_web.py``). Its window is already open for the whole
+    journey, so re-rendering it is exactly the real-`page.reload`
+    against the live backend below, with no bridge open-call — the
+    genuine web equivalent of the user reopening the first-run check
+    (Tk re-renders the still-open panel in place; the web onboarding
+    window re-reads ``get_readiness`` on its next render).
     """
-    bridge_call(app.bridge_base, {
-        "settings": "open_settings_window",
-        "voices": "open_voice_manager_window",
-        "notices": "open_notices_window",
-    }[view])
+    if view != "onboarding":
+        bridge_call(app.bridge_base, {
+            "settings": "open_settings_window",
+            "voices": "open_voice_manager_window",
+            "notices": "open_notices_window",
+        }[view])
     page = app.reattach_page(view_hint=view, timeout=timeout / 1000.0)
     # Force a real re-render from the live backend (the window may have
     # only been focused, keeping its old form values in the DOM) and
