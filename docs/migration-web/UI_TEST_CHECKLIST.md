@@ -249,17 +249,20 @@ PipPal") — and even then the underlying callable is `[x]`.
 
 > **Scope.** Like §6–§8, this section tracks **use-case / behavioural**
 > rows (the **Phase-4** rows of `docs/USE_CASE_BACKLOG.md`: UC-B14,
-> UC-E6, UC-D6 Tier-1; UC-B21 Tier-2 J6; UC-E9 honestly triaged), not
-> new *controls* — the §1–§5 per-control 72/72 tally is **unchanged**.
-> Every condition is induced at a **true seam** (the pure
-> `notices_card._candidate_notice_roots` helper at real empty temp
-> dirs; a real `plugins.register_engine` WAV backend so the *unmodified*
-> `pippal.playback`/engine genuinely flips real overlay/`is_speaking`
-> state; a real corrupt `config.json`'s bytes under a fresh launched-app
-> profile; a real OS `SO_EXCLUSIVEADDRUSE` port holder) — never by
-> mocking the unit under test, never privilege/host-dependent. No
-> production code is modified (strictly additive — new test files +
-> docs only).
+> UC-E6, UC-D6 Tier-1; UC-B21 Tier-2 J6; UC-E9 now covered via a
+> production fix), not new *controls* — the §1–§5 per-control 72/72
+> tally is **unchanged**. Every condition is induced at a **true seam**
+> (the pure `notices_card._candidate_notice_roots` helper at real empty
+> temp dirs; a real `plugins.register_engine` WAV backend so the
+> *unmodified* `pippal.playback`/engine genuinely flips real
+> overlay/`is_speaking` state; a real corrupt `config.json`'s bytes
+> under a fresh launched-app profile; a real second
+> `start_command_server` against an already-held port) — never by
+> mocking the unit under test, never privilege/host-dependent. With the
+> exception of the **UC-E9 single-instance production fix** in
+> `command_server.py` (row 9.5 / Honest parity note 5 — a real,
+> minimal, cross-platform-safe, crash-restart-safe production change),
+> these rows are additive (new test files + docs).
 
 | # | Use-case | Test | Status |
 |---|---|---|---|
@@ -267,7 +270,7 @@ PipPal") — and even then the underlying callable is `[x]`.
 | 9.2 | **UC-E6** live tray idle↔speaking swap (`app_web.py:226-244`) — the **verbatim** `app_web.update_tray_icon` body run on a fake icon exactly as the real `tray_poll` loop calls it, driven by a **real** engine read (real WAV backend → real `engine.is_speaking`); asserts the real `tray.make_tray_icon` factory's genuinely pixel-distinct idle vs speaking images swap at rest→reading→stop and the real tooltip | `test_core_phase4.py::test_tray_icon_live_swaps_idle_to_speaking_on_real_read` | [x] (Tier-1) |
 | 9.3 | **UC-D6** cancel-pending-auto-hide-on-new-read generation guard (`overlay_state.py:139,151,176`) — real WAV backend → *unmodified* `pippal.playback`; a real long-pending auto-hide timer (60 s `auto_hide_ms`) armed by the real `set_state("done")`, then a real second read's real `_cancel_hide_locked` bumps `_hide_generation` (asserted advanced); the fresh reading is genuinely PRESERVED (real served DOM stays `reading`, panel visible — NOT clobbered to idle by the stale timer) | `test_core_phase4.py::test_new_read_cancels_pending_autohide_generation_guard` | [x] (Tier-1) |
 | 9.4 | **UC-B21** corrupt-`config.json` `.bak`-rename recovery — **Tier-2 J6** on the **REAL launched** `app_web.main()` WebView2 desktop app (CDP `Edg/…`, not headless); corrupt `config.json` pre-written into the fresh profile so the real `pippal.config.load_config` recovery (`config.py:84-96`) genuinely runs at launch; asserts on the real running process: no crash + real `config.json.bak` is a byte-for-byte copy of the user's file + the real `POST /bridge get_config` equals layered defaults + no corrupt config remains; real recording artifact (ffmpeg `.mp4` + trace.zip) attached like J1–J5 | `test_journey_phase4.py::test_j6_corrupt_config_recovers_to_defaults_and_bak` | [x] (Tier-2) |
-| 9.5 | **UC-E9** single-instance gate (`app_web.py:207-221`) — **honestly triaged with a VERIFIED real product finding, NOT forced green.** The documented bind-conflict gate does **not** trigger for two real instances on Windows (`http.server.HTTPServer.allow_reuse_address=True` + `SO_REUSEADDR`, empirically verified incl. the exact prod fixed-port-51677 path; `command_server.py` protected). The Tier-1 test asserts the real verified product behaviour (two binds BOTH succeed — the honest fact, not "refused") AND the gate's real EXIT logic when the bind genuinely fails (real `SO_EXCLUSIVEADDRUSE` holder → real `start_command_server` `None` → the verbatim guard's real `SystemExit(0)`; only the native `MessageBoxW` OS call skipped) | `test_core_phase4.py::test_single_instance_gate_bind_failure_exits_but_dup_bind_caveat` | **[ ] open — Phase-4 triaged with a verified product finding** (gate exit-logic proven Tier-1; the Windows trigger-condition is a documented latent product gap, see Honest parity note 5 below — not forced green) |
+| 9.5 | **UC-E9** single-instance gate (`app_web.py:207-221`) — **production fix (this PR) + genuine real-effect coverage, no fake-green.** The bind-conflict gate previously did **not** trigger for two real instances on Windows (`http.server.HTTPServer.allow_reuse_address=True` + `SO_REUSEADDR`, empirically verified incl. the exact prod fixed-port-51677 path). Fixed in `command_server.py` (`_SingleInstanceHTTPServer`: on Windows force `allow_reuse_address=False` + set `SO_EXCLUSIVEADDRUSE` before `bind()`; non-Windows byte-for-byte unchanged; crash-restart safe — exclusive use conflicts only with currently-open sockets, never `TIME_WAIT`). The Tier-1 test asserts the real, now-true effect: a real first `start_command_server` serves (token-carrying `GET /ping`→200); a real SECOND on the SAME port genuinely returns `None`; the **verbatim** `app_web.main` guard genuinely raises the real `SystemExit(0)` while the first keeps serving; a FRESH instance rebinds the same port after the first exits (crash-restart safe). Only the native `MessageBoxW` OS call is skipped | `test_core_phase4.py::test_single_instance_gate_refuses_second_instance_and_is_crash_restart_safe` | **[x] covered (Tier-1) — production fix + real-effect test** (missing → covered; see Honest parity note 5 below) |
 
 ---
 
@@ -279,9 +282,10 @@ PipPal") — and even then the underlying callable is `[x]`.
 > UC-D3 Tier-2 **J8** as additive release-lane breadth for
 > already-covered rows), not new *controls* — the §1–§5 per-control
 > 72/72 tally is **unchanged**. Phase-5 is the **final core phase**:
-> after it **0 use-case rows are partial**; the only 2 open rows are
-> the honestly-documented product-gap exceptions UC-C9 (§8.5) and
-> UC-E9 (§9.5). Every Tier-1 condition is induced at a **true seam**
+> after it **0 use-case rows are partial**; after this PR's UC-E9
+> production fix the only remaining open row is the
+> honestly-documented product-gap exception UC-C9 (§8.5) — UC-E9 (§9.5)
+> is now covered. Every Tier-1 condition is induced at a **true seam**
 > (the real served Settings UI + the real `build_activation_readiness`;
 > the verbatim `app_web.build_tray_menu` + a real
 > `plugins.register_engine` WAV backend so the *unmodified*
@@ -334,23 +338,26 @@ PipPal") — and even then the underlying callable is `[x]`.
 > install-completion parity gap, **Phase-3 triaged & formally accepted**
 > (Honest parity note 4 below), not forced green. §9 adds 4 genuine
 > `[x]` Phase-4 tests (UC-B14/E6/D6 Tier-1 + UC-B21 Tier-2 J6); **§9.5
-> (UC-E9) is an honest open `[ ]`** — the single-instance gate, **Phase-4
-> triaged with a VERIFIED real product finding** (the documented
-> bind-conflict gate does not trigger for two real instances on Windows
-> due to stdlib `HTTPServer.allow_reuse_address` + `SO_REUSEADDR`;
-> Honest parity note 5 below), not forced green. **§10 (Phase-5, the
-> final core phase) closes the LAST 3 partial use-case rows**: UC-B2,
-> UC-E1, UC-E7 are now genuine `[x]` Tier-1 in
-> `e2e/web/test_core_phase5.py` (**partial → covered**), and 2 additive
-> Tier-2 journeys (**J7** UC-B11/B13/B12 right-click round-trip; **J8**
-> UC-D3 reader transport) prove already-covered rows end-to-end on the
-> real launched WebView2 app (no row flip from the journeys). After
-> Phase-5 there are **0 partial use-case rows**; the only 2 open rows
-> are the honestly-documented product-gap exceptions §8.5 (UC-C9) and
-> §9.5 (UC-E9). The authoritative use-case-level covered/partial/missing
-> tally lives in `docs/USE_CASE_BACKLOG.md` (**63 covered / 0 partial /
-> 2 missing of 65 after Phase-5** — full phased core coverage achieved
-> except the 2 honestly-documented product-gap exceptions).
+> (UC-E9) is now a genuine `[x]` covered row** — the single-instance
+> gate's Windows trigger-condition was a verified real product weakness
+> (stdlib `HTTPServer.allow_reuse_address` + `SO_REUSEADDR`) and is now
+> **fixed in `command_server.py`** (`_SingleInstanceHTTPServer` —
+> Windows `SO_EXCLUSIVEADDRUSE`, non-Windows unchanged, crash-restart
+> safe) with a real-effect Tier-1 test (Honest parity note 5 below);
+> missing → covered, not forced green. **§10 (Phase-5, the final core
+> phase) closes the LAST 3 partial use-case rows**: UC-B2, UC-E1, UC-E7
+> are now genuine `[x]` Tier-1 in `e2e/web/test_core_phase5.py`
+> (**partial → covered**), and 2 additive Tier-2 journeys (**J7**
+> UC-B11/B13/B12 right-click round-trip; **J8** UC-D3 reader transport)
+> prove already-covered rows end-to-end on the real launched WebView2
+> app (no row flip from the journeys). After Phase-5 there are **0
+> partial use-case rows**; after this PR's UC-E9 production fix the
+> only remaining open row is the honestly-documented product-gap
+> exception §8.5 (UC-C9). The authoritative use-case-level
+> covered/partial/missing tally lives in `docs/USE_CASE_BACKLOG.md`
+> (**64 covered / 0 partial / 1 missing of 65** — full phased core
+> coverage achieved except the 1 honestly-documented product-gap
+> exception, UC-C9).
 
 > **Zero function exemptions.** §5's tray/hotkey rows are no longer an
 > exemption: §5.1–5.4 and 5.6 are real headless-safe pytest integration
@@ -413,35 +420,40 @@ surfaced here rather than hidden so the checklist reflects reality:
    `docs/USE_CASE_BACKLOG.md`. Recommended future work: add an
    `on_installed` callback to the web VM open path (a real feature
    change for a later phase), then add the Tier-1 test.
-5. **The single-instance gate does not actually trigger for two real
-   instances on Windows (UC-E9 — Phase-4 triaged with a VERIFIED real
-   product finding).** Both `app_web.main` (`app_web.py:207-221`) and
+5. **RESOLVED (this PR): the single-instance gate now genuinely
+   triggers for two real instances on Windows (UC-E9 — production fix +
+   real-effect test).** Both `app_web.main` (`app_web.py:207-221`) and
    `pippal.app` (`app.py:422-431`) treat `start_command_server`
    returning `None` (port could not be bound) as "another instance is
    running" → show the "PipPal is already running" `MessageBoxW` and
-   `raise SystemExit(0)`. But `http.server.HTTPServer` sets
-   `allow_reuse_address = True`, and on Windows `SO_REUSEADDR` lets two
-   sockets bind the **same** `127.0.0.1:port` concurrently —
-   empirically verified on this runner on **both** the hermetic
-   ephemeral path **and** the exact production fixed-port-51677 path: a
-   real second `start_command_server` while the first is serving *also
-   binds and returns a live server*, so the `cmd_server is None` guard
-   never fires for two genuine instances. This is a **real latent
-   product weakness in the gate's trigger condition, not a test
-   weakness**, and `command_server.py` is protected (not changed here).
-   Phase-4 **does not fake-green it**: §9.5's Tier-1 test asserts the
-   real verified product behaviour (two binds both succeed — the honest
-   fact, asserted, not "refused") **and** the gate's real *exit* logic
-   when the bind genuinely fails (a real OS `SO_EXCLUSIVEADDRUSE` port
-   holder → real `start_command_server` `None` → the verbatim
-   `app_web.main` guard's real `SystemExit(0)`; only the native
-   `MessageBoxW` OS call is skipped). Recorded as the open `[ ]` row
+   `raise SystemExit(0)`. This relies on a second instance failing to
+   bind the IPC port — which **did not hold on Windows**:
+   `http.server.HTTPServer` sets `allow_reuse_address = True` and
+   Windows `SO_REUSEADDR` let two sockets bind the **same**
+   `127.0.0.1:port` concurrently (empirically verified on both the
+   hermetic-ephemeral and the exact production fixed-port-51677 path),
+   so the `cmd_server is None` guard never fired for two genuine
+   instances — a real latent product weakness. **Production fix (this
+   PR):** `start_command_server` now binds with a
+   `_SingleInstanceHTTPServer` that, on Windows, forces
+   `allow_reuse_address=False` (so the stdlib never sets `SO_REUSEADDR`)
+   and sets `SO_EXCLUSIVEADDRUSE` on the listening socket *before*
+   `bind()`. A real second bind to a port a live PipPal instance owns
+   now genuinely fails (`OSError`/`WSAEADDRINUSE`) for every caller
+   regardless of privilege, so the second instance exits 0 while the
+   first serves. Non-Windows behaviour is byte-for-byte unchanged
+   (`SO_EXCLUSIVEADDRUSE` is Windows-only; POSIX `SO_REUSEADDR`
+   TIME_WAIT-rebind preserved). Crash-restart safe: exclusive use
+   conflicts only with currently-open sockets, never `TIME_WAIT`, so a
+   fresh instance rebinds the same port immediately once the previous
+   one exits/crashes (verified). §9.5's Tier-1 test asserts the real,
+   now-true effect: first serves; real second `start_command_server`
+   returns `None`; the verbatim `app_web.main` guard raises the real
+   `SystemExit(0)` while the first keeps serving; a fresh instance
+   rebinds after the first exits. Recorded as the now-covered `[x]` row
    §9.5 and as UC-E9 in `docs/USE_CASE_BACKLOG.md` (Honest gaps note 6).
-   Recommended future work (a real product fix, out of this
-   strictly-additive scope): bind the IPC listener with
-   `SO_EXCLUSIVEADDRUSE` (or probe an existing instance's `/ping`
-   before binding) so the gate is genuine on Windows, then flip UC-E9
-   to covered with a real two-instance test.
+   No fake-green: the asserted refusal is the real product behaviour
+   after the fix.
 
 ## Per-test reset mechanism (how a fresh state is guaranteed)
 
@@ -495,10 +507,11 @@ profile.
   conditions at true seams; UC-C9 honestly triaged in docs, no test) +
   `e2e/web/test_core_phase4.py` (4 — the §9 Phase-4 resilience
   use-cases: UC-B14 notices-missing fallback, UC-E6 live tray swap,
-  UC-D6 auto-hide generation guard, + the UC-E9 finding/exit-logic
-  test; real conditions at true seams; UC-E9's Windows
-  trigger-condition honestly triaged in docs as a verified product
-  finding) + `e2e/web/test_core_phase5.py` (3 — the §10 Phase-5 final
+  UC-D6 auto-hide generation guard, + the UC-E9 single-instance gate
+  test, **now genuinely covered after this PR's `command_server.py`
+  production fix** — real first serves / real second returns `None` /
+  verbatim guard's real `SystemExit(0)` / crash-restart-safe rebind;
+  real conditions at true seams) + `e2e/web/test_core_phase5.py` (3 — the §10 Phase-5 final
   partial-row closures UC-B2/UC-E1/UC-E7, **partial → covered**; real
   conditions at true seams: the real served Settings UI + real
   `build_activation_readiness`; the verbatim `app_web.build_tray_menu`
@@ -690,15 +703,45 @@ profile.
   **266 passed** (unchanged; fully additive — `test_core_phase4.py` /
   `test_journey_phase4.py` are new files, no production code touched),
   `ruff check src/pippal tests e2e/web e2e/journey` → clean,
-  `pytest --collect-only` → exactly 266, zero from `e2e/web`. **UC-E9
-  is honestly NOT flipped to covered** — Phase-4 triaged with a VERIFIED
-  real product finding (the documented bind-conflict gate does not
-  trigger for two real instances on Windows; §9.5 / Honest parity note
-  5 / backlog UC-E9 + Honest gaps note 6), recorded open rather than
-  forced green. The merge-required **`Web UI E2E (served, headless
-  Chromium)`** + **`Lint`** + **`Unit tests`** checks were then
-  confirmed on the self-hosted **LocalSystem** runner
-  `pippal-ci-ACER-LAPTOP` on the pushed PR-#90 head — CI evidence
+  `pytest --collect-only` → exactly 266, zero from `e2e/web`. At
+  Phase-4 UC-E9 was honestly recorded open with a verified product
+  finding (the documented bind-conflict gate did not trigger for two
+  real instances on Windows); **that finding has since been resolved
+  by this PR's `command_server.py` production fix — see the dedicated
+  entry below.**
+- **UC-E9 production fix (this PR) — local record.** A real, minimal,
+  cross-platform-safe production change in `src/pippal/command_server.py`
+  (`_SingleInstanceHTTPServer`: on Windows force
+  `allow_reuse_address=False` + set `SO_EXCLUSIVEADDRUSE` before
+  `bind()`; non-Windows byte-for-byte unchanged; crash-restart safe)
+  makes the documented single-instance gate genuine on Windows. The
+  Phase-4 UC-E9 test was rewritten into a genuine real-effect test
+  (`test_core_phase4.py::test_single_instance_gate_refuses_second_instance_and_is_crash_restart_safe`):
+  a real first `start_command_server` serves (token-carrying
+  `GET /ping`→200); a real SECOND on the SAME port genuinely returns
+  `None`; the **verbatim** `app_web.main` guard genuinely raises the
+  real `SystemExit(0)` while the first keeps serving; a FRESH instance
+  rebinds the same port after the first exits. **UC-E9 missing →
+  covered** (§9.5 / Honest parity note 5 / backlog UC-E9 + Honest gaps
+  note 6) — not forced green: the asserted refusal is the real product
+  behaviour after the fix. Local repro on this machine (isolated venv,
+  Python 3.11.9, no machine/runner pollution): full unit suite
+  `python -m pytest -q` → **266 passed** (fully additive — no
+  production-test regression; `command_server.py` is the only
+  production change); full `e2e/web` (served, headless Chromium) →
+  **84 passed twice** (stable, order-independent); `ruff check
+  src/pippal tests` → clean; `pytest --collect-only` → exactly 266
+  (zero from `e2e/web`), `e2e/web` → 84. Explicit demonstrations: (a)
+  two instances on the same port → second genuinely refused (real
+  `WinError 10048`); (b) after instance 1 exits, a fresh instance binds
+  & serves (crash-restart safe — not a permanent port lock); (c) the
+  hermetic ephemeral-port path (`PIPPAL_CMD_SERVER_PORT=0` → bound port
+  published back + token gate) still works. The merge-required
+  **`Web UI E2E (served, headless Chromium)`** + **`Lint`** + **`Unit
+  tests`** checks were then confirmed SUCCESS on the self-hosted
+  **LocalSystem** runner `pippal-ci-ACER-LAPTOP` on the pushed PR-#90
+  head, and the **`Tier-2 Journey E2E`** workflow confirmed still green
+  on `pippal-interactive-ACER-LAPTOP` on the new head — CI evidence
   (run/job/runner/pass-count/test-names) recorded in the PR; see the
   final report / commit trail.
 - **Prior record (pre-Phase-1, still accurate for that state): 59

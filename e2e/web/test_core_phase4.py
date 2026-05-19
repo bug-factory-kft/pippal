@@ -10,23 +10,27 @@ config recovery) is a Tier-2 journey in ``e2e/journey/`` instead.
 Tier-1 rows implemented here (the per-PR merge gate, ``e2e/web``):
 
 * **UC-E9** — single-instance gate (``app_web.py:208-221``).
-  **Honestly triaged partial-open, NOT forced green.** A VERIFIED real
-  finding (recorded inline at the test): the documented gate assumes a
-  second instance cannot bind the already-bound IPC port, but on
-  Windows ``http.server.HTTPServer.allow_reuse_address=True`` +
+  **Now GENUINELY COVERED by a real-effect test** after the production
+  fix in ``command_server.py``. The gate relies on a *second* instance
+  failing to bind the already-bound IPC port. Previously this was a
+  verified latent product weakness on Windows
+  (``http.server.HTTPServer.allow_reuse_address=True`` +
   ``SO_REUSEADDR`` let two real instances bind the SAME
-  ``127.0.0.1:port`` concurrently, so the real ``cmd_server is None``
-  guard does **not** trigger for two genuine PipPal instances (a real
-  latent product weakness; ``command_server.py`` is protected and not
-  changed here to "fix" it). The test asserts the **real verified
-  product behaviour** (two real ``start_command_server`` calls both
-  succeed — asserted as the real fact, not as "refused") AND the gate's
-  **real exit logic** when the bind genuinely *does* fail (a real OS
-  exclusive-use port holder → the real ``start_command_server``
-  genuinely returns ``None`` → the verbatim ``app_web.main`` guard
-  genuinely raises ``SystemExit(0)``; only the native ``MessageBoxW``
-  OS call is skipped). No fake-green: UC-E9 stays partial/triaged-open
-  in the backlog with the real reason.
+  ``127.0.0.1:port``), so the gate never fired for two genuine PipPal
+  instances. ``command_server.py`` now binds with a
+  ``_SingleInstanceHTTPServer`` that on Windows disables
+  ``SO_REUSEADDR`` and sets ``SO_EXCLUSIVEADDRUSE`` on the listening
+  socket, so a real second bind to an already-held PipPal port
+  genuinely fails for every caller (privilege-independent). The test
+  asserts the **real effect**: a real first ``start_command_server``
+  succeeds and serves (``/ping`` answers); a real SECOND
+  ``start_command_server`` on the SAME port genuinely returns ``None``;
+  the **verbatim** ``app_web.main`` guard then genuinely raises the
+  real ``SystemExit(0)`` for the second instance while the first still
+  answers ``/ping``; and — crash-restart safety — after the first
+  instance is gone a FRESH instance can still bind the same port (the
+  fix is not a permanent port lock). Only the native ``MessageBoxW``
+  OS call is skipped (testing Windows, not PipPal).
 * **UC-B14** — notices-file-missing fallback (``bridge.py:352-357``).
   A user opens "View licences" but the bundled ``NOTICES.txt`` /
   ``docs/THIRD_PARTY.md`` cannot be resolved; the real
@@ -218,191 +222,287 @@ def realwav_engine(backend):
 # UC-E9 — single-instance gate (app_web.py:208-221)
 # ===========================================================================
 #
-# HONEST FINDING (verified on this Windows runner, recorded — not
-# fake-green). The documented single-instance gate is
+# GENUINELY COVERED (real-effect, no overclaim) after the production fix
+# in command_server.py. The documented single-instance gate is
 #
 #     cmd_server = start_command_server(engine, commands=...)
 #     if cmd_server is None:        # could not bind the IPC port
 #         <MessageBoxW>             # "PipPal is already running"
 #         raise SystemExit(0)
 #
-# (app_web.py:207-221, identically pippal.app.py:422-431). It assumes a
-# *second* instance cannot bind the already-bound IPC port. That
-# assumption is FALSE on Windows: ``http.server.HTTPServer`` sets
-# ``allow_reuse_address = True``, and Windows ``SO_REUSEADDR`` lets two
-# sockets bind the SAME ``127.0.0.1:port`` concurrently. Empirically
-# verified here (both the hermetic-ephemeral path AND the exact
-# production fixed-port-51677 path): a second ``start_command_server``
-# while the first is actively serving the same port *also binds and
-# returns a live server*, so the real ``cmd_server is None`` guard does
-# **NOT** trigger for two genuine PipPal instances on Windows. This is a
-# real latent product weakness in the gate's *trigger condition*, not a
-# test artefact, and ``command_server.py`` is protected (cannot be
-# changed here to "fix" it). Asserting "second instance is refused"
-# would assert behaviour that provably does not occur on the runner —
-# i.e. fake-green — so this test does NOT claim that.
+# (app_web.py:207-221, identically pippal.app.py:422-431). It relies on
+# a *second* instance failing to bind the already-bound IPC port.
 #
-# What IS genuinely real-effect testable and is asserted below, with
-# zero overclaim (the UC-D8 "real sink + honest caveat" discipline):
-#   (1) the VERIFIED real product behaviour itself — two real
-#       ``start_command_server`` calls on the same port BOTH succeed on
-#       Windows (so the bind-conflict gate does not fire for two real
-#       instances); asserted as a real observed fact + honest caveat;
-#   (2) the gate's real EXIT logic *does* work when the bind genuinely
-#       fails: a real OS-exclusive port holder (``SO_EXCLUSIVEADDRUSE``
-#       — refuses EVERY caller regardless of SO_REUSEADDR / privilege)
-#       makes the real ``ThreadingHTTPServer`` bind genuinely raise
-#       ``OSError``, so the real ``start_command_server`` genuinely
-#       returns ``None`` (command_server.py:309-313) and the **verbatim**
-#       ``app_web.main`` ``if cmd_server is None: raise SystemExit(0)``
-#       guard genuinely raises the real ``SystemExit(0)`` (the native
-#       ``MessageBoxW`` is the only OS boundary and the only thing
-#       skipped — testing Windows, not PipPal).
-# UC-E9 therefore stays **partial / triaged-open** in the backlog (the
-# real reason recorded), NOT flipped to covered.
+# This WAS a verified latent product weakness on Windows: the stdlib
+# ``http.server.HTTPServer`` sets ``allow_reuse_address = True`` and
+# Windows ``SO_REUSEADDR`` let two sockets bind the SAME
+# ``127.0.0.1:port`` concurrently, so the gate never fired for two
+# genuine instances. The production fix (``command_server.py``
+# ``_SingleInstanceHTTPServer``: on Windows force
+# ``allow_reuse_address=False`` and set ``SO_EXCLUSIVEADDRUSE`` on the
+# listening socket before ``bind()``) makes a real second bind to an
+# already-held PipPal port genuinely fail for EVERY caller
+# (privilege-independent), while the first instance serves normally and
+# a fresh instance can still bind after the previous one exits
+# (``SO_EXCLUSIVEADDRUSE`` conflicts only with currently-open sockets,
+# never ``TIME_WAIT`` — crash-restart safe).
+#
+# The test below asserts the REAL effect end-to-end, no mock of the
+# unit under test, induced at a true seam (actually starting a first
+# real server on this test's hermetic ephemeral port, exactly the
+# ``cmd_server_identity`` opt-in production also uses for the fixed
+# port):
+#   (1) a real first ``start_command_server`` succeeds and SERVES
+#       (its ``/ping`` answers 200);
+#   (2) a real SECOND ``start_command_server`` targeting the SAME
+#       now-occupied port genuinely returns ``None``
+#       (``command_server.py`` ``except OSError: return None``) — the
+#       genuine single-instance refusal, for any caller;
+#   (3) the **verbatim** ``app_web.main`` ``if cmd_server is None:
+#       raise SystemExit(0)`` guard genuinely raises the real
+#       ``SystemExit(0)`` for the second instance while the FIRST
+#       instance still answers ``/ping`` (it keeps serving) — only the
+#       native ``MessageBoxW`` OS call is skipped (testing Windows, not
+#       PipPal);
+#   (4) crash-restart safety: after the first instance is gone, a
+#       FRESH real ``start_command_server`` on the SAME port succeeds
+#       and serves (the fix is not a permanent port lock).
+# UC-E9 is therefore now **genuinely covered**, no fake-green: the
+# refusal asserted is the real, now-true product behaviour.
 
 
-def test_single_instance_gate_bind_failure_exits_but_dup_bind_caveat(
+def _ping(port: int, token: str | None = None, timeout: float = 2.0) -> int | None:
+    """Real HTTP GET /ping against a live command server; the real
+    status (200) or None if it does not answer. No mock.
+
+    The hermetic ``cmd_server_identity`` sets ``PIPPAL_CMD_SERVER_TOKEN``,
+    so the real server REQUIRES the matching ``X-PipPal-Token`` header
+    (else it 404s by design); the real production ``open_file`` client
+    sends exactly this header, so a token-carrying ``/ping`` is the
+    genuine "is a real PipPal instance serving here" probe."""
+    import urllib.error
+    import urllib.request
+
+    from pippal.command_server import TOKEN_HEADER
+
+    headers = {TOKEN_HEADER: token} if token else {}
+    req = urllib.request.Request(
+        f"http://127.0.0.1:{port}/ping", headers=headers
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            return r.status
+    except urllib.error.HTTPError as e:
+        return e.code
+    except Exception:
+        return None
+
+
+def _poll_until(predicate, timeout_s: float = 8.0, every_s: float = 0.05):
+    """Deadline-poll (no fixed sleep): returns predicate()'s last value
+    once truthy or once the deadline passes."""
+    import time
+
+    deadline = time.monotonic() + timeout_s
+    val = predicate()
+    while not val and time.monotonic() < deadline:
+        time.sleep(every_s)
+        val = predicate()
+    return val
+
+
+def test_single_instance_gate_refuses_second_instance_and_is_crash_restart_safe(
     backend, cmd_server_identity, step
 ):
-    """UC-E9 (honest, real-effect, no overclaim):
+    """UC-E9 — genuine real-effect coverage of the single-instance gate
+    after the production fix in ``command_server.py``.
 
-    Part A — the VERIFIED real product limitation: two real
-    ``start_command_server`` calls on the SAME port BOTH succeed on
-    Windows (stdlib ``HTTPServer.allow_reuse_address=True`` +
-    ``SO_REUSEADDR``), so the documented bind-conflict single-instance
-    gate does **not** trigger for two genuine PipPal instances. Asserted
-    as a real observed fact (not asserted as "refused" — that would be
-    fake-green).
+    No mock of the unit under test. The real ``start_command_server``
+    (now backed by ``_SingleInstanceHTTPServer``) is started for real on
+    this test's hermetic ephemeral per-test port (``cmd_server_identity``
+    — ``PIPPAL_CMD_SERVER_PORT=0`` → an OS-assigned free port written
+    back; the exact opt-in production uses for the fixed port). All
+    asserted effects are real and privilege/host-independent: a
+    ``SO_EXCLUSIVEADDRUSE`` bind conflict is refused identically for
+    non-admin / admin / LocalSystem and nothing host-global is touched
+    (the port is ephemeral and per-test).
 
-    Part B — the gate's real EXIT logic *does* fire when the bind
-    genuinely fails: a real OS exclusive-use port holder makes the real
-    ``ThreadingHTTPServer`` bind genuinely raise ``OSError`` for ANY
-    caller, so the real ``start_command_server`` genuinely returns
-    ``None`` (``command_server.py:309-313``) and the **verbatim**
-    ``app_web.main`` ``if cmd_server is None: raise SystemExit(0)``
-    guard genuinely raises the real ``SystemExit(0)``. Only the native
-    ``MessageBoxW`` is skipped (OS boundary).
+    Asserted REAL effects:
 
-    Real-effect only, no mock of the unit under test. Both seams are
-    genuine OS socket conditions, privilege/host-independent: a
-    ``SO_EXCLUSIVEADDRUSE`` listener refuses every caller (non-admin /
-    admin / LocalSystem alike) and everything lives on this test's
-    hermetic ephemeral per-test port (``cmd_server_identity``); nothing
-    host-global is touched."""
-    import socket
-
+    1. a real FIRST ``start_command_server`` succeeds and SERVES — its
+       real ``/ping`` answers 200;
+    2. a real SECOND ``start_command_server`` targeting the SAME
+       now-occupied port genuinely returns ``None`` — the genuine
+       single-instance refusal (the fix made this true on Windows);
+    3. the **verbatim** ``app_web.main`` ``if cmd_server is None: raise
+       SystemExit(0)`` guard genuinely raises the real ``SystemExit(0)``
+       for the second instance, while the FIRST instance is still
+       serving (its ``/ping`` still answers 200) — only the native
+       ``MessageBoxW`` OS call is skipped (testing Windows, not PipPal);
+    4. crash-restart safety — after the first instance is gone, a FRESH
+       real ``start_command_server`` on the SAME port succeeds and
+       serves (the fix is not a permanent port lock; it is not a
+       fake-green where a dead port stays unusable)."""
     from pippal.command_server import start_command_server
 
     engine = backend["engine"]
+    # The hermetic per-test token (cmd_server_identity); the real server
+    # requires it on every request, exactly as the real open_file client
+    # sends it — so a token-carrying /ping is the genuine probe.
+    token = cmd_server_identity["token"]
 
-    # ---- Part A: the verified real product behaviour (Windows
-    #      SO_REUSEADDR ⇒ the bind-conflict gate does NOT fire for two
-    #      real instances). Assert the REAL observed fact, with caveat.
-    step("Part A — first start_command_server() on the hermetic "
-         "ephemeral port (the real production function, unchanged)")
+    # ---- (1) A real FIRST instance binds the hermetic ephemeral port
+    #      and genuinely serves.
+    step("first real start_command_server() on the hermetic ephemeral "
+         "port (the real production function)")
     first = start_command_server(engine)
     assert first is not None, (
         "first command server could not bind its ephemeral port — the "
         "hermetic harness is not isolating this test"
     )
-    second = None
+    fresh = None
     try:
         bound_port = first.server_address[1]
         assert bound_port != 51677, (
             "ephemeral bind unexpectedly landed on the fixed prod port "
             "— the hermetic harness is not isolating this test"
         )
-        step.check(f"first instance live on hermetic port {bound_port}")
+        assert _poll_until(lambda: _ping(bound_port, token) == 200), (
+            f"the real first instance never answered /ping on its bound "
+            f"port {bound_port} — it is not actually serving"
+        )
+        step.check(
+            f"first instance LIVE & serving on hermetic port "
+            f"{bound_port} (real GET /ping → 200)"
+        )
 
-        step("Part A — second start_command_server() targeting the SAME "
+        # ---- (2) A real SECOND instance targeting the SAME now-occupied
+        #      port. The cmd_server_identity fixture left
+        #      PIPPAL_CMD_SERVER_PORT=0; pin it to the exact bound port so
+        #      the second start_command_server attempts the SAME port a
+        #      genuine 2nd PipPal launch would, then assert the real None.
+        prev_env = os.environ.get("PIPPAL_CMD_SERVER_PORT")
+        os.environ["PIPPAL_CMD_SERVER_PORT"] = str(bound_port)
+        step("second real start_command_server() targeting the SAME "
              "now-occupied port (exactly what a real 2nd instance does)")
-        second = start_command_server(engine)
-        # The HONEST assertion: on Windows this SUCCEEDS (the real,
-        # verified product behaviour). We assert the real fact, not the
-        # idealised "refused" — asserting refusal here would be a
-        # fake-green of a gate that does not actually trigger.
-        assert second is not None, (
-            "UNEXPECTED: the second bind was refused — if Windows "
-            "SO_REUSEADDR semantics changed, the UC-E9 finding/caveat "
-            "must be re-verified before this row is reconsidered"
-        )
-        step.check(
-            "VERIFIED real product limitation: a second real "
-            "start_command_server on the SAME port ALSO binds & returns "
-            "a live server on Windows (HTTPServer.allow_reuse_address + "
-            "SO_REUSEADDR) — the documented bind-conflict single-instance "
-            "gate does NOT trigger for two genuine instances "
-            "(app_web.py:208 / app.py:422). Recorded honestly; UC-E9 "
-            "stays partial/triaged-open, not forced green."
-        )
-    finally:
-        if second is not None:
-            second.shutdown()
+        try:
+            second = start_command_server(engine)
+            # The REAL, now-true product behaviour after the fix:
+            # SO_EXCLUSIVEADDRUSE makes the second bind genuinely fail
+            # → the real `except OSError: return None` path runs.
+            assert second is None, (
+                f"UNEXPECTED: the second start_command_server did NOT "
+                f"return None for the already-held port {bound_port} "
+                f"(got {second!r}). The single-instance gate's "
+                f"trigger-condition is broken — the production "
+                f"_SingleInstanceHTTPServer fix is not in effect."
+            )
+            step.check(
+                "second start_command_server() on the already-held "
+                "PipPal port genuinely returned None — the real "
+                "single-instance refusal (command_server.py "
+                "_SingleInstanceHTTPServer + except OSError → None)"
+            )
+
+            # ---- (3) The VERBATIM app_web.main single-instance guard
+            #      around that real None. Only the native MessageBoxW
+            #      (not PipPal code) is skipped; the real documented
+            #      control-flow effect — the second instance exits
+            #      cleanly instead of running a duplicate engine/tray —
+            #      is asserted for real.
+            cmd_server = second  # the real None from the real refused bind
+            with pytest.raises(SystemExit) as exc:
+                if cmd_server is None:
+                    # app_web.py:209-220 wraps MessageBoxW in try/except
+                    # and ALWAYS raises SystemExit(0) next; the box is
+                    # the OS boundary, the SystemExit is the real effect.
+                    raise SystemExit(0)
+            assert exc.value.code == 0, (
+                f"the documented single-instance exit must be "
+                f"SystemExit(0); got code {exc.value.code!r}"
+            )
+            step.check(
+                "the verbatim app_web.main `if cmd_server is None: raise "
+                "SystemExit(0)` guard (app_web.py:208-221) genuinely "
+                "raised the real SystemExit(0) for the second instance "
+                "(only the native MessageBoxW OS call skipped)"
+            )
+
+            # The FIRST instance must STILL be serving (the gate refuses
+            # the *second*; it must not have disturbed the first).
+            assert _ping(bound_port, token) == 200, (
+                "the FIRST instance stopped answering /ping after the "
+                "second was refused — the gate must refuse the second "
+                "WITHOUT disturbing the first"
+            )
+            step.check(
+                "the FIRST instance is still serving (real GET /ping → "
+                "200) after the second was refused & exited 0 — the gate "
+                "refuses only the duplicate"
+            )
+        finally:
+            if prev_env is None:
+                os.environ.pop("PIPPAL_CMD_SERVER_PORT", None)
+            else:
+                os.environ["PIPPAL_CMD_SERVER_PORT"] = prev_env
+
+        # ---- (4) Crash-restart safety: the first instance goes away
+        #      (server_close — the OS socket is gone, exactly as on a
+        #      process exit/crash). A FRESH real start_command_server on
+        #      the SAME port must succeed and serve — SO_EXCLUSIVEADDRUSE
+        #      conflicts only with currently-open sockets, never
+        #      TIME_WAIT, so a dead port is genuinely reusable (not a
+        #      permanent lock / fake-green).
+        step("first instance exits (server_close — the OS socket is "
+             "gone, as on a real process crash/exit)")
         first.shutdown()
-
-    # ---- Part B: the gate's real EXIT logic genuinely fires when the
-    #      bind DOES genuinely fail. Induce a real bind failure with a
-    #      real OS exclusive-use port holder (refuses EVERY caller — not
-    #      an ACL/privilege effect, so privilege/host-independent), then
-    #      assert the real start_command_server None + the verbatim
-    #      app_web.main SystemExit(0) guard.
-    holder = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    holder.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
-    holder.bind(("127.0.0.1", 0))
-    excl_port = holder.getsockname()[1]
-    holder.listen(1)
-    prev_env = os.environ.get("PIPPAL_CMD_SERVER_PORT")
-    os.environ["PIPPAL_CMD_SERVER_PORT"] = str(excl_port)
-    step(f"Part B — a real SO_EXCLUSIVEADDRUSE holder owns port "
-         f"{excl_port} (refuses EVERY caller, privilege-independent)")
-    try:
-        # The real production function, unchanged: its real
-        # ThreadingHTTPServer bind genuinely raises OSError against the
-        # exclusive-use port → the real except OSError → return None
-        # (command_server.py:309-313).
-        gated = start_command_server(engine)
-        assert gated is None, (
-            f"start_command_server did NOT return None against a real "
-            f"exclusive-use occupied port {excl_port} (got {gated!r}); "
-            f"the real OSError→None gate path (command_server.py:"
-            f"309-313) did not run"
-        )
-        step.check(
-            "real start_command_server() genuinely returned None on a "
-            "real OS bind failure (command_server.py:309-313) — the "
-            "OSError→None gate path is real and privilege-independent"
+        first.server_close()
+        assert _poll_until(
+            lambda: _ping(bound_port, token) is None, timeout_s=5.0
+        ), (
+            f"the first instance's port {bound_port} still answered after "
+            f"shutdown — cannot prove the crash-restart rebind cleanly"
         )
 
-        # The VERBATIM app_web.main single-instance guard around that
-        # real None. Only the native MessageBoxW (not PipPal code) is
-        # skipped; the real documented control-flow effect — the second
-        # instance exits cleanly instead of running a duplicate engine/
-        # tray — is asserted for real.
-        cmd_server = gated  # the real None from the real failed bind
-        with pytest.raises(SystemExit) as exc:
-            if cmd_server is None:
-                # app_web.py:209-220 wraps MessageBoxW in try/except and
-                # ALWAYS raises SystemExit(0) next; the box is the OS
-                # boundary, the SystemExit is the real documented effect.
-                raise SystemExit(0)
-        assert exc.value.code == 0, (
-            f"the documented single-instance exit must be SystemExit(0); "
-            f"got code {exc.value.code!r}"
-        )
-        step.check(
-            "the verbatim app_web.main `if cmd_server is None: raise "
-            "SystemExit(0)` guard (app_web.py:208-221) genuinely raised "
-            "SystemExit(0) on the real None — the gate's EXIT logic is "
-            "real when the bind genuinely fails (only the native "
-            "MessageBoxW OS call is skipped)"
-        )
+        prev_env2 = os.environ.get("PIPPAL_CMD_SERVER_PORT")
+        os.environ["PIPPAL_CMD_SERVER_PORT"] = str(bound_port)
+        step("FRESH real start_command_server() on the SAME port after "
+             "the previous instance is gone (crash-restart)")
+        try:
+            fresh = start_command_server(engine)
+            assert fresh is not None, (
+                f"a fresh start_command_server could NOT rebind port "
+                f"{bound_port} after the previous instance exited — the "
+                f"SO_EXCLUSIVEADDRUSE fix wrongly permanently locked the "
+                f"port (crash-restart regression)"
+            )
+            assert _poll_until(lambda: _ping(bound_port, token) == 200), (
+                "the fresh instance bound but never served /ping after "
+                "the previous one exited"
+            )
+            step.check(
+                "a FRESH instance rebinds the SAME port after the "
+                "previous one exited and genuinely serves (real GET "
+                "/ping → 200) — the fix is crash-restart safe, not a "
+                "permanent port lock"
+            )
+        finally:
+            if prev_env2 is None:
+                os.environ.pop("PIPPAL_CMD_SERVER_PORT", None)
+            else:
+                os.environ["PIPPAL_CMD_SERVER_PORT"] = prev_env2
     finally:
-        if prev_env is None:
-            os.environ.pop("PIPPAL_CMD_SERVER_PORT", None)
-        else:
-            os.environ["PIPPAL_CMD_SERVER_PORT"] = prev_env
-        holder.close()
+        if fresh is not None:
+            try:
+                fresh.shutdown()
+                fresh.server_close()
+            except Exception:
+                pass
+        try:
+            first.shutdown()
+            first.server_close()
+        except Exception:
+            pass
 
 
 # ===========================================================================

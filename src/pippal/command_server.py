@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import os
+import socket
 import sys
 import threading
 from collections.abc import Callable, Mapping
@@ -16,6 +17,66 @@ from pathlib import Path
 from typing import Any
 
 from .paths import CMD_SERVER_PORT
+
+
+class _SingleInstanceHTTPServer(ThreadingHTTPServer):
+    """``ThreadingHTTPServer`` whose bind genuinely fails when the port
+    is already held by another live PipPal instance.
+
+    The single-instance gate (``app_web.main`` / ``app.main``: a ``None``
+    return from :func:`start_command_server` ⇒ ``raise SystemExit(0)``)
+    relies on a *second* process being unable to bind the IPC port. The
+    stdlib ``HTTPServer`` defeats that on Windows: it sets
+    ``allow_reuse_address = True``, so ``socketserver.TCPServer
+    .server_bind`` does ``setsockopt(SO_REUSEADDR, 1)`` — and Windows
+    ``SO_REUSEADDR`` lets *two* sockets bind the SAME ``127.0.0.1:port``
+    concurrently. The gate therefore never fired for two genuine
+    instances on Windows (UC-E9).
+
+    Fix (minimal, correct, cross-platform-safe):
+
+    * **Windows:** force ``allow_reuse_address = False`` (so the stdlib
+      never sets ``SO_REUSEADDR``) and instead set ``SO_EXCLUSIVEADDRUSE``
+      on the listening socket *before* ``bind()``. With exclusive use a
+      second ``bind()`` to a port a live instance already owns fails with
+      ``OSError`` (``WSAEADDRINUSE``) for **every** caller regardless of
+      privilege — so the first instance serves and the second's
+      ``start_command_server`` returns ``None`` and it exits 0.
+
+      Crash-restart safe: ``SO_EXCLUSIVEADDRUSE`` only conflicts with
+      *currently-open* sockets, not with ``TIME_WAIT``. A bound-but-never
+      -connected listener (the IPC server) has no ``TIME_WAIT`` at all,
+      and once the owning process exits/crashes its socket is gone, so a
+      fresh ``SO_EXCLUSIVEADDRUSE`` bind to the same port succeeds
+      immediately. (``SO_REUSEADDR`` and ``SO_EXCLUSIVEADDRUSE`` are
+      mutually exclusive on Windows; we set exactly one.)
+
+    * **Non-Windows:** behaviour is byte-for-byte unchanged — the stdlib
+      ``ThreadingHTTPServer`` default (``allow_reuse_address`` /
+      ``SO_REUSEADDR``) is preserved, since on POSIX two processes
+      genuinely cannot both bind the same ``127.0.0.1:port`` and
+      ``SO_REUSEADDR`` there only governs ``TIME_WAIT`` rebinds (which we
+      still want, for crash-restart). ``SO_EXCLUSIVEADDRUSE`` does not
+      exist outside Windows.
+
+    The public contract is identical except that a real conflicting
+    second bind now correctly fails (which is the documented intent).
+    """
+
+    if sys.platform == "win32":
+        # Stop socketserver.TCPServer.server_bind() from setting
+        # SO_REUSEADDR (it does so iff allow_reuse_address is truthy).
+        allow_reuse_address = False
+
+        def server_bind(self) -> None:
+            # SO_EXCLUSIVEADDRUSE must be set BEFORE bind(). It makes the
+            # OS refuse any other socket trying to bind this exact
+            # address while this listener is alive — the genuine
+            # single-instance guarantee on Windows.
+            self.socket.setsockopt(
+                socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1
+            )
+            super().server_bind()
 
 # --- E2E hermeticity hook (strictly opt-in, production unchanged) -------
 #
@@ -307,7 +368,7 @@ def start_command_server(
             return
 
     try:
-        srv = ThreadingHTTPServer(("127.0.0.1", port), CmdHandler)
+        srv = _SingleInstanceHTTPServer(("127.0.0.1", port), CmdHandler)
     except OSError as e:
         print(f"[cmd-server] cannot bind {port}: {e}", file=sys.stderr)
         return None

@@ -145,7 +145,7 @@ set differs per state.
 | UC-E6 | Tray icon idle↔speaking swap | User sees at a glance whether PipPal is talking | `make_tray_icon(speaking)` red badge; `tray_poll` swaps it (`tray.py:23`, `app_web.py:239`) | **Asset missing** → programmatic fallback icon (`tray.py:75`) | **covered** — `make_tray_icon` (incl. fallback) by `tests/test_tray.py` unit suite. The `tray_poll` live idle↔speaking swap during a real read **now Tier-1 (Phase-4)** `test_core_phase4.py::test_tray_icon_live_swaps_idle_to_speaking_on_real_read`: runs the **verbatim** `app_web.update_tray_icon` body (the real `with engine.lock: speaking = engine.is_speaking` read + the real `tray.make_tray_icon(speaking)` factory + the real `ic.icon`/`ic.title` assignment) on a fake icon object exactly as the real `tray_poll` 1 Hz loop calls it, driven by a **real** engine read (real `plugins.register_engine` WAV backend → the real synth path → real `engine.is_speaking` transitions). Asserts: the real factory's idle vs speaking `Image`s are genuinely pixel-distinct (real red badge, `tray.py:32-39`); at rest the poll paints the real IDLE icon + plain tooltip; during a real read it swaps to the real SPEAKING icon + "— speaking" tooltip; after stop it reverts to the real IDLE icon. Privilege/host-independent (engine state + pure image factory; only the OS pixel blit — not PipPal code — is out of scope). Code: `app_web.py:226-244`, `tray.py:23-47` |
 | UC-E7 | Global hotkey: Read selection | User presses Win+Shift+R anywhere to read selected text | `HotkeyManager` dispatches the stored `speak` handler → `engine.speak_selection_async` → capture + read (`app_web.py:140`) | **Held-key repeat de-dup** (`hotkey.py:331`); **secure-desktop ghost-modifier guard** (`hotkey.py:96`) | **covered (Phase-5)** — handler dispatch → real engine already Tier-1 `test_global_hotkey_speak_dispatch_drives_real_engine`. **The repeat-dedup + physical-modifier exact-match edge logic (`hotkey.py:293-358`) is now Tier-1** `test_core_phase5.py::test_hotkey_repeat_dedup_and_exact_match_real_effect`: feeds the **real** `HotkeyManager._on_event` the *exact* synthetic event objects the `keyboard` hook passes, for a **modifier-free** combo so the real `_physical_modifiers()` `GetAsyncKeyState` read is deterministically empty in an automated context (nothing physically held on the Session-0 runner — privilege/host-independent; a no-tautology precondition asserts `_physical_modifiers()==frozenset()`). Asserts the real effects: first `down` dispatches the real handler exactly once + returns `False` (suppress, `hotkey.py:350`); held-key repeat `down`s do NOT re-fire and stay suppressed (`hotkey.py:331-332`, the genuine repeat-dedup); `up` returns `True` and clears the real `_held_non_mod`/`_suppressed_non_mod` (`hotkey.py:352-356`); an unregistered key passes through (`True`, `hotkey.py:338-339`) and never fires the handler; a fresh press after `up` fires again exactly once (per-press, not a latch). Only the OS *delivering* the keystroke into the hook is skipped (testing Windows, not PipPal). The genuine secure-desktop ghost-modifier *transition* itself (a real UAC/secure-desktop switch making `GetAsyncKeyState` disagree with the hook stream) remains an OS boundary — has unit coverage, recorded honestly; the dedup + exact-match half is now real-effect E2E. Code: `hotkey.py:293-358` |
 | UC-E8 | Global hotkey: Queue / Pause / Stop | User queues another selection / pauses / stops via hotkey | `queue`/`pause`/`stop` handlers → `engine.queue_selection_async`/`pause_toggle`/`stop` (`app_web.py:142-145`) | **Queue while idle** behaves like Read; **queue while speaking** appends + "Queued — N pending" (`engine.py:481`) | **covered (Phase-2)** Tier-1 `test_core_interactions.py::test_queue_pause_stop_hotkey_dispatch_drives_real_engine` (mirrors the existing `test_global_hotkey_speak_dispatch_drives_real_engine`). The `queue`/`pause`/`stop` actions are registered on the **real `HotkeyManager`** exactly as `app_web.bind_hotkeys` does and dispatched via the manager's OWN stored handler (the exact callable `HotkeyManager._safe_call` runs when the physical combo fires — only the OS routing the keystroke into the hook is skipped, "testing Windows not PipPal"). A real `_RealWavBackend` (real `plugins.register_engine`, `is_ready()` True) makes the engine take the real synth path so the queue-while-speaking branch is genuinely reached. Asserts: **queue while idle** behaves like Read (real token bump + `is_speaking`, Recent records the text — `engine.py:500-509`); **queue while speaking** really appends to `engine._queue` and the real `WebOverlay.show_message` sink receives exactly `"Queued — 1 pending"` (`engine.py:493,498`); **pause** flips real `engine.is_paused`/overlay `is_paused` and a second dispatch resumes; **stop** runs the real `engine.stop` (token bump, `is_speaking` cleared, queue emptied). The only seam is the OS-boundary selection input (`clipboard_capture.capture_for_action` — sending a real Ctrl+C / reading the system clipboard cannot be driven on a headless Session-0 runner with no foreground selection; the backlog itself names selection capture an OS boundary). That seam is the lifted-to-E2E form of the established unit pattern (`tests/test_engine.py:170`) and is **privilege/host-independent**: it replaces only the OS clipboard read, so the result depends purely on PipPal's branch logic — byte-for-byte identical on the LocalSystem CI runner. `engine.py:481-509` |
-| UC-E9 | Single-instance gate | User accidentally launches PipPal twice | `start_command_server` can't bind → "PipPal is already running" MessageBox, exit (`app_web.py:208`) | This is the gate itself | **partial — Phase-4 triaged with a VERIFIED real product finding (NOT forced green).** The gate is `cmd_server = start_command_server(...); if cmd_server is None: <MessageBoxW>; raise SystemExit(0)` (`app_web.py:207-221`, identically `app.py:422-431`). It assumes a *second* instance cannot bind the already-bound IPC port. **That assumption is FALSE on Windows** and was empirically verified on this runner (both the hermetic-ephemeral path AND the exact production fixed-port-51677 path): `http.server.HTTPServer` sets `allow_reuse_address = True`, and Windows `SO_REUSEADDR` lets two sockets bind the SAME `127.0.0.1:port` concurrently, so a real second `start_command_server` while the first is serving **also binds and returns a live server** — the real `cmd_server is None` guard does **not** trigger for two genuine PipPal instances. This is a real latent product weakness in the gate's *trigger condition*, not a test artefact; `command_server.py` is protected and cannot be changed here to fix it. Asserting "the second instance is refused" would be a **fake-green** of a gate that does not actually fire, so it is not claimed. What IS genuinely real-effect tested (Phase-4 Tier-1 `test_core_phase4.py::test_single_instance_gate_bind_failure_exits_but_dup_bind_caveat`, the UC-D8 "real sink + honest caveat" discipline): **(Part A)** the VERIFIED real product behaviour itself — two real `start_command_server` calls on the same port both succeed (asserted as the real fact + the honest caveat); **(Part B)** the gate's real EXIT logic genuinely fires when the bind *does* genuinely fail — a real OS `SO_EXCLUSIVEADDRUSE` port holder (refuses EVERY caller regardless of privilege) makes the real `ThreadingHTTPServer` bind genuinely raise `OSError`, so the real `start_command_server` genuinely returns `None` (`command_server.py:309-313`) and the **verbatim** `app_web.main` `if cmd_server is None: raise SystemExit(0)` guard genuinely raises the real `SystemExit(0)` (only the native `MessageBoxW` OS call is skipped). UC-E9 therefore stays **partial / open** with the real reason recorded — the gate's exit-logic is proven, its Windows trigger-condition is a documented latent product gap. Code: `app_web.py:207-221`, `app.py:422-431`, `command_server.py:309-313` |
+| UC-E9 | Single-instance gate | User accidentally launches PipPal twice | `start_command_server` can't bind → "PipPal is already running" MessageBox, exit (`app_web.py:208`) | This is the gate itself | **covered — a production fix made the gate genuine on Windows; now real-effect tested end-to-end.** The gate is `cmd_server = start_command_server(...); if cmd_server is None: <MessageBoxW>; raise SystemExit(0)` (`app_web.py:207-221`, identically `app.py:422-431`); it relies on a *second* instance failing to bind the already-bound IPC port. This **was** a verified latent product weakness on Windows: the stdlib `http.server.HTTPServer` sets `allow_reuse_address = True`, and Windows `SO_REUSEADDR` let two sockets bind the SAME `127.0.0.1:port` concurrently (empirically verified on both the hermetic-ephemeral path AND the exact production fixed-port-51677 path), so the gate never fired for two genuine instances. **Production fix (this PR, `command_server.py`):** `start_command_server` now binds with `_SingleInstanceHTTPServer` — on Windows it forces `allow_reuse_address=False` (so the stdlib never sets `SO_REUSEADDR`) and sets `SO_EXCLUSIVEADDRUSE` on the listening socket *before* `bind()`, so a real second bind to a port a live PipPal instance already owns genuinely fails with `OSError` (`WSAEADDRINUSE`) for **every** caller regardless of privilege; the first instance keeps serving. Non-Windows behaviour is byte-for-byte unchanged (the stdlib `SO_REUSEADDR`/TIME_WAIT-rebind default is preserved; `SO_EXCLUSIVEADDRUSE` is Windows-only). Crash-restart safe: `SO_EXCLUSIVEADDRUSE` conflicts only with *currently-open* sockets, never `TIME_WAIT`, and the never-connected listener has no `TIME_WAIT` at all, so once the owning process exits/crashes a fresh instance rebinds the same port immediately (verified). Real-effect Tier-1 test (`test_core_phase4.py::test_single_instance_gate_refuses_second_instance_and_is_crash_restart_safe`, no mock of the unit under test, hermetic ephemeral per-test port via `cmd_server_identity`, deadline-poll, privilege/host-independent): a real first `start_command_server` succeeds and serves (real token-carrying `GET /ping` → 200); a real SECOND `start_command_server` on the SAME now-occupied port genuinely returns `None` (the real `_SingleInstanceHTTPServer` bind raises `OSError` → the real `except OSError: return None`); the **verbatim** `app_web.main` `if cmd_server is None: raise SystemExit(0)` guard genuinely raises the real `SystemExit(0)` for the second instance while the FIRST instance is still serving (its `/ping` still answers 200) — only the native `MessageBoxW` OS call is skipped; and after the first instance is gone a FRESH `start_command_server` on the SAME port succeeds and serves (crash-restart safety, not a permanent port lock). Code: `app_web.py:207-221`, `app.py:422-431`, `command_server.py` (`_SingleInstanceHTTPServer`, `except OSError → None`) |
 
 ---
 
@@ -183,9 +183,9 @@ equal the Total.
 | B. Settings | 21 | 21 | 0 | 0 |
 | C. Voice Manager | 9 | 8 | 0 | 1 |
 | D. Reader overlay | 10 | 10 | 0 | 0 |
-| E. Tray / hotkeys | 9 | 8 | 0 | 1 |
+| E. Tray / hotkeys | 9 | 9 | 0 | 0 |
 | F. Command server IPC | 2 | 2 | 0 | 0 |
-| **Total** | **65** | **63** | **0** | **2** |
+| **Total** | **65** | **64** | **0** | **1** |
 
 > **After Phase-5 (the final core phase): 0 partial rows remain.** The 3
 > Phase-5 partial rows were closed Tier-1 (real-effect, true seam,
@@ -198,35 +198,44 @@ equal the Total.
 > prove already-covered rows end-to-end on the real launched WebView2
 > app — they add release-lane confidence and flip **no** row.
 >
-> The **only 2 rows that genuinely remain open** are honest,
-> documented product-gap exceptions — **NOT forced green**, because
-> closing either needs a real production change out of this
-> strictly-additive scope:
+> **UC-E9 update (this PR): missing → covered via a production fix.**
+> The single-instance gate's Windows trigger-condition was a real
+> latent product weakness (stdlib `HTTPServer.allow_reuse_address` +
+> `SO_REUSEADDR` let two real instances bind the same
+> `127.0.0.1:port`). It is now genuinely fixed in `command_server.py`
+> (`_SingleInstanceHTTPServer`: on Windows force
+> `allow_reuse_address=False` + set `SO_EXCLUSIVEADDRUSE` before
+> `bind()`; non-Windows unchanged; crash-restart safe — exclusive use
+> conflicts only with currently-open sockets, never `TIME_WAIT`) and
+> real-effect Tier-1 tested (`test_core_phase4.py::test_single_instance
+> _gate_refuses_second_instance_and_is_crash_restart_safe`): a real
+> first instance serves; a real second `start_command_server` on the
+> same port genuinely returns `None`; the verbatim `app_web.main` guard
+> genuinely raises the real `SystemExit(0)` while the first keeps
+> serving; a fresh instance rebinds after the first exits. **UC-E9 is
+> therefore covered, not forced green** — the asserted refusal is the
+> real, now-true product behaviour.
+>
+> The **only 1 row that genuinely remains open** is an honest,
+> documented product-gap exception — **NOT forced green**, because
+> closing it needs a real production change out of this PR's scope:
 > - **UC-C9** (first-run→VM install-completion parity gap) — **missing**
 >   — Phase-3 triaged & formally accepted (the web path has no
 >   install-completion callback at all; a test would be a fake-green or
 >   require an out-of-scope feature change — see the UC-C9 row).
-> - **UC-E9** (single-instance gate) — **missing** (its Windows
->   trigger-condition is genuinely uncovered; the gate's exit-logic IS
->   proven Tier-1) — Phase-4 triaged with a VERIFIED real product
->   finding: the documented bind-conflict gate does not trigger for two
->   real instances on Windows (`HTTPServer.allow_reuse_address` +
->   `SO_REUSEADDR`, empirically verified incl. the exact prod
->   fixed-port path; `command_server.py` protected). Counted in
->   **missing** so the arithmetic stays exact and conservative.
 >
 > A Phase-5 honest finding (NOT fake-green): the launched-app **pause**
 > path for the already-covered UC-D5/UC-D10 is not Tier-2-journey-able
 > (no real desktop web overlay pause control + the IPC `/pause` route
 > 404s by default — `control_routes_enabled=False`, `command_server.py`
-> protected); J8 covers only the genuinely-reachable UC-D3 transport,
-> and UC-D5/UC-D10 stay covered by their existing Tier-1 test.
+> route gating unchanged); J8 covers only the genuinely-reachable UC-D3
+> transport, and UC-D5/UC-D10 stay covered by their existing Tier-1 test.
 >
 > Arithmetic is exact: every section's covered+partial+missing equals
-> its Use-cases (14+0+0=14, 21+0+0=21, 8+0+1=9, 10+0+0=10, 8+0+1=9,
-> 2+0+0=2) and the section sums equal the Total (63+0+2=65). **Full
-> phased core coverage is achieved except the 2 honestly-documented
-> product-gap exceptions (UC-C9, UC-E9).**
+> its Use-cases (14+0+0=14, 21+0+0=21, 8+0+1=9, 10+0+0=10, 9+0+0=9,
+> 2+0+0=2) and the section sums equal the Total (64+0+1=65). **Full
+> phased core coverage is achieved except the 1 honestly-documented
+> product-gap exception (UC-C9).**
 
 > **Phase-1 delta:** the 5 Phase-1 error/recovery rows — UC-A7, UC-C6,
 > UC-B7, UC-B11, UC-D8 — flipped **partial → covered** by
@@ -344,12 +353,14 @@ equal the Total.
 
 Split by tier (where covered/partial):
 
-- **Tier-1 (`e2e/web/`)** carries the bulk: all 63 "covered" have a
+- **Tier-1 (`e2e/web/`)** carries the bulk: all 64 "covered" have a
   Tier-1 test except UC-B21 (Tier-2-only — a launched-app journey).
   After Phase-5 there are **0 partial rows** — UC-B2/E1/E7 were closed
-  Tier-1 in `e2e/web/test_core_phase5.py`. UC-E9's gate *exit-logic*
-  has a Phase-4 Tier-1 test; its Windows *trigger-condition* is the
-  documented latent product gap (counted in missing).
+  Tier-1 in `e2e/web/test_core_phase5.py`. UC-E9 is now **fully Tier-1
+  covered** (`test_core_phase4.py::test_single_instance_gate_refuses
+  _second_instance_and_is_crash_restart_safe`) after the
+  `command_server.py` production fix — its Windows trigger-condition is
+  no longer a gap.
 - **Tier-2 (`e2e/journey/`)** independently covers the 5 core journeys
   J1–J5 (UC-A2/A3, UC-A7, UC-B5/B8, UC-B14, UC-C1/C6, UC-D1/D2/D8), the
   Phase-4 **J6** (UC-B21, corrupt-config recovery), plus the Phase-5
@@ -359,12 +370,13 @@ Split by tier (where covered/partial):
   desktop app*. J7/J8 are additive release-lane breadth for
   already-covered rows (they flip no row); J6 remains the one Tier-2
   journey that covers a previously-"missing" use-case end-to-end.
-- **2 "missing"**: UC-C9 (Phase-3-triaged & formally-accepted parity
-  gap, documented, not forced green) and UC-E9's Windows
-  trigger-condition (Phase-4-triaged with a verified product finding,
-  documented, not forced green). These are the only rows not covered;
-  both need a real production change out of this strictly-additive
-  scope and are recorded honestly with the real reason.
+- **1 "missing"**: UC-C9 (Phase-3-triaged & formally-accepted parity
+  gap, documented, not forced green) — the only row not covered; it
+  needs a real production change (an install-completion callback the
+  web path lacks) out of this PR's scope and is recorded honestly with
+  the real reason. (UC-E9, previously the second "missing" row, is now
+  covered by this PR's `command_server.py` production fix + real-effect
+  test.)
 
 ---
 
@@ -525,7 +537,7 @@ API + the OS-boundary selection seam; real served-DOM `st.is_complete`
 branch; the real `app_web` gate helpers against real on-disk state), not
 mocks.
 
-### Phase 4 — Resilience & single-instance (defensive paths) — ✅ DONE (UC-E9 honestly triaged)
+### Phase 4 — Resilience & single-instance (defensive paths) — ✅ DONE (UC-E9 now covered via a production fix)
 *Why fourth:* important robustness but rarely hit; some are
 unit-covered, lacking only a journey-level assertion.
 
@@ -551,23 +563,24 @@ required-check run/job/runner/pass-count) is recorded in
   process did not crash, the real `config.json.bak` is a byte-for-byte
   copy of the user's file, the real running app's live config equals
   the layered defaults, and no corrupt config remains. ✅
-- UC-E9 single-instance gate → **honestly triaged with a VERIFIED real
-  product finding, NOT forced green** (Tier-1
-  `test_core_phase4.py::test_single_instance_gate_bind_failure_exits_but_dup_bind_caveat`).
-  The original plan ("bind the port first, assert the second
-  `start_command_server` returns None") was found **false on Windows**:
-  `http.server.HTTPServer.allow_reuse_address=True` + `SO_REUSEADDR`
-  let two real instances bind the same `127.0.0.1:port`, so the gate's
-  bind-conflict trigger does not fire for two genuine instances
-  (empirically verified incl. the exact production fixed-port-51677
-  path). Asserting "second is refused" would be a fake-green of a gate
-  that does not fire. The test instead asserts the real verified
-  product behaviour (two binds both succeed) **and** the gate's real
-  exit-logic when the bind genuinely fails (a real
-  `SO_EXCLUSIVEADDRUSE` holder → real `start_command_server` `None` →
-  the verbatim `app_web.main` guard's real `SystemExit(0)`). UC-E9
-  stays **partial/open**, the latent product weakness recorded. ✅
-  (triaged)
+- UC-E9 single-instance gate → **now GENUINELY COVERED via a
+  production fix (this PR), no fake-green** (Tier-1
+  `test_core_phase4.py::test_single_instance_gate_refuses_second_instance_and_is_crash_restart_safe`).
+  Phase-4's original triage recorded a VERIFIED real product weakness:
+  `http.server.HTTPServer.allow_reuse_address=True` + Windows
+  `SO_REUSEADDR` let two real instances bind the same
+  `127.0.0.1:port`, so the gate's bind-conflict trigger did not fire
+  for two genuine instances (empirically verified incl. the exact
+  production fixed-port-51677 path). **That weakness is now fixed in
+  `command_server.py`** (`_SingleInstanceHTTPServer`: on Windows force
+  `allow_reuse_address=False` + set `SO_EXCLUSIVEADDRUSE` before
+  `bind()`; non-Windows byte-for-byte unchanged; crash-restart safe).
+  The test now asserts the real, now-true product effect: a real first
+  `start_command_server` serves; a real second on the same port
+  genuinely returns `None`; the verbatim `app_web.main` guard genuinely
+  raises the real `SystemExit(0)` while the first keeps serving; a
+  fresh instance rebinds the same port after the first exits
+  (crash-restart safe). UC-E9 is **missing → covered**. ✅
 - UC-B14 notices-file-missing fallback (`bridge.py:352-357`) (Tier-1)
   → `test_core_phase4.py::test_notices_file_missing_fallback_copy_in_served_dom`.
   Seams only the pure `_candidate_notice_roots` helper at real empty
@@ -590,11 +603,13 @@ required-check run/job/runner/pass-count) is recorded in
 *Actual size:* 4 Tier-1 test functions + 1 Tier-2 journey. The
 conditions are real seams (real registered WAV synth via the plugin
 API; real empty notices roots; a real corrupt-config file's bytes; a
-real `SO_EXCLUSIVEADDRUSE` port holder), not mocks. UC-E9's
-trigger-condition is an honestly-recorded latent product gap, not a
+real second `start_command_server` against an already-held port), not
+mocks. UC-E9's Windows trigger-condition — originally a latent product
+gap honestly triaged in Phase-4 — is now closed by this PR's
+`command_server.py` production fix and is genuinely covered, not a
 fake-green.
 
-### Phase 5 — final core phase: close the remaining partial rows (Tier-1) + Tier-2 journey breadth — ✅ DONE (UC-C9/UC-E9 honestly stay open)
+### Phase 5 — final core phase: close the remaining partial rows (Tier-1) + Tier-2 journey breadth — ✅ DONE (UC-C9 stays open; UC-E9 later closed by a production fix — see the UC-E9 row & Honest-gaps note 6)
 *Why last:* the FINAL core phase. (1) Tier-1: close the three remaining
 **partial** rows where they are genuinely coverable without a
 production change, at a true seam, real-effect, privilege/host
@@ -738,8 +753,11 @@ real launched app's own bridge + the exact registered `open_file`
 command + the real overlay transport), not mocks. UC-D5/UC-D10's
 launched-app pause path is an honestly-recorded reachability boundary
 (no real user surface + a default-off 404 route), not a fake-green;
-UC-C9 and UC-E9 stay honestly open (no production change available in
-this strictly-additive scope — see their rows + the gaps section).
+UC-C9 stays honestly open (no production change available in this
+scope — see its row + the gaps section). UC-E9 was honestly open at
+Phase-5 but is now **closed by this PR's `command_server.py`
+production fix** (missing → covered — see the UC-E9 row, the Phase-4
+bullet, and Honest-gaps note 6).
 
 > **Phase-5 delta (this PR update):** the 3 remaining Phase-5
 > partial rows — **UC-B2** (partial→covered), **UC-E1**
@@ -775,6 +793,17 @@ this strictly-additive scope — see their rows + the gaps section).
 > cells; every section's covered+partial+missing equals its Use-cases
 > and the section sums equal the Total (63+0+2=65). No Phase-1/2/3/4
 > row's *status* changed.
+>
+> **Superseding update (this PR — UC-E9 production fix):** the Phase-5
+> arithmetic above (`63+0+2=65`, "missing unchanged at 2") was exact
+> *at Phase-5*. This later PR ships a real `command_server.py`
+> production fix (`_SingleInstanceHTTPServer` — Windows
+> `SO_EXCLUSIVEADDRUSE`, non-Windows unchanged, crash-restart safe) +
+> a genuine real-effect Tier-1 test, flipping **UC-E9 missing →
+> covered**. The authoritative current tally is the one at the top of
+> this section: section E 8/0/1 → **9/0/0**, Total **64 covered / 0
+> partial / 1 missing of 65** (`64+0+1=65`). UC-C9 is the only row
+> that genuinely remains missing.
 
 *Est. (original plan):* "3 new Tier-2 journeys" — the audited Phase-5
 scope refined this to the 3 Tier-1 partial-row closures (UC-B2/E1/E7) +
@@ -848,33 +877,40 @@ Phase-4. Additive only; not a CI gate.
    would be a fake-green or require an out-of-scope feature change; it
    is documented as an open parity gap here and in the checklist's
    Honest parity notes rather than forced green.
-6. **VERIFIED real product finding (Phase-4): the single-instance gate
-   (UC-E9) does not actually trigger for two real instances on
-   Windows.** The gate is `cmd_server = start_command_server(...); if
+6. **RESOLVED (this PR): the single-instance gate (UC-E9) was a real
+   latent product weakness on Windows; it is now fixed and genuinely
+   covered.** The gate is `cmd_server = start_command_server(...); if
    cmd_server is None: <MessageBoxW>; raise SystemExit(0)`
    (`app_web.py:207-221`, identically `app.py:422-431`). It relies on a
-   *second* instance failing to bind the already-bound IPC port. But
+   *second* instance failing to bind the already-bound IPC port. The
+   original Phase-4 audit verified this **did not hold on Windows**:
    `http.server.HTTPServer` sets `allow_reuse_address = True`, and on
-   Windows `SO_REUSEADDR` permits two sockets to bind the **same**
-   `127.0.0.1:port` concurrently — empirically verified on this runner
-   on **both** the hermetic-ephemeral path and the **exact production
-   fixed-port-51677 path**: a real second `start_command_server` while
-   the first is serving *also binds and returns a live server*, so the
-   real `cmd_server is None` guard never fires for two genuine PipPal
-   instances. This is a real latent product weakness in the gate's
-   *trigger condition* (not a test artefact). `command_server.py` is
-   protected and is **not** modified here to fix it. Phase-4 does **not**
-   fake-green this: the Tier-1 test asserts the real verified product
-   behaviour (two binds both succeed — the honest fact) **and** the
-   gate's real *exit* logic when the bind genuinely fails (a real OS
-   `SO_EXCLUSIVEADDRUSE` holder → real `start_command_server` `None` →
-   the verbatim guard's real `SystemExit(0)`). UC-E9 stays
-   **partial/open** with the real reason recorded (UC-E9 row + the
-   checklist). Recommended future work (a real product fix, out of this
-   strictly-additive scope): bind the listener with
-   `SO_EXCLUSIVEADDRUSE` (or a pre-bind `/ping` probe of the existing
-   instance) so the single-instance gate is genuine on Windows, then
-   flip UC-E9 to covered with a real two-instance test.
+   Windows `SO_REUSEADDR` permitted two sockets to bind the **same**
+   `127.0.0.1:port` concurrently (empirically verified on both the
+   hermetic-ephemeral path and the exact production fixed-port-51677
+   path), so the `cmd_server is None` guard never fired for two genuine
+   PipPal instances. **Production fix (this PR):** `start_command_server`
+   now binds with `_SingleInstanceHTTPServer` — on Windows it forces
+   `allow_reuse_address=False` (so the stdlib never sets `SO_REUSEADDR`)
+   and sets `SO_EXCLUSIVEADDRUSE` on the listening socket *before*
+   `bind()`. A real second bind to a port a live PipPal instance owns
+   now genuinely fails with `OSError` (`WSAEADDRINUSE`) for **every**
+   caller regardless of privilege, so the second instance's
+   `start_command_server` returns `None` and it exits 0 while the first
+   serves. Non-Windows behaviour is byte-for-byte unchanged
+   (`SO_EXCLUSIVEADDRUSE` is Windows-only; the stdlib `SO_REUSEADDR`
+   TIME_WAIT-rebind default is preserved on POSIX). Crash-restart safe:
+   `SO_EXCLUSIVEADDRUSE` conflicts only with *currently-open* sockets,
+   never `TIME_WAIT`, and the never-connected listener has no
+   `TIME_WAIT`, so once the owner exits/crashes a fresh instance
+   rebinds the same port immediately (verified). The Tier-1 test
+   (`test_core_phase4.py::test_single_instance_gate_refuses_second_instance_and_is_crash_restart_safe`)
+   asserts the real, now-true effect — first serves; real second
+   `start_command_server` returns `None`; the verbatim `app_web.main`
+   guard raises the real `SystemExit(0)` while the first keeps serving;
+   a fresh instance rebinds after the first exits. **UC-E9 is now
+   genuinely covered (missing → covered), not forced green** — the
+   asserted refusal is the real product behaviour after the fix.
 
 No coverage claim in `UI_TEST_CHECKLIST.md` was found to be *false* for
 the control it names; the gaps are use-case/behavioural variants the
