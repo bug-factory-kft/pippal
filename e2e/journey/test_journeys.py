@@ -36,6 +36,19 @@ Journeys
 * **J5 notices** (``test_j5_view_open_source_notices``): user opens the
   open-source notices from Settings → the real Notices window shows the
   genuine licences text the backend resolved from disk.
+* **J9 / UC-C9 first-run → Voice-Manager install-completion → onboarding
+  ready** (``test_j9_first_run_vm_install_completion_onboarding_ready``):
+  fresh first-run launch (real onboarding "needs a voice"; the real
+  shared ``get_readiness`` is ``missing_voice``) → user opens the real
+  Voices window from onboarding → installs the smallest practical real
+  Piper voice (a genuine HF download, J1's real-download pattern) → the
+  NEW ``bridge.install_voice`` install-completion callback (the web
+  analogue of Tk ``apply_installed_voice``) fires on the real launched
+  process → WITHOUT any manual Settings select/save the running app's
+  shared ``get_readiness`` flips to ``ready`` and the just-installed
+  voice is the configured voice → reopening the real onboarding window
+  shows the READY first-run screen. Closes the last core parity gap on
+  the real non-headless WebView2 app.
 
 Non-journey-able controls (honest notes) are listed at the bottom of
 ``e2e/journey/README.md`` and in the Tier-2 section of
@@ -724,4 +737,184 @@ def test_j5_view_open_source_notices(real_app, step) -> None:
         step.check(
             f"REAL Notices window shows the resolved licences text "
             f"({len(txt)} chars), matching the backend resolver"
+        )
+
+
+# ==========================================================================
+# J9 — UC-C9: first-run → Voice Manager → install-completion → onboarding
+#       genuinely flips ready, on the REAL launched WebView2 app
+# ==========================================================================
+#
+# The Tk first-run flow wires the Voice Manager's install-completion
+# callback (``app.py:577-583`` ``on_installed=panel.apply_installed_voice``
+# → ``activation_panel.py:415`` → ``_finish_voice_install``:
+# ``self.config["voice"] = installed_filename``) so installing a voice
+# from the first-run Voice Manager makes that voice the configured voice
+# and flips onboarding/readiness ready. The web ``bridge.install_voice``
+# now has the true analogue (same shared ``onboarding`` logic, reused not
+# forked). This journey proves it END-TO-END on the REAL launched
+# non-headless WebView2 desktop app.
+#
+# Distinct from J1: J1 proves the *download/install path* and then makes
+# the voice active via a MANUAL Settings select+Save (J1.5). J9 proves
+# the **automatic install-completion callback**: after the real install
+# the running app's shared readiness flips ready and the installed voice
+# is the configured voice WITHOUT any Settings interaction — the exact
+# UC-C9 behaviour that did not exist before this production fix. The only
+# non-app element is the genuine HF network download (J1's real-download
+# pattern; the smallest practical catalogue voice) — everything else is
+# the real launched process: real onboarding/VM windows, the real host
+# callback, the real installer, the real NEW completion callback, the
+# real shared readiness recomputation. No mock of the unit under test, no
+# tautology (the journey never sets the configured voice — the
+# production callback does), deadline-polls not sleeps, hermetic per-
+# journey profile, privilege/host-independent.
+
+UCC9_VOICE_ID = J1_VOICE_ID
+UCC9_VOICE_FILE = J1_VOICE_FILE
+
+
+@pytest.mark.parametrize(
+    "real_app",
+    # Genuine first run with a real Piper engine but NO voice — the real
+    # "PipPal needs a local voice" onboarding whose VM the user opens.
+    [{"seed": "first_run", "with_piper": True}],
+    indirect=True,
+)
+def test_j9_first_run_vm_install_completion_onboarding_ready(
+    real_app, step
+) -> None:
+    """UC-C9: a first-run user installs a voice from the web Voice
+    Manager and the NEW install-completion callback genuinely flips the
+    real launched app's onboarding/activation/readiness to ready —
+    automatically, exactly like the Tk apply_installed_voice flow.
+    """
+    app = real_app
+    _attached_to_real_app(app, step)
+
+    with step.group(
+        "J9.1 fresh first launch with a real engine but NO voice → the "
+        "real shared readiness must be 'missing_voice' (onboarding nags "
+        "for a voice — the genuine UC-C9 starting state)"
+    ):
+        app.reattach_page(view_hint="onboarding")
+        _wait_surface(app, "onboarding", step)
+        assert installed_voice_files(app.profile) == [], (
+            "fresh first-run profile already had a voice"
+        )
+        rd0 = bridge_call(app.bridge_base, "get_readiness")
+        assert rd0.get("status") == "missing_voice", rd0
+        cfg0 = bridge_call(app.bridge_base, "get_config")
+        step.check(
+            f"running app shared get_readiness == 'missing_voice' "
+            f"(config voice = {cfg0.get('voice')!r}); zero voices on disk"
+        )
+
+    with step.group(
+        "J9.2 user clicks 'Open Voice Manager' on the real onboarding "
+        "window → the REAL Voices window must open (real host callback)"
+    ):
+        vm_btn = app.page.get_by_test_id("onboarding-open-vm")
+        vm_btn.wait_for(state="visible", timeout=15000)
+        step("click 'Open Voice Manager' on the real onboarding window")
+        vm_btn.first.click()
+        _wait_surface(app, "voices", step)
+        step.check(f"REAL Voices window opened — {app.page.url!r}")
+
+    with step.group(
+        f"J9.3 user installs the smallest real voice ({UCC9_VOICE_ID}) — "
+        "a GENUINE download to the real launched app's profile (J1's "
+        "real-download pattern)"
+    ):
+        row_btn = app.page.get_by_test_id(f"vm-action-{UCC9_VOICE_ID}")
+        row_btn.wait_for(state="visible", timeout=15000)
+        step(
+            f"click Install on '{UCC9_VOICE_ID}' (a real HF download on "
+            "the real launched process)"
+        )
+        row_btn.click()
+
+        def _file_landed() -> bool:
+            return UCC9_VOICE_FILE in installed_voice_files(app.profile)
+
+        deadline_poll(
+            _file_landed,
+            timeout=180.0,
+            interval=0.5,
+            what=f"real {UCC9_VOICE_FILE} (+ .json) to land on disk",
+        )
+        onnx = app.profile / "voices" / UCC9_VOICE_FILE
+        size_mb = onnx.stat().st_size / (1024 * 1024)
+        assert onnx.stat().st_size > 1_000_000, onnx.stat().st_size
+        step.check(
+            f"REAL voice on disk: {onnx.name} = {size_mb:.2f} MB "
+            "(genuine network install on the launched app)"
+        )
+
+    with step.group(
+        "J9.4 THE FIX — the NEW install-completion callback must have "
+        "automatically made the installed voice the configured voice on "
+        "the running app (the web analogue of Tk apply_installed_voice), "
+        "WITHOUT any Settings select/save"
+    ):
+        def _config_voice_set() -> bool:
+            return bridge_call(app.bridge_base, "get_config").get(
+                "voice"
+            ) == UCC9_VOICE_FILE
+
+        deadline_poll(
+            _config_voice_set,
+            timeout=20.0,
+            what="running app config voice == the just-installed voice "
+            "(set by the NEW install-completion callback)",
+        )
+        live_cfg = bridge_call(app.bridge_base, "get_config")
+        step.check(
+            f"running app shared config voice == {UCC9_VOICE_FILE!r} — "
+            "set by the NEW bridge.install_voice completion callback, "
+            "NOT by any Settings interaction (the test never set it)"
+        )
+        assert live_cfg.get("voice") == UCC9_VOICE_FILE, live_cfg
+
+    with step.group(
+        "J9.5 the real shared onboarding readiness must have flipped to "
+        "'ready' on the running app (build_activation_readiness over the "
+        "now-updated shared config — the shared logic, reused not forked)"
+    ):
+        def _ready() -> bool:
+            return bridge_call(app.bridge_base, "get_readiness").get(
+                "status"
+            ) == "ready"
+
+        deadline_poll(
+            _ready,
+            timeout=20.0,
+            what="running app shared get_readiness to flip to 'ready'",
+        )
+        rd1 = bridge_call(app.bridge_base, "get_readiness")
+        assert rd1.get("status") == "ready", rd1
+        step.check(
+            "running app shared get_readiness flipped 'missing_voice' → "
+            "'ready' automatically (UC-C9 install-completion parity)"
+        )
+
+    with step.group(
+        "J9.6 reopening the REAL onboarding window now shows the READY "
+        "first-run screen (the user is no longer nagged for a voice)"
+    ):
+        _reopen_surface(app, "onboarding", step)
+        title = app.page.get_by_test_id("onboarding-title").inner_text()
+        assert title.strip() == "PipPal is ready to read locally", title
+        assert app.page.get_by_test_id("onboarding-open-vm").count() == 0, (
+            "the 'needs a voice' Open Voice Manager button is still shown "
+            "on the real onboarding window after the install"
+        )
+        app.page.get_by_test_id("onboarding-play-sample").wait_for(
+            state="visible", timeout=10000
+        )
+        step.check(
+            "REAL reopened onboarding window renders the READY first-run "
+            f"screen (title {title.strip()!r}, no 'needs a voice' "
+            "buttons) — UC-C9 genuinely covered end-to-end on the real "
+            "non-headless WebView2 app"
         )

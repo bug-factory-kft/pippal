@@ -212,6 +212,18 @@ class PipPalBridge:
         with self._install_lock:
             v = self._voice_by_id(voice_id)
             filename = install_piper_voice(v)
+        # Install-completion signal back into onboarding/activation —
+        # the web analogue of the Tk first-run flow, where the Voice
+        # Manager's on_installed callback runs the activation panel's
+        # apply_installed_voice (app.py:577-583 → activation_panel.py:415
+        # → _finish_voice_install: ``self.config["voice"] = installed
+        # _filename``). Make the just-installed voice the configured
+        # voice on the SAME shared config dict the shared
+        # onboarding.build_activation_readiness reads, so the readiness/
+        # onboarding surface flips to ready exactly like Tk. This mirrors
+        # install_default_voice below (and the Tk panel) — the shared
+        # onboarding logic is reused untouched, no Tk/web drift.
+        self.config["voice"] = filename
         try:
             self.engine.reset_backend()
         except Exception:

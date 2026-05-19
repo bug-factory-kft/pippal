@@ -217,23 +217,47 @@ PipPal") — and even then the underlying callable is `[x]`.
 
 > **Scope.** Like §6/§7, this section tracks **use-case / behavioural**
 > rows (the **Phase-3** rows of `docs/USE_CASE_BACKLOG.md`: UC-A14,
-> UC-A6, UC-A13), not new *controls* — so the §1–§5 per-control 72/72
-> tally is **unchanged**. These are real first-run-UX behaviours that
-> were untested in either tier. Every condition is induced at a **true
-> seam** (a real `plugins.register_engine` WAV backend so the *unmodified*
+> UC-A6, UC-A13; plus **UC-C9**, now covered via a production fix), not
+> new *controls* — so the §1–§5 per-control 72/72 tally is
+> **unchanged**. These are real first-run-UX behaviours that were
+> untested in either tier. Every condition is induced at a **true seam**
+> (a real `plugins.register_engine` WAV backend so the *unmodified*
 > `_speak_selection_impl` genuinely reaches the real activation
 > bookkeeping; the conftest's pre-seeded *complete* activation so the
 > real `renderOnboarding` genuinely takes its `st.is_complete` branch;
 > the **real** `app_web._selected_piper_missing` + real
 > `should_show_activation_panel` against real on-disk state — the exact
-> `app_web.py:261` gate) — never by mocking the unit under test, and
-> never in a privilege- or host-state-dependent way. The only seam
-> (UC-A14) is the OS-boundary *selection input*
+> `app_web.py:261` gate; for UC-C9 the OS-boundary network download
+> only, the established e2e/web installer-test seam) — never by mocking
+> the unit under test, and never in a privilege- or host-state-dependent
+> way. The UC-A14 seam is the OS-boundary *selection input*
 > (`clipboard_capture.capture_for_action` — the established
 > `tests/test_engine.py:170` unit pattern lifted to E2E; it replaces
 > only the OS clipboard read so the result is byte-for-byte identical on
-> the LocalSystem CI runner). No production code is modified
-> (strictly additive — new test file + docs only).
+> the LocalSystem CI runner).
+>
+> **Production-change disclosure (this PR — TWO minimal production
+> fixes, NOT strictly-additive; full disclosure below).** This PR
+> applies two small, real production fixes that close two genuine parity
+> gaps; neither forks shared logic, neither changes any unrelated path,
+> and both keep non-target behaviour byte-for-byte unchanged:
+> 1. **UC-E9** single-instance gate — `command_server.py`
+>    `_SingleInstanceHTTPServer` (Windows-only `SO_EXCLUSIVEADDRUSE` /
+>    `allow_reuse_address=False`; non-Windows unchanged; crash-restart
+>    safe). See §9.5 + Honest parity note 5.
+> 2. **UC-C9** first-run→Voice-Manager install-completion parity —
+>    `web_ui/bridge.py` `install_voice` now applies the **same shared
+>    `onboarding` effect** Tk's `apply_installed_voice` /
+>    `_finish_voice_install` does (set the just-installed voice as the
+>    configured voice on the **same shared config dict** the **shared**
+>    `build_activation_readiness` reads; mirrors the bridge's own
+>    `install_default_voice`). The shared `pippal.onboarding` module and
+>    the entire Tk path are **untouched** — the shared logic is reused,
+>    not forked, so there is **no Tk/web drift** (the full 266-test unit
+>    suite incl. `tests/test_activation_panel.py` /
+>    `tests/test_onboarding.py` stays green). See row 8.5 + Honest parity
+>    note 4. Everything else in §8 is strictly additive (new test +
+>    docs).
 
 | # | Use-case | Playwright test | Status |
 |---|---|---|---|
@@ -241,7 +265,7 @@ PipPal") — and even then the underlying callable is `[x]`.
 | 8.2 | **UC-A14** selected-text **capture-failure recovery** — empty selection → real no-text branch → real `_record_activation_capture_failure`; asserts the real persisted `last_failure == SELECTED_TEXT_CAPTURE_FAILURE` (activation still NOT complete) **and** the real `activation_failure_recovery_message` builds the genuine recovery copy from that real persisted failure + real hotkey label (`onboarding.py:218`) | `test_selected_text_capture_failure_records_recovery_message` | [x] |
 | 8.3 | **UC-A6** already-complete onboarding re-entry copy branch (`app.js:399-422`) — real served DOM: Finish=`"Close"` (primary, ungated), Play=`"Play sample again"` (not primary), already-set-up status; "Play sample again" drives a real engine read; "Close" reaches the real `on_close_window` callback and does **NOT** re-write the real `first_run_activation.json` (the `is_complete` branch returns before `mark_activation_complete`). No seam | `test_onboarding_already_complete_reentry_close_and_play_again` | [x] |
 | 8.4 | **UC-A13** startup auto-open **decision** (`app_web.py:38-40,261`) — the exact real gate `_selected_piper_missing(config) or should_show_activation_panel()` across all 4 real branches with real on-disk state (real stub `piper.exe` toggled by real file create/delete; real activation file written by the real `mark_activation_complete`); privilege/host-independent | `test_startup_auto_open_decision_real_composition_gate` | [x] |
-| 8.5 | **UC-C9** first-run→Voice-Manager install-completion parity gap | — | **[ ] open — Phase-3 triaged & formally accepted** (see Honest parity note 4 below; the web path has no install-completion callback, so a test would be a fake-green or need an out-of-scope feature change) |
+| 8.5 | **UC-C9** first-run→Voice-Manager install-completion parity — **production fix (this PR) + genuine real-effect coverage, no fake-green.** The web path previously had **no** install-completion callback (Tk wires `on_installed=panel.apply_installed_voice` (`app.py:577-583` → `activation_panel.py:415` → `_finish_voice_install`: `config["voice"]=installed_filename`); the web `install_voice` did not set the configured voice — only `install_default_voice` did). Fixed in `web_ui/bridge.py` (`install_voice` now applies the **same shared `onboarding`/activation effect** Tk's `apply_installed_voice` does, on the **same shared config dict** the **shared** `build_activation_readiness` reads — shared logic reused, not forked; Tk byte-for-byte unchanged). The Tier-1 test asserts the real, now-true effect: real served onboarding `missing_voice` → real `open_voice_manager_window` host callback → real `bridge.install_voice`→`install_piper_voice` installer → the NEW completion callback makes the just-installed voice the configured voice → real shared `get_readiness` flips `missing_voice`→`ready` → the real reopened onboarding DOM shows the READY first-run screen. Seam = ONLY the OS-boundary network download (the established e2e/web installer pattern); no mock of the unit, no tautology (the test never sets the configured voice — the production callback does), deadline-poll, privilege/host-independent. Tier-2 launched-app equivalent: journey **J9** (genuine voice download on the real non-headless WebView2 app) | `test_core_phase3.py::test_ucc9_first_run_vm_install_completion_flips_onboarding_ready` + Tier-2 `test_journeys.py::test_j9_first_run_vm_install_completion_onboarding_ready` | **[x] covered (Tier-1 merge gate + Tier-2 J9) — production fix + real-effect test** (missing → covered; see Honest parity note 4 below) |
 
 ---
 
@@ -282,10 +306,10 @@ PipPal") — and even then the underlying callable is `[x]`.
 > UC-D3 Tier-2 **J8** as additive release-lane breadth for
 > already-covered rows), not new *controls* — the §1–§5 per-control
 > 72/72 tally is **unchanged**. Phase-5 is the **final core phase**:
-> after it **0 use-case rows are partial**; after this PR's UC-E9
-> production fix the only remaining open row is the
-> honestly-documented product-gap exception UC-C9 (§8.5) — UC-E9 (§9.5)
-> is now covered. Every Tier-1 condition is induced at a **true seam**
+> after it **0 use-case rows are partial**; after this PR's two minimal
+> production fixes (UC-E9 §9.5 and UC-C9 §8.5) **no use-case row remains
+> open** — full genuine core coverage with 0 documented product-gap
+> exceptions. Every Tier-1 condition is induced at a **true seam**
 > (the real served Settings UI + the real `build_activation_readiness`;
 > the verbatim `app_web.build_tray_menu` + a real
 > `plugins.register_engine` WAV backend so the *unmodified*
@@ -333,10 +357,14 @@ PipPal") — and even then the underlying callable is `[x]`.
 > breadth) track **use-case / behavioural** rows from
 > `docs/USE_CASE_BACKLOG.md`, *not* new controls — they are listed here
 > so the new real-effect tests are visible, but they do not change the
-> per-control count. §8 adds 4 genuine `[x]` Phase-3 tests; **§8.5
-> (UC-C9) is an honest open `[ ]`** — the first-run→Voice-Manager
-> install-completion parity gap, **Phase-3 triaged & formally accepted**
-> (Honest parity note 4 below), not forced green. §9 adds 4 genuine
+> per-control count. §8 adds 5 genuine `[x]` tests; **§8.5 (UC-C9) is
+> now a genuine `[x]` covered row** — the first-run→Voice-Manager
+> install-completion parity gap is **fixed in `web_ui/bridge.py`**
+> (`install_voice` applies the same shared `onboarding` effect Tk's
+> `apply_installed_voice` does; shared logic reused, not forked; Tk
+> byte-for-byte unchanged) with a real-effect Tier-1 merge-gate test +
+> Tier-2 journey J9 (Honest parity note 4 below); missing → covered, not
+> forced green. §9 adds 4 genuine
 > `[x]` Phase-4 tests (UC-B14/E6/D6 Tier-1 + UC-B21 Tier-2 J6); **§9.5
 > (UC-E9) is now a genuine `[x]` covered row** — the single-instance
 > gate's Windows trigger-condition was a verified real product weakness
@@ -351,13 +379,12 @@ PipPal") — and even then the underlying callable is `[x]`.
 > UC-B11/B13/B12 right-click round-trip; **J8** UC-D3 reader transport)
 > prove already-covered rows end-to-end on the real launched WebView2
 > app (no row flip from the journeys). After Phase-5 there are **0
-> partial use-case rows**; after this PR's UC-E9 production fix the
-> only remaining open row is the honestly-documented product-gap
-> exception §8.5 (UC-C9). The authoritative use-case-level
-> covered/partial/missing tally lives in `docs/USE_CASE_BACKLOG.md`
-> (**64 covered / 0 partial / 1 missing of 65** — full phased core
-> coverage achieved except the 1 honestly-documented product-gap
-> exception, UC-C9).
+> partial use-case rows**; after this PR's two minimal production fixes
+> (UC-E9 §9.5 and UC-C9 §8.5) **no use-case row remains open**. The
+> authoritative use-case-level covered/partial/missing tally lives in
+> `docs/USE_CASE_BACKLOG.md` (**65 covered / 0 partial / 0 missing of
+> 65** — full genuine phased core coverage achieved with 0 documented
+> product-gap exceptions remaining).
 
 > **Zero function exemptions.** §5's tray/hotkey rows are no longer an
 > exemption: §5.1–5.4 and 5.6 are real headless-safe pytest integration
@@ -401,25 +428,47 @@ surfaced here rather than hidden so the checklist reflects reality:
    appear here (which would be a false positive).
 3. **Window placement / "remember last position"** is not ported
    (documented already in the PR body); cosmetic, no behaviour change.
-4. **First-run → Voice-Manager install-completion callback is not
-   ported (UC-C9 — Phase-3 triaged & formally accepted).** Tk's
+4. **RESOLVED (this PR): the first-run → Voice-Manager
+   install-completion callback now has a true web analogue (UC-C9 —
+   production fix + real-effect test).** Tk's
    `_open_voice_manager_from_first_run` wires
-   `on_installed=panel.apply_installed_voice` (`app.py:574-583`) so a
-   voice installed *from the first-run-launched VM* refreshes the
-   onboarding panel. The web onboarding "Open Voice Manager" button
-   (`app.js:385-386` → the real `open_voice_manager_window` host
-   callback) opens the VM as an **independent window with no
-   install-completion callback** back into the onboarding surface —
-   there is no `apply_installed_voice` analogue in the web
-   bridge/`app_web` path. This is a **genuine migration parity gap, not
-   a test weakness.** Phase-3 **formally accepts** it rather than
-   forcing a green: a test here would either assert behaviour that does
-   not exist (a tautology / fake-green) or require *implementing* the
-   missing web wiring (a feature change, out of strictly-additive
-   Phase-3 scope). Recorded as the open `[ ]` row §8.5 and as UC-C9 in
-   `docs/USE_CASE_BACKLOG.md`. Recommended future work: add an
-   `on_installed` callback to the web VM open path (a real feature
-   change for a later phase), then add the Tier-1 test.
+   `on_installed=panel.apply_installed_voice` (`app.py:574-583` →
+   `activation_panel.py:415` → `_finish_voice_install`:
+   `self.config["voice"] = installed_filename`) so a voice installed
+   *from the first-run-launched VM* makes that voice the configured
+   voice and the shared `build_activation_readiness` flips
+   onboarding/readiness ready (canonical Tk contract:
+   `tests/test_activation_panel.py:375` asserts `config["voice"] ==
+   installed_filename`). The web path **previously** opened the VM as an
+   independent window with **no install-completion callback** back into
+   onboarding — `bridge.install_voice` did not set the configured voice
+   (only `bridge.install_default_voice` did) — a genuine migration
+   parity gap. **Production fix (this PR):** `web_ui/bridge.py`
+   `install_voice` (the web Voice Manager's install-completion point)
+   now performs the **same shared onboarding/activation effect** Tk's
+   `apply_installed_voice` does — sets the just-installed voice as the
+   configured voice on the **same shared config dict** the **shared**
+   `onboarding.build_activation_readiness` reads, exactly mirroring the
+   bridge's own `install_default_voice` and Tk's panel. The shared
+   `pippal.onboarding` module and the **entire Tk path are untouched**:
+   the shared logic is **reused, not forked**, so there is **no Tk/web
+   drift** (the full 266-test unit suite incl.
+   `tests/test_activation_panel.py` / `tests/test_onboarding.py` stays
+   green — Tk behaviour is byte-for-byte identical). Genuinely covered,
+   not forced green: Tier-1 merge gate
+   `test_core_phase3.py::test_ucc9_first_run_vm_install_completion_flips
+   _onboarding_ready` (real served onboarding → real host callback →
+   real installer → the NEW completion callback → real shared
+   `get_readiness` flips `missing_voice`→`ready` → real reopened
+   onboarding DOM shows the READY screen; seam = ONLY the OS-boundary
+   network download — the established e2e/web installer pattern; no mock
+   of the unit, no tautology — the test never sets the configured voice,
+   the production callback does; deadline-poll; privilege/host-
+   independent) **and** Tier-2 launched-app journey **J9**
+   `test_journeys.py::test_j9_first_run_vm_install_completion_onboarding
+   _ready` (a genuine voice download on the real non-headless WebView2
+   app — J1's real-download pattern). Recorded as covered row §8.5 and
+   as UC-C9 in `docs/USE_CASE_BACKLOG.md`.
 5. **RESOLVED (this PR): the single-instance gate now genuinely
    triggers for two real instances on Windows (UC-E9 — production fix +
    real-effect test).** Both `app_web.main` (`app_web.py:207-221`) and
@@ -502,9 +551,9 @@ profile.
   instances; real failures at true seams) + `e2e/web/test_core_
   interactions.py` (5 — the §7 Phase-2 untested-core-interaction
   use-cases UC-E8/D9/D10/F1/F2; real conditions at true seams) +
-  `e2e/web/test_core_phase3.py` (4 — the §8 Phase-3 onboarding-
-  completeness / startup-decision use-cases UC-A14/A6/A13; real
-  conditions at true seams; UC-C9 honestly triaged in docs, no test) +
+  `e2e/web/test_core_phase3.py` (5 — the §8 onboarding-completeness /
+  startup-decision use-cases UC-A14/A6/A13 + UC-C9 (production fix +
+  real-effect test, missing → covered); real conditions at true seams) +
   `e2e/web/test_core_phase4.py` (4 — the §9 Phase-4 resilience
   use-cases: UC-B14 notices-missing fallback, UC-E6 live tray swap,
   UC-D6 auto-hide generation guard, + the UC-E9 single-instance gate
@@ -744,6 +793,56 @@ profile.
   on `pippal-interactive-ACER-LAPTOP` on the new head — CI evidence
   (run/job/runner/pass-count/test-names) recorded in the PR; see the
   final report / commit trail.
+- **UC-C9 production fix (this PR, alongside the UC-E9 fix) — local
+  record.** A real, minimal production change in
+  `src/pippal/web_ui/bridge.py` (`install_voice` now applies the **same
+  shared `onboarding`/activation effect** Tk's `apply_installed_voice` /
+  `_finish_voice_install` does — set the just-installed voice as the
+  configured voice on the **same shared config dict** the **shared**
+  `onboarding.build_activation_readiness` reads; mirrors the bridge's
+  own `install_default_voice`) closes the first-run→Voice-Manager
+  install-completion parity gap. The shared `pippal.onboarding` module
+  and the entire Tk path are **untouched** — the shared logic is
+  **reused, not forked**, so there is **no Tk/web drift**. New
+  real-effect Tier-1 merge-gate test
+  (`test_core_phase3.py::test_ucc9_first_run_vm_install_completion_flips_onboarding_ready`):
+  real served onboarding `missing_voice` → real `open_voice_manager
+  _window` host callback → real `bridge.install_voice`→`install_piper
+  _voice` installer → the NEW completion callback → real shared
+  `get_readiness` flips `missing_voice`→`ready` → real reopened
+  onboarding DOM shows the READY first-run screen; seam = ONLY the
+  OS-boundary network download (the established e2e/web installer
+  pattern); no mock of the unit, no tautology (the test never sets the
+  configured voice — the production callback does), deadline-poll,
+  privilege/host-independent. New Tier-2 launched-app journey **J9**
+  (`test_journeys.py::test_j9_first_run_vm_install_completion_onboarding_ready`):
+  a genuine voice download on the real non-headless WebView2 app (J1's
+  real-download pattern), asserting the NEW callback automatically makes
+  the installed voice the configured voice and flips the running app's
+  shared readiness ready WITHOUT any manual Settings select/save.
+  **UC-C9 missing → covered** (§8.5 / Honest parity note 4 / backlog
+  UC-C9) — not forced green: the asserted onboarding-ready flip is the
+  real, now-true product behaviour after the fix. Local repro on this
+  machine (isolated venv `.venv-ucc9`, Python 3.11.9, no machine/runner
+  pollution): full unit suite `python -m pytest -q` → **266 passed**
+  (fully additive on the test side — no production-test regression;
+  `web_ui/bridge.py` is the only production change in this entry; the
+  shared `pippal.onboarding` and the whole Tk path are unmodified, so
+  `tests/test_activation_panel.py` / `tests/test_onboarding.py` stay
+  green = Tk parity preserved with no drift); full `e2e/web` (served,
+  headless Chromium) → **85 passed twice** (stable, order-independent;
+  the new UC-C9 Tier-1 test is the +1 over the 84 of the UC-E9 entry);
+  `ruff check .` → clean; `pytest --collect-only` → exactly 266 (zero
+  from `e2e/web`); the new UC-C9 Tier-1 test passed in isolation with
+  its full step trace (real `on_open_voice_manager` callback fired →
+  real installer → live shared config voice == the installed file →
+  real shared `get_readiness` flipped `missing_voice`→`ready` → real
+  reopened onboarding DOM = the READY screen). The merge-required
+  **`Web UI E2E (served, headless Chromium)`** + **`Lint`** + **`Unit
+  tests`** checks and the **`Tier-2 Journey E2E`** workflow CI evidence
+  (run/job/runner/pass-count/test-names/CDP build/artifact, incl. the
+  J9 UC-C9 journey on the real non-headless WebView2 app) are recorded
+  in the PR / final report.
 - **Prior record (pre-Phase-1, still accurate for that state): 59
   passed** (Chromium, served + headless).
   Stability proven on that code: the full `e2e/web` suite was run

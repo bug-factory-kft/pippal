@@ -21,12 +21,22 @@ in either tier.
   should_show_activation_panel()`` — asserted against the **real**
   composition helpers with real on-disk state across every branch.
 
-UC-C9 (the first-run→Voice-Manager install-completion parity gap) is a
-**triage decision item**, not a test — it is honestly accepted and
-recorded in ``docs/USE_CASE_BACKLOG.md`` and
-``docs/migration-web/UI_TEST_CHECKLIST.md`` (the web onboarding "Open
-Voice Manager" genuinely has no install-completion callback; forcing a
-green here would be a fake-green).
+* **UC-C9** — first-run → Voice-Manager → install-completion →
+  onboarding ready. Previously an honestly-accepted parity gap (the web
+  path had no install-completion callback). A minimal production fix
+  (``bridge.install_voice`` now applies the same shared onboarding
+  effect Tk's ``apply_installed_voice`` does — set the just-installed
+  voice as the configured voice on the shared config the shared
+  ``build_activation_readiness`` reads, no forked logic) closed it. The
+  test below
+  (``test_ucc9_first_run_vm_install_completion_flips_onboarding_ready``)
+  drives the REAL served onboarding → Voice-Manager → real
+  ``install_voice`` installer → the NEW completion callback → real
+  shared readiness flips ready, seaming ONLY the OS-boundary network
+  download (the established e2e/web installer pattern). The Tier-2
+  launched-app equivalent is journey J9
+  (``e2e/journey/test_journeys.py``), which does a genuine download on
+  the real WebView2 app.
 
 Discipline (identical to the rest of ``e2e/web`` and held strictly):
 
@@ -668,3 +678,169 @@ def test_startup_auto_open_decision_real_composition_gate(
         mark_activation_complete(
             "sample", path=state_path, completed_at="2026-01-01T00:00:00Z"
         )
+
+
+# ===========================================================================
+# UC-C9 — first-run → Voice Manager → install-completion → onboarding ready
+# ===========================================================================
+#
+# The Tk first-run flow wires the Voice Manager's install-completion
+# callback (``app.py:577-583`` ``on_installed=panel.apply_installed_voice``
+# → ``activation_panel.py:415`` → ``_finish_voice_install``:
+# ``self.config["voice"] = installed_filename``) so that installing a
+# voice from the first-run Voice Manager makes that voice the configured
+# voice and flips onboarding/readiness to *ready*. ``tests/test_activation
+# _panel.py:375`` is the canonical Tk contract: after the install,
+# ``config["voice"] == installed_filename``.
+#
+# The web path now has the true analogue: ``bridge.install_voice`` is the
+# web Voice Manager's install-completion point, and it applies the SAME
+# shared effect on the SAME config dict the shared
+# ``onboarding.build_activation_readiness`` reads (no forked logic, no
+# Tk/web drift). This test exercises that real new callback end-to-end on
+# the REAL served UI + REAL bridge and asserts the REAL effect — the
+# missing→covered closure of UC-C9.
+#
+# Seam discipline (identical to test_voice_manager_row_install_real_effect
+# / test_onboarding_install_default_voice_real_effect): the ONLY seam is
+# the OS-boundary network download (``voice_manager._streaming_download``
+# — a real HTTP GET to Hugging Face, which a hermetic Session-0 CI runner
+# cannot and must not perform). EVERYTHING under test is real: the real
+# served onboarding + Voice Manager DOM, the real ``open_voice_manager_
+# window`` host callback, the real ``bridge.install_voice`` →
+# ``install_piper_voice`` installer, the real NEW install-completion
+# config update, and the real shared ``build_activation_readiness`` /
+# ``get_readiness`` recomputation. No mock of the unit under test, no
+# tautology (the test never sets the config voice — the production
+# callback does), no fixed sleep (deadline-poll), privilege/host-
+# independent (depends only on a file landing under the hermetic
+# per-test profile and PipPal's own branch logic — byte-for-byte
+# identical on the LocalSystem runner).
+
+
+def test_ucc9_first_run_vm_install_completion_flips_onboarding_ready(
+    page: Page, app_url: str, readiness, backend, monkeypatch, step
+):
+    """UC-C9: a first-run user with NO voice opens the web Voice Manager
+    from onboarding, installs a voice, and the NEW install-completion
+    callback genuinely flips onboarding/activation/readiness to ready —
+    exactly like the Tk ``apply_installed_voice`` flow (the same shared
+    onboarding logic, reused not forked)."""
+    from pippal import voices as voices_mod
+    from pippal.ui import voice_manager as vm
+
+    bridge = backend["bridge"]
+    cfg = backend["config"]
+
+    # --- Real first-run "needs a voice" state (real stub piper, no voice
+    # on disk). build_activation_readiness is the REAL shared function.
+    step("force the real first-run readiness = missing_voice "
+         "(real stub piper.exe, zero voices on disk)")
+    rd0 = readiness["missing_voice"]()
+    assert rd0.status == "missing_voice", rd0.status
+    # The bridge's get_readiness (what the served onboarding renders) is
+    # the REAL shared onboarding path and agrees: not ready yet.
+    assert bridge.get_readiness()["status"] == "missing_voice"
+    assert voices_mod.installed_voices() == [], voices_mod.installed_voices()
+    step.check("real shared get_readiness == 'missing_voice' "
+               "(onboarding would nag for a voice)")
+
+    # --- The user opens the REAL served onboarding surface and clicks
+    # "Open Voice Manager" — the genuine host-callback path (app.js:385).
+    _goto(page, app_url, "onboarding", step)
+    expect(page.get_by_test_id("onboarding-open-vm")).to_be_visible()
+    step("click 'Open Voice Manager' on the real onboarding surface")
+    page.get_by_test_id("onboarding-open-vm").click()
+
+    def _vm_opened() -> bool:
+        return "voices" in backend["window_opens"]
+
+    assert _poll(page, _vm_opened, timeout_ms=5000), (
+        "Open Voice Manager did not reach the real on_open_voice_manager "
+        "host callback"
+    )
+    step.check("real on_open_voice_manager host callback fired "
+               "(the web first-run→VM open path)")
+
+    # --- Seam ONLY the OS network boundary; the installer + the NEW
+    # completion callback are 100% real.
+    def _fake_download(url: str, dest: Path, *a, **k) -> None:
+        dest.write_bytes(b"stub-voice-model-bytes")
+
+    monkeypatch.setattr(vm, "_streaming_download", _fake_download)
+
+    # The user is now in the real served Voice Manager window and clicks
+    # the per-row Install for a real catalogue voice.
+    _goto(page, app_url, "voices", step)
+    cat = bridge.get_voice_catalogue()
+    target = cat["voices"][0]
+    vid = target["id"]
+    from pippal.voices import voice_filename
+    expected_file = voice_filename(bridge._voice_by_id(vid))
+    btn = page.get_by_test_id(f"vm-action-{vid}")
+    expect(btn).to_have_text("Install")
+    # PROVE NO TAUTOLOGY: the configured voice is NOT the to-be-installed
+    # one before the install (the production callback must change it).
+    assert cfg.get("voice") != expected_file, (
+        f"precondition broken: config voice already {expected_file!r}"
+    )
+    step(f"click per-row Install for {vid!r} on the real served Voice "
+         "Manager (real installer; only the HTTP download is seamed)")
+    btn.click()
+
+    # --- Real effect 1: a real model file lands in the real per-test
+    # voices dir via the real install_piper_voice.
+    def _file_on_disk() -> bool:
+        return any(vid in f for f in voices_mod.installed_voices())
+
+    assert _poll(page, _file_on_disk, timeout_ms=10000), (
+        f"row Install produced no real voice file for {vid}"
+    )
+    step.check(f"real voice file for {vid!r} landed on disk "
+               "(real install_piper_voice path)")
+
+    # --- Real effect 2: THE FIX — the NEW install-completion callback in
+    # bridge.install_voice set the just-installed voice as the configured
+    # voice on the SHARED config dict (the web analogue of Tk's
+    # apply_installed_voice / _finish_voice_install; the canonical Tk
+    # contract is tests/test_activation_panel.py:375). The test never set
+    # this — the production code did.
+    def _config_voice_set() -> bool:
+        return cfg.get("voice") == expected_file
+
+    assert _poll(page, _config_voice_set, timeout_ms=6000), (
+        f"the install-completion callback did NOT make {expected_file!r} "
+        f"the configured voice (config voice = {cfg.get('voice')!r}) — "
+        "UC-C9 parity is broken"
+    )
+    step.check(f"NEW install-completion callback: live shared config "
+               f"voice == {expected_file!r} (web analogue of Tk "
+               "apply_installed_voice — same shared config dict)")
+
+    # --- Real effect 3: the SHARED onboarding readiness recomputation
+    # (build_activation_readiness over the now-updated shared config —
+    # NOT re-implemented here) genuinely flips to 'ready'.
+    rd1 = bridge.get_readiness()
+    assert rd1["status"] == "ready", (
+        f"shared get_readiness still {rd1['status']!r} after the install-"
+        "completion callback — onboarding did not flip ready"
+    )
+    step.check("real shared get_readiness flipped 'missing_voice' → "
+               "'ready' (the shared onboarding logic, reused not forked)")
+
+    # --- Real effect 4: the user reopens the real served onboarding
+    # surface (the web equivalent of Tk re-rendering the panel in place)
+    # and the REAL rendered DOM now shows the ready first-run screen
+    # instead of the "needs a voice" nag.
+    _goto(page, app_url, "onboarding", step)
+    expect(page.get_by_test_id("onboarding-title")).to_have_text(
+        "PipPal is ready to read locally", timeout=15000
+    )
+    # The missing_voice-only "Open Voice Manager" / "Install default
+    # voice" buttons are gone; the ready-state Play sample is present.
+    expect(page.get_by_test_id("onboarding-open-vm")).to_have_count(0)
+    expect(page.get_by_test_id("onboarding-play-sample")).to_be_visible()
+    step.check("real reopened onboarding DOM renders the READY first-run "
+               "screen (title 'PipPal is ready to read locally', no "
+               "'needs a voice' buttons) — UC-C9 genuinely covered "
+               "end-to-end on the real served UI + real bridge")

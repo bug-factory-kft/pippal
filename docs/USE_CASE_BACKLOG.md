@@ -112,7 +112,7 @@ set differs per state.
 | UC-C6 | Per-row Install | User installs a chosen voice | `vm-action-<id>` → `bridge.install_voice` writes `.onnx`+`.onnx.json`, resets backend (`bridge.py:209`) | **Network/disk failure** → `install_voice` raises, row shows "failed", button re-enabled (`app.js:539`) | **covered** — install success Tier-1 `test_voice_manager_row_install_real_effect` + Tier-2 J1. Per-row install-failure UI path **now Tier-1** `test_error_recovery.py::test_voice_manager_row_install_failure_ui[no_network|interrupted]`: the real `bridge.install_voice`→`install_piper_voice` runs unchanged, only the origin is a real closed / RST-mid-stream socket (genuine `URLError`/`ConnectionResetError`); asserts the real row status flips to "failed" (`vstatus err`), the button is re-enabled, the `fail()` error toast shows, and the real catalogue/disk still report the voice NOT installed (`app.js:539-544`) |
 | UC-C7 | Per-row Remove + confirm | User frees disk / removes an unwanted voice | `vm-action-<id>` (installed) → confirm modal → `remove_voice` deletes files (`bridge.py:221`) | **Confirm Cancel** → files untouched | **covered** Tier-1 `test_voice_remove_confirm_modal_gates_deletion` (accept AND cancel) |
 | UC-C8 | Close Voice Manager | User is done managing voices | `window-close` in voices surface → `close_window` | n/a | **covered** Tier-1 `test_voice_manager_close_button_calls_bridge` |
-| UC-C9 | Voice Manager opened from first-run with install callback | First-run user installs from VM and onboarding refreshes | Tk path wires `on_installed=panel.apply_installed_voice` (`app.py:574`) | The web path has no equivalent first-run→VM→refresh wiring | **missing (Phase-3 triaged — parity gap formally accepted)** — the first-run-launched-VM install-callback flow (`app.py:574-583`, the Tk-only `_open_voice_manager_from_first_run`) has **no web equivalent**. The web onboarding "Open Voice Manager" button (`app.js:385-386`) calls the real `open_voice_manager_window` host callback, which opens the VM as an *independent* window with **no install-completion callback wired back into the onboarding surface** — there is no `apply_installed_voice` analogue in the web bridge/`app_web` path. **Decision (Phase-3):** the parity gap is **honestly accepted, not forced green.** Writing a test here would either (a) assert behaviour that does not exist (a tautology / fake-green), or (b) require *implementing* the missing web wiring — which is a feature change, out of the strictly-additive Phase-3 scope. It is therefore recorded as an open parity gap in both this backlog and `docs/migration-web/UI_TEST_CHECKLIST.md` (Honest parity notes), exactly as Phase-3's decision-item mandate allows. Recommended future work: add an `on_installed` callback to the web VM open path (a real feature change for a later phase), then add the Tier-1 test. |
+| UC-C9 | Voice Manager opened from first-run with install callback | First-run user installs from VM and onboarding refreshes | Tk path wires `on_installed=panel.apply_installed_voice` (`app.py:574`) → `_finish_voice_install` sets `config["voice"]` | The web `bridge.install_voice` now applies the SAME shared effect (no forked logic) | **covered (parity gap closed by a minimal production fix)** — the Tk first-run flow wires `on_installed=panel.apply_installed_voice` (`app.py:577-583` → `activation_panel.py:415` → `_finish_voice_install`: `self.config["voice"] = installed_filename`), so installing a voice from the first-run Voice Manager makes it the configured voice and the shared `build_activation_readiness` flips onboarding/readiness ready (canonical Tk contract: `tests/test_activation_panel.py:375` asserts `config["voice"] == installed_filename`). The web path previously had **no install-completion callback** (`open_voice_manager_window` opened the VM as an independent window; `install_voice` did not set the configured voice — only `install_default_voice` did). **Production fix (this PR, alongside the UC-E9 fix):** `web_ui/bridge.py` `install_voice` now performs the **same shared onboarding/activation effect** Tk's `apply_installed_voice` does — set the just-installed voice as the configured voice on the **same shared config dict** the **shared** `onboarding.build_activation_readiness` reads (mirroring the bridge's own `install_default_voice` and Tk's panel). The shared onboarding logic is **reused, not forked** — Tk behaviour is byte-for-byte unchanged (the shared module is untouched), so there is no Tk/web drift. Now **genuinely covered**: Tier-1 merge gate `e2e/web/test_core_phase3.py::test_ucc9_first_run_vm_install_completion_flips_onboarding_ready` (real served onboarding → Open Voice Manager host callback → real `install_voice` installer → NEW completion callback → real shared `get_readiness` flips `missing_voice`→`ready` + real reopened onboarding DOM shows the READY screen; seam = ONLY the OS-boundary network download, the established e2e/web installer pattern; no mock of the unit, no tautology — the test never sets the configured voice, the production callback does) **and** Tier-2 launched-app journey **J9** `e2e/journey/test_journeys.py::test_j9_first_run_vm_install_completion_onboarding_ready` (a GENUINE voice download on the real non-headless WebView2 app — J1's real-download pattern — proving the NEW callback automatically configures the voice + flips the running app's shared readiness ready WITHOUT any manual Settings select/save). |
 
 ---
 
@@ -181,11 +181,11 @@ equal the Total.
 |---|---|---|---|---|
 | A. Onboarding | 14 | 14 | 0 | 0 |
 | B. Settings | 21 | 21 | 0 | 0 |
-| C. Voice Manager | 9 | 8 | 0 | 1 |
+| C. Voice Manager | 9 | 9 | 0 | 0 |
 | D. Reader overlay | 10 | 10 | 0 | 0 |
 | E. Tray / hotkeys | 9 | 9 | 0 | 0 |
 | F. Command server IPC | 2 | 2 | 0 | 0 |
-| **Total** | **65** | **64** | **0** | **1** |
+| **Total** | **65** | **65** | **0** | **0** |
 
 > **After Phase-5 (the final core phase): 0 partial rows remain.** The 3
 > Phase-5 partial rows were closed Tier-1 (real-effect, true seam,
@@ -216,13 +216,36 @@ equal the Total.
 > therefore covered, not forced green** — the asserted refusal is the
 > real, now-true product behaviour.
 >
-> The **only 1 row that genuinely remains open** is an honest,
-> documented product-gap exception — **NOT forced green**, because
-> closing it needs a real production change out of this PR's scope:
-> - **UC-C9** (first-run→VM install-completion parity gap) — **missing**
->   — Phase-3 triaged & formally accepted (the web path has no
->   install-completion callback at all; a test would be a fake-green or
->   require an out-of-scope feature change — see the UC-C9 row).
+> **UC-C9 update (this PR, alongside the UC-E9 fix): missing → covered
+> via a minimal production fix.** The web path previously had **no**
+> install-completion callback (the genuine parity gap formerly recorded
+> here as a Phase-3-accepted exception). It is now genuinely fixed in
+> `web_ui/bridge.py` (`install_voice` applies the **same shared
+> onboarding/activation effect** Tk's `apply_installed_voice` /
+> `_finish_voice_install` does — set the just-installed voice as the
+> configured voice on the **same shared config dict** the **shared**
+> `onboarding.build_activation_readiness` reads; mirrors the bridge's
+> own `install_default_voice`). The shared onboarding logic is **reused,
+> not forked** — `pippal.onboarding` and the Tk path are byte-for-byte
+> unchanged (no Tk/web drift; the full 266-test unit suite incl.
+> `tests/test_activation_panel.py` / `tests/test_onboarding.py` stays
+> green). Real-effect Tier-1 merge-gate test
+> (`test_core_phase3.py::test_ucc9_first_run_vm_install_completion_flips
+> _onboarding_ready`, no mock of the unit under test, seam = ONLY the
+> OS-boundary network download — the established e2e/web installer
+> pattern, deadline-poll, privilege/host-independent, no tautology — the
+> test never sets the configured voice, the production callback does)
+> **and** Tier-2 launched-app journey **J9**
+> (`test_journeys.py::test_j9_first_run_vm_install_completion_onboarding
+> _ready`, a genuine voice download on the real non-headless WebView2
+> app, J1's real-download pattern). **UC-C9 is therefore covered, not
+> forced green** — the asserted onboarding-ready flip is the real,
+> now-true product behaviour.
+>
+> **No row genuinely remains open.** Full phased core coverage is
+> achieved with **zero** documented product-gap exceptions remaining
+> (the former UC-C9 and UC-E9 exceptions were both closed by minimal
+> production fixes in this PR).
 >
 > A Phase-5 honest finding (NOT fake-green): the launched-app **pause**
 > path for the already-covered UC-D5/UC-D10 is not Tier-2-journey-able
@@ -232,10 +255,10 @@ equal the Total.
 > transport, and UC-D5/UC-D10 stay covered by their existing Tier-1 test.
 >
 > Arithmetic is exact: every section's covered+partial+missing equals
-> its Use-cases (14+0+0=14, 21+0+0=21, 8+0+1=9, 10+0+0=10, 9+0+0=9,
-> 2+0+0=2) and the section sums equal the Total (64+0+1=65). **Full
-> phased core coverage is achieved except the 1 honestly-documented
-> product-gap exception (UC-C9).**
+> its Use-cases (14+0+0=14, 21+0+0=21, 9+0+0=9, 10+0+0=10, 9+0+0=9,
+> 2+0+0=2) and the section sums equal the Total (65+0+0=65). **Full
+> genuine phased core coverage is achieved with 0 partial, 0 missing,
+> and no documented product-gap exceptions remaining.**
 
 > **Phase-1 delta:** the 5 Phase-1 error/recovery rows — UC-A7, UC-C6,
 > UC-B7, UC-B11, UC-D8 — flipped **partial → covered** by
@@ -353,14 +376,18 @@ equal the Total.
 
 Split by tier (where covered/partial):
 
-- **Tier-1 (`e2e/web/`)** carries the bulk: all 64 "covered" have a
+- **Tier-1 (`e2e/web/`)** carries the bulk: all 65 "covered" have a
   Tier-1 test except UC-B21 (Tier-2-only — a launched-app journey).
   After Phase-5 there are **0 partial rows** — UC-B2/E1/E7 were closed
   Tier-1 in `e2e/web/test_core_phase5.py`. UC-E9 is now **fully Tier-1
   covered** (`test_core_phase4.py::test_single_instance_gate_refuses
   _second_instance_and_is_crash_restart_safe`) after the
-  `command_server.py` production fix — its Windows trigger-condition is
-  no longer a gap.
+  `command_server.py` production fix, and **UC-C9 is now fully Tier-1
+  covered** (`test_core_phase3.py::test_ucc9_first_run_vm_install
+  _completion_flips_onboarding_ready`) after the `web_ui/bridge.py`
+  install-completion production fix (shared `onboarding` logic reused,
+  not forked; Tk unchanged) — neither Windows/first-run
+  trigger-condition is a gap any more.
 - **Tier-2 (`e2e/journey/`)** independently covers the 5 core journeys
   J1–J5 (UC-A2/A3, UC-A7, UC-B5/B8, UC-B14, UC-C1/C6, UC-D1/D2/D8), the
   Phase-4 **J6** (UC-B21, corrupt-config recovery), plus the Phase-5
@@ -370,13 +397,16 @@ Split by tier (where covered/partial):
   desktop app*. J7/J8 are additive release-lane breadth for
   already-covered rows (they flip no row); J6 remains the one Tier-2
   journey that covers a previously-"missing" use-case end-to-end.
-- **1 "missing"**: UC-C9 (Phase-3-triaged & formally-accepted parity
-  gap, documented, not forced green) — the only row not covered; it
-  needs a real production change (an install-completion callback the
-  web path lacks) out of this PR's scope and is recorded honestly with
-  the real reason. (UC-E9, previously the second "missing" row, is now
-  covered by this PR's `command_server.py` production fix + real-effect
-  test.)
+- **0 "missing"**: every core use-case row is now genuinely covered.
+  The two formerly-open rows are both closed by minimal production
+  fixes in this PR: **UC-C9** (the first-run→Voice-Manager
+  install-completion parity gap) by the `web_ui/bridge.py`
+  `install_voice` fix (the same shared `onboarding` effect Tk's
+  `apply_installed_voice` applies — shared logic reused, not forked; Tk
+  unchanged) + Tier-1 test + Tier-2 journey J9; and **UC-E9** by the
+  `command_server.py` single-instance production fix + real-effect
+  test. No row is forced green — each asserted effect is the real,
+  now-true product behaviour after its fix.
 
 ---
 
@@ -521,17 +551,24 @@ evidence — run/job/runner/commit/pass-count — is recorded in
   (the exact real `_selected_piper_missing(config) or
   should_show_activation_panel()` gate across all 4 real branches with
   real on-disk state — privilege/host-independent). ✅
-- UC-C9 first-run→VM install-completion parity gap — **decision item:
-  formally accepted as an open parity gap (doc/triage, NOT forced
-  green).** The web onboarding "Open Voice Manager" path has no
-  `apply_installed_voice` analogue / install-completion callback; a test
-  would be a tautology/fake-green or require an out-of-scope feature
-  change. Recorded honestly in the UC-C9 row + the checklist's Honest
-  parity notes; recommended as future feature+test work. ✅ (triaged)
+- UC-C9 first-run→VM install-completion parity gap → **RESOLVED by this
+  PR's `web_ui/bridge.py` production fix** (`install_voice` now applies
+  the same shared `onboarding` effect Tk's `apply_installed_voice`
+  does — shared logic reused, not forked; Tk byte-for-byte unchanged) →
+  `test_core_phase3.py::test_ucc9_first_run_vm_install_completion_flips_onboarding_ready`
+  (Tier-1 merge gate; seam = ONLY the OS-boundary network download — the
+  established e2e/web installer pattern; no mock of the unit, no
+  tautology — the test never sets the configured voice, the production
+  callback does; privilege/host-independent) + Tier-2 launched-app
+  journey **J9**
+  `test_journeys.py::test_j9_first_run_vm_install_completion_onboarding_ready`
+  (a genuine voice download on the real non-headless WebView2 app —
+  J1's real-download pattern). Originally Phase-3-triaged as a formally
+  accepted parity gap; now genuinely covered, not forced green. ✅
 
-*Actual size:* 4 Tier-1 test functions + 1 honest triage decision (the
-spec's "~3 tests + 1 triage" — UC-A14 split into a completion test and a
-capture-failure-recovery test for a single-real-effect assertion each).
+*Actual size:* 5 Tier-1 test functions (UC-A14 split into a completion
+test and a capture-failure-recovery test; + the UC-C9 install-completion
+test landed by this PR's production fix).
 The conditions are real seams (real registered WAV synth via the plugin
 API + the OS-boundary selection seam; real served-DOM `st.is_complete`
 branch; the real `app_web` gate helpers against real on-disk state), not
@@ -609,7 +646,7 @@ gap honestly triaged in Phase-4 — is now closed by this PR's
 `command_server.py` production fix and is genuinely covered, not a
 fake-green.
 
-### Phase 5 — final core phase: close the remaining partial rows (Tier-1) + Tier-2 journey breadth — ✅ DONE (UC-C9 stays open; UC-E9 later closed by a production fix — see the UC-E9 row & Honest-gaps note 6)
+### Phase 5 — final core phase: close the remaining partial rows (Tier-1) + Tier-2 journey breadth — ✅ DONE (UC-C9 and UC-E9 both later closed by minimal production fixes in this PR — see their rows, J9, & Honest-gaps note 6)
 *Why last:* the FINAL core phase. (1) Tier-1: close the three remaining
 **partial** rows where they are genuinely coverable without a
 production change, at a true seam, real-effect, privilege/host
@@ -752,12 +789,15 @@ real `HotkeyManager._on_event` fed the exact hook event objects; the
 real launched app's own bridge + the exact registered `open_file`
 command + the real overlay transport), not mocks. UC-D5/UC-D10's
 launched-app pause path is an honestly-recorded reachability boundary
-(no real user surface + a default-off 404 route), not a fake-green;
-UC-C9 stays honestly open (no production change available in this
-scope — see its row + the gaps section). UC-E9 was honestly open at
-Phase-5 but is now **closed by this PR's `command_server.py`
-production fix** (missing → covered — see the UC-E9 row, the Phase-4
-bullet, and Honest-gaps note 6).
+(no real user surface + a default-off 404 route), not a fake-green.
+UC-C9 and UC-E9 were honestly open at Phase-5 but are **both now closed
+by minimal production fixes in this PR**: UC-C9 by the
+`web_ui/bridge.py` `install_voice` install-completion fix (same shared
+`onboarding` effect Tk's `apply_installed_voice` applies — shared logic
+reused, not forked; Tk unchanged) + Tier-1 test + Tier-2 journey J9;
+UC-E9 by the `command_server.py` single-instance fix + real-effect test
+(both missing → covered — see their rows, J9, the Phase-4 bullet, and
+Honest-gaps note 6).
 
 > **Phase-5 delta (this PR update):** the 3 remaining Phase-5
 > partial rows — **UC-B2** (partial→covered), **UC-E1**
@@ -794,16 +834,30 @@ bullet, and Honest-gaps note 6).
 > and the section sums equal the Total (63+0+2=65). No Phase-1/2/3/4
 > row's *status* changed.
 >
-> **Superseding update (this PR — UC-E9 production fix):** the Phase-5
-> arithmetic above (`63+0+2=65`, "missing unchanged at 2") was exact
-> *at Phase-5*. This later PR ships a real `command_server.py`
-> production fix (`_SingleInstanceHTTPServer` — Windows
-> `SO_EXCLUSIVEADDRUSE`, non-Windows unchanged, crash-restart safe) +
-> a genuine real-effect Tier-1 test, flipping **UC-E9 missing →
-> covered**. The authoritative current tally is the one at the top of
-> this section: section E 8/0/1 → **9/0/0**, Total **64 covered / 0
-> partial / 1 missing of 65** (`64+0+1=65`). UC-C9 is the only row
-> that genuinely remains missing.
+> **Superseding update (this PR — TWO production fixes: UC-E9 + UC-C9):**
+> the Phase-5 arithmetic above (`63+0+2=65`, "missing unchanged at 2")
+> was exact *at Phase-5*. This PR ships **two** minimal production fixes,
+> each with a genuine real-effect test, flipping both formerly-missing
+> rows to covered:
+> 1. **UC-E9** — `command_server.py` `_SingleInstanceHTTPServer`
+>    (Windows `SO_EXCLUSIVEADDRUSE`, non-Windows unchanged, crash-restart
+>    safe) + real-effect Tier-1 test → **missing → covered**.
+> 2. **UC-C9** — `web_ui/bridge.py` `install_voice` now applies the same
+>    shared `onboarding`/activation effect Tk's `apply_installed_voice`
+>    does (set the just-installed voice as the configured voice on the
+>    same shared config dict the shared `build_activation_readiness`
+>    reads; shared logic reused, not forked; the shared
+>    `pippal.onboarding` module + the whole Tk path byte-for-byte
+>    unchanged) + a real-effect Tier-1 merge-gate test + Tier-2
+>    launched-app journey **J9** → **missing → covered**.
+>
+> The authoritative current tally is the one at the top of this section:
+> section C 8/0/1 → **9/0/0** (UC-C9) and section E 8/0/1 → **9/0/0**
+> (UC-E9), Total **65 covered / 0 partial / 0 missing of 65**
+> (`65+0+0=65`). **No row genuinely remains missing** — full genuine
+> core coverage with 0 documented product-gap exceptions, neither row
+> forced green (each asserted effect is the real, now-true product
+> behaviour after its fix).
 
 *Est. (original plan):* "3 new Tier-2 journeys" — the audited Phase-5
 scope refined this to the 3 Tier-1 partial-row closures (UC-B2/E1/E7) +
@@ -871,12 +925,10 @@ Phase-4. Additive only; not a CI gate.
    replacing only the OS clipboard read so the result is
    privilege/host-independent); the pure activation-state logic that
    runs around it is now exercised end-to-end. **UC-C9** (the
-   first-run→VM install-completion parity gap) is the one onboarding
-   gap that genuinely remains — **Phase-3 triaged & formally accepted**:
-   the web path has no install-completion callback at all, so a test
-   would be a fake-green or require an out-of-scope feature change; it
-   is documented as an open parity gap here and in the checklist's
-   Honest parity notes rather than forced green.
+   first-run→VM install-completion parity gap) was the one onboarding
+   gap that remained at Phase-3 (then triaged & formally accepted) — it
+   is now **RESOLVED by this PR's `web_ui/bridge.py` production fix**;
+   see note 7 below.
 6. **RESOLVED (this PR): the single-instance gate (UC-E9) was a real
    latent product weakness on Windows; it is now fixed and genuinely
    covered.** The gate is `cmd_server = start_command_server(...); if
@@ -911,6 +963,56 @@ Phase-4. Additive only; not a CI gate.
    a fresh instance rebinds after the first exits. **UC-E9 is now
    genuinely covered (missing → covered), not forced green** — the
    asserted refusal is the real product behaviour after the fix.
+7. **RESOLVED (this PR): the first-run→Voice-Manager
+   install-completion parity gap (UC-C9) is fixed and genuinely
+   covered.** Tk's first-run flow wires
+   `on_installed=panel.apply_installed_voice` (`app.py:577-583` →
+   `activation_panel.py:415` → `_finish_voice_install`:
+   `self.config["voice"] = installed_filename`), so installing a voice
+   from the first-run Voice Manager makes that voice the configured
+   voice and the **shared** `onboarding.build_activation_readiness`
+   flips onboarding/readiness ready (canonical Tk contract:
+   `tests/test_activation_panel.py:375` asserts `config["voice"] ==
+   installed_filename`). The original Phase-3 audit verified the **web
+   path had no install-completion callback at all** — the web onboarding
+   "Open Voice Manager" opened the VM as an independent window and
+   `bridge.install_voice` did not set the configured voice (only
+   `bridge.install_default_voice` did) — a genuine migration parity gap,
+   then formally accepted as open rather than forced green. **Production
+   fix (this PR):** `web_ui/bridge.py` `install_voice` (the web Voice
+   Manager's install-completion point — the analogue of Tk's
+   `voice_manager._download_done` → `on_installed`) now performs the
+   **same shared onboarding/activation effect** Tk's
+   `apply_installed_voice` does: it sets the just-installed voice as the
+   configured voice on the **same shared config dict** the **shared**
+   `onboarding.build_activation_readiness` reads, exactly mirroring the
+   bridge's own `install_default_voice` and Tk's panel. The shared
+   `pippal.onboarding` module and the **entire Tk path are untouched**:
+   the shared logic is **reused, not forked**, so there is **no Tk/web
+   drift** (the full 266-test unit suite incl.
+   `tests/test_activation_panel.py` / `tests/test_onboarding.py` stays
+   green — Tk behaviour is byte-for-byte identical). The Tier-1
+   merge-gate test
+   (`test_core_phase3.py::test_ucc9_first_run_vm_install_completion_flips_onboarding_ready`)
+   asserts the real, now-true effect — real served onboarding
+   `missing_voice` → real `open_voice_manager_window` host callback →
+   real `bridge.install_voice`→`install_piper_voice` installer → the NEW
+   completion callback makes the just-installed voice the configured
+   voice → real shared `get_readiness` flips `missing_voice`→`ready` →
+   real reopened onboarding DOM shows the READY first-run screen; seam =
+   ONLY the OS-boundary network download (the established e2e/web
+   installer pattern; no mock of the unit, no tautology — the test never
+   sets the configured voice, the production callback does; deadline-
+   poll; privilege/host-independent). The Tier-2 launched-app journey
+   **J9**
+   (`test_journeys.py::test_j9_first_run_vm_install_completion_onboarding_ready`)
+   does a genuine voice download on the real non-headless WebView2 app
+   (J1's real-download pattern) and asserts the NEW callback
+   automatically configures the voice + flips the running app's shared
+   readiness ready WITHOUT any manual Settings select/save. **UC-C9 is
+   now genuinely covered (missing → covered), not forced green** — the
+   asserted onboarding-ready flip is the real product behaviour after
+   the fix.
 
 No coverage claim in `UI_TEST_CHECKLIST.md` was found to be *false* for
 the control it names; the gaps are use-case/behavioural variants the
