@@ -17,10 +17,12 @@ name: UI Web E2E
 # self-hosted Windows runner. The job fails if any test fails (pytest's
 # exit code is the job result).
 #
-# Scope guard: this is additive. It does NOT touch ci.yml /
-# e2e-windows.yml / bench-baseline.yml, and the web e2e dir stays
-# excluded from the default `python -m pytest` (pytest.ini:
-# testpaths = tests), so the unit/e2e-windows jobs are unaffected.
+# Scope guard: this is additive. It does NOT touch gate-lint-unit.yml
+# (renamed from ci.yml) / check-e2e-tk.yml (renamed from
+# e2e-windows.yml) / check-bench.yml (renamed from bench-baseline.yml),
+# and the web e2e dir stays excluded from the default
+# `python -m pytest` (pytest.ini: testpaths = tests), so the
+# unit/e2e-windows jobs are unaffected.
 
 on:
   pull_request:
@@ -73,7 +75,7 @@ jobs:
           # newlines pytest's live-log writes) as escapes. Force UTF-8
           # IO so the CI log shows the human-readable steps verbatim.
           # Scoped to THIS step only — the default `python -m pytest`
-          # (tests/) job in ci.yml is untouched.
+          # (tests/) job in gate-lint-unit.yml (was ci.yml) is untouched.
           PYTHONUTF8: "1"
           PYTHONIOENCODING: "utf-8"
         run: |

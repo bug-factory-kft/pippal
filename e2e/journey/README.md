@@ -16,7 +16,7 @@ deadline-polls not fixed sleeps.
 |---|---|---|
 | What it drives | the real static UI **served** + **headless Chromium** + the real `/bridge` backend | the **actually launched** desktop app — a real pywebview **WebView2** window |
 | Granularity | one focused real-effect test per **control** | multi-step **use-case journeys** ("why the user does this") |
-| Lane | **per-PR merge gate** (`ui-web-e2e.yml` → required check *Web UI E2E (served, headless Chromium)*) | **release / journey lane**, run on demand |
+| Lane | **per-PR merge gate** (`gate-web-e2e.yml` — renamed from `ui-web-e2e.yml` — → required check *Web UI E2E (served, headless Chromium)*) | **release / journey lane**, run on demand |
 | Where it runs | the Session-0 CI runner (no desktop needed) | only the **interactive logged-in user** (a real window must appear) — **NOT** the Session-0 CI runner |
 | Status here | unchanged — stays the merge gate | additive — never modifies Tier-1 or any workflow |
 
@@ -260,12 +260,15 @@ a two-step, additive flow:
    ```
 
    (plus a timestamped sibling), then **best-effort triggers**
-   `gh workflow run tier2-evidence-publish.yml`. Pass `-NoPublish` to
-   stage only; `-StageRoot <path>` to override the staging root.
+   `gh workflow run journey-evidence.yml` (renamed from
+   `tier2-evidence-publish.yml`). Pass `-NoPublish` to stage only;
+   `-StageRoot <path>` to override the staging root.
 
 2. **The `Tier-2 Evidence Publish` workflow**
-   (`.github/workflows/tier2-evidence-publish.yml`,
-   **`workflow_dispatch` only**) runs a single job on the same
+   (`.github/workflows/journey-evidence.yml` — renamed from
+   `tier2-evidence-publish.yml`; workflow `name:` unchanged so the
+   Actions UI label is the same — **`workflow_dispatch` only**) runs a
+   single job on the same
    self-hosted Windows host. It runs **no journey** (no desktop
    needed) — it only reads `%LOCALAPPDATA%\pippal-tier2-evidence\
    latest\` and `actions/upload-artifact@v4`s it as
@@ -290,8 +293,10 @@ Evidence Publish* manually from the Actions tab.
   download path end-to-end.
 - These journeys are **excluded from the default `pytest`**
   (`testpaths = tests`) and from Tier-1 `e2e/web`. They never modify
-  `command_server.py` / `open_file.py`, `ci.yml` / `e2e-windows.yml` /
-  `bench-baseline.yml` / `ui-web-e2e.yml`, or branch protection.
+  `command_server.py` / `open_file.py`, `gate-lint-unit.yml`
+  (was `ci.yml`) / `check-e2e-tk.yml` (was `e2e-windows.yml`) /
+  `check-bench.yml` (was `bench-baseline.yml`) / `gate-web-e2e.yml`
+  (was `ui-web-e2e.yml`), or branch protection.
 - A second pywebview window = a new CDP target the initial
   `connect_over_cdp` does not auto-surface; the fixture reconnects to
   discover it (see the technique above). This is a Playwright-CDP
@@ -302,5 +307,6 @@ Evidence Publish* manually from the Actions tab.
   a per-journey **trace.zip** (works over CDP) + a real screen/window
   **.mp4** via `ffmpeg gdigrab` (or a screenshot-grab + contact-sheet
   fallback when ffmpeg is absent). See *Recordings* above. The
-  staging + `tier2-evidence-publish.yml` (`workflow_dispatch` only)
+  staging + `journey-evidence.yml` (renamed from
+  `tier2-evidence-publish.yml`; `workflow_dispatch` only)
   flow is purely additive and never gates the Tier-1 merge check.

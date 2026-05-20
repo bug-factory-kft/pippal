@@ -17,7 +17,9 @@ Two tiers, exactly as the codebase defines them:
 
 - **Tier-1** = `e2e/web/` per-control real-effect Playwright E2E,
   served + headless, the per-PR merge gate
-  (`.github/workflows/ui-web-e2e.yml`). Tests:
+  (`.github/workflows/gate-web-e2e.yml`, renamed from
+  `ui-web-e2e.yml`; required check name *Web UI E2E (served, headless
+  Chromium)* unchanged). Tests:
   `e2e/web/test_web_ui.py`, `e2e/web/test_web_ui_controls.py`,
   `e2e/web/test_tray_hotkey_integration.py`.
 - **Tier-2** = `e2e/journey/` real-launched-pywebview-window

@@ -7,9 +7,11 @@ TWO-TIER MODEL — why this package exists separately from e2e/web
 * **Tier-1 (``e2e/web``)** — per-control real-effect E2E driven in
   *served / headless* mode (a local server + headless Chromium + the
   real ``/bridge`` backend). It is the **per-PR merge gate**
-  (``ui-web-e2e.yml`` → required check *Web UI E2E (served, headless
-  Chromium)*). It is fast, deterministic, runnable on the Session-0 CI
-  runner, and is **not** modified by this package.
+  (``gate-web-e2e.yml`` — renamed from ``ui-web-e2e.yml`` — → required
+  check *Web UI E2E (served, headless Chromium)*; the workflow ``name:``
+  *UI Web E2E* and the displayed check name are unchanged). It is fast,
+  deterministic, runnable on the Session-0 CI runner, and is **not**
+  modified by this package.
 
 * **Tier-2 (this package, ``e2e/journey``)** — genuine *user-journey /
   use-case* tests that drive the **actually launched desktop app**: a

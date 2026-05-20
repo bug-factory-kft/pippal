@@ -29,16 +29,21 @@
   release evidence expects >= 2 to demonstrate stability.
 
 .PARAMETER NoPublish
-  Skip the best-effort `gh workflow run tier2-evidence-publish.yml`
+  Skip the best-effort `gh workflow run journey-evidence.yml`
   trigger at the end. The evidence bundle is still STAGED to the fixed
   host path either way (so the Tier-2 Evidence Publish workflow can be
   dispatched manually later).
+
+  (Workflow renamed from `tier2-evidence-publish.yml` ->
+  `journey-evidence.yml` in the gate-/check-/journey- funkcio-prefix
+  rename; the workflow `name:` "Tier-2 Evidence Publish" is unchanged.)
 
 .PARAMETER StageRoot
   Override the fixed staging root (default
   `%LOCALAPPDATA%\pippal-tier2-evidence`). The just-produced bundle is
   copied to `<StageRoot>\latest\` and a timestamped sibling. The
-  `tier2-evidence-publish.yml` workflow reads `<StageRoot>\latest\` on
+  `journey-evidence.yml` workflow (renamed from
+  `tier2-evidence-publish.yml`) reads `<StageRoot>\latest\` on
   the runner host and uploads it as the `tier2-journey-evidence`
   GitHub artifact (Tier-1's equivalent of an attached, downloadable
   report).
@@ -77,13 +82,14 @@ function Get-JUnitCounts {
 function Publish-Tier2Evidence {
     <#
       Stage the just-produced evidence bundle to a FIXED host path so
-      the workflow_dispatch `tier2-evidence-publish.yml` (a single job
-      that runs NO journey — no desktop needed) can read it from the
-      runner host and `actions/upload-artifact@v4` it as
-      `tier2-journey-evidence` (Tier-1's equivalent of an attached,
-      downloadable report). This is purely additive: it touches only
-      this Tier-2 runner and a per-user staging dir; it does not affect
-      Tier-1 or any required check.
+      the workflow_dispatch `journey-evidence.yml` (renamed from
+      `tier2-evidence-publish.yml`; a single job that runs NO journey —
+      no desktop needed) can read it from the runner host and
+      `actions/upload-artifact@v4` it as `tier2-journey-evidence`
+      (Tier-1's equivalent of an attached, downloadable report). This
+      is purely additive: it touches only this Tier-2 runner and a
+      per-user staging dir; it does not affect Tier-1 or any required
+      check.
 
       Best-effort + non-fatal: a staging/publish failure must NEVER
       change the journey gate's exit code.
@@ -165,7 +171,10 @@ function Publish-Tier2Evidence {
         $branch = (& git -C $RepoRoot rev-parse --abbrev-ref HEAD).Trim()
         if ([string]::IsNullOrWhiteSpace($branch)) { $branch = 'feat/web-ui-migration' }
         Write-Host "Dispatching Tier-2 Evidence Publish workflow on '$branch'…" -ForegroundColor Cyan
-        & $gh workflow run tier2-evidence-publish.yml --ref $branch
+        # Workflow filename: journey-evidence.yml (renamed from
+        # tier2-evidence-publish.yml; workflow `name:` "Tier-2 Evidence
+        # Publish" unchanged, so the Actions UI label is the same).
+        & $gh workflow run journey-evidence.yml --ref $branch
         if ($LASTEXITCODE -eq 0) {
             Write-Host "Triggered. Download 'tier2-journey-evidence' from the 'Tier-2 Evidence Publish' workflow run." -ForegroundColor Green
         }
@@ -326,7 +335,7 @@ try {
         html_report = $htmlReport
         stage_root = $StageRoot
         staged_latest = (Join-Path $StageRoot 'latest')
-        publish_workflow = 'tier2-evidence-publish.yml (workflow_dispatch only; uploads artifact tier2-journey-evidence)'
+        publish_workflow = 'journey-evidence.yml (renamed from tier2-evidence-publish.yml; workflow_dispatch only; uploads artifact tier2-journey-evidence)'
         tests = $counts.tests
         failures = $counts.failures
         errors = $counts.errors

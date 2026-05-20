@@ -130,7 +130,8 @@ replaces the *windows*. They have no served DOM, but every tray menu
 callback and the hotkey-dispatch handler are plain Python callables, so
 they get **real headless-safe integration tests** in
 `e2e/web/test_tray_hotkey_integration.py` (picked up by the same
-`ui-web-e2e.yml` workflow that runs `python -m pytest e2e/web`). The
+`gate-web-e2e.yml` workflow — renamed from `ui-web-e2e.yml` — that runs
+`python -m pytest e2e/web`). The
 pystray menu is built by the *exact same* code path the running web app
 uses (`pippal.web_ui.app_web.build_tray_menu`, extracted verbatim from
 `main`); a `pystray.MenuItem` is callable, so `item(icon)` is precisely
@@ -614,8 +615,9 @@ profile.
 - Every test narrates its meaningful actions/assertions through the
   `step` fixture (`e2e/web/conftest.py`) on the stdlib `logging`
   module, so a PASSING CI run shows exactly what each test did instead
-  of "Passed … no log output captured". The `ui-web-e2e.yml` workflow
-  runs the suite with `-v -rA --log-cli-level=INFO` (the flags live in
+  of "Passed … no log output captured". The `gate-web-e2e.yml`
+  workflow (renamed from `ui-web-e2e.yml`) runs the suite with
+  `-v -rA --log-cli-level=INFO` (the flags live in
   the workflow command, **not** the root `pytest.ini`, so the default
   `python -m pytest` (`tests/`) suite is unaffected and `e2e/web` stays
   excluded from it).
@@ -876,8 +878,9 @@ profile.
 
 Everything above is **Tier-1**: per-control real-effect E2E in
 **served / headless** mode — the **per-PR merge gate**
-(`ui-web-e2e.yml` → required check *Web UI E2E (served, headless
-Chromium)*). It stays exactly that and is **not** modified.
+(`gate-web-e2e.yml` — renamed from `ui-web-e2e.yml`; workflow `name:`
+*UI Web E2E* and required check name *Web UI E2E (served, headless
+Chromium)* unchanged). It stays exactly that and is **not** modified.
 
 **Tier-2** is a *second*, additive lane: genuine **use-case journeys**
 on the **actually launched desktop app** — a real `reader_app_web.py`
@@ -1000,9 +1003,11 @@ an additive, two-step flow:
   `.mp4`/contact-sheet, app/cdp proof, a `tier2-evidence-manifest.json`)
   to a fixed per-user host path
   `%LOCALAPPDATA%\pippal-tier2-evidence\latest\` (+ a timestamped
-  copy), then best-effort `gh workflow run tier2-evidence-publish.yml`.
+  copy), then best-effort `gh workflow run journey-evidence.yml`
+  (renamed from `tier2-evidence-publish.yml`).
 - **`Tier-2 Evidence Publish`**
-  (`.github/workflows/tier2-evidence-publish.yml`) is
+  (`.github/workflows/journey-evidence.yml` — renamed from
+  `tier2-evidence-publish.yml`; workflow `name:` unchanged) is
   **`workflow_dispatch` only** — a single job on the same self-hosted
   Windows host that runs **no journey** (no desktop), only reads the
   staged dir and `actions/upload-artifact@v4`s it as
@@ -1019,8 +1024,10 @@ an additive, two-step flow:
   run — J1 alone proves the real download path end-to-end.
 - Additive only: `e2e/journey` is **excluded from the default
   `pytest`** (`testpaths = tests`) and from Tier-1 `e2e/web`;
-  `command_server.py` / `open_file.py`, `ci.yml` / `e2e-windows.yml` /
-  `bench-baseline.yml` / `ui-web-e2e.yml`, and branch protection are
+  `command_server.py` / `open_file.py`, `gate-lint-unit.yml`
+  (was `ci.yml`) / `check-e2e-tk.yml` (was `e2e-windows.yml`) /
+  `check-bench.yml` (was `bench-baseline.yml`) / `gate-web-e2e.yml`
+  (was `ui-web-e2e.yml`), and branch protection are
   untouched. `ruff check src/pippal tests e2e/web e2e/journey` → clean;
   `py -3.11 -m pytest -q` still collects exactly the unit suite (zero
   from `e2e/journey`).

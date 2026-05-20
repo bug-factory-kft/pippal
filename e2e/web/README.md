@@ -73,10 +73,12 @@ $env:PYTHONUTF8 = "1"; $env:PYTHONIOENCODING = "utf-8"
 .\.venv-web\Scripts\python.exe -m pytest e2e\web -v -rA --log-cli-level=INFO --browser chromium
 ```
 
-This is exactly what the `ui-web-e2e.yml` workflow runs (the flags are
-passed on the command line, **not** in the root `pytest.ini`, so the
-default `python -m pytest` / `tests/` suite is completely unaffected
-and `e2e/web` stays excluded from it).
+This is exactly what the `gate-web-e2e.yml` workflow runs (renamed
+from `ui-web-e2e.yml`; workflow `name:` *UI Web E2E* and required
+check name *Web UI E2E (served, headless Chromium)* unchanged — the
+flags are passed on the command line, **not** in the root `pytest.ini`,
+so the default `python -m pytest` / `tests/` suite is completely
+unaffected and `e2e/web` stays excluded from it).
 
 ### Watch it live (headed, slow)
 
@@ -103,7 +105,7 @@ network, console, a timeline of every action):
 
 ## Playwright artifacts (ALWAYS produced, not only on failure)
 
-The `ui-web-e2e.yml` workflow runs the suite with
+The `gate-web-e2e.yml` workflow (renamed from `ui-web-e2e.yml`) runs the suite with
 `--tracing=on --video=on --screenshot=on --output=playwright-report/artifacts`
 and `--html=playwright-report/report.html --self-contained-html`, so
 **every** test (even on a fully green run) produces:

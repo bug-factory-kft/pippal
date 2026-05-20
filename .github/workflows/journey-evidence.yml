@@ -25,8 +25,11 @@ name: Tier-2 Evidence Publish
 # ---------------------------------------
 # * `workflow_dispatch` ONLY — never `pull_request` / `push`, so it is
 #   NOT a required check and cannot gate or interfere with the Tier-1
-#   merge gate (`ui-web-e2e.yml` -> `Web UI E2E (served, headless
-#   Chromium)`), `ci.yml`, `e2e-windows.yml`, or `bench-baseline.yml`.
+#   merge gate (`gate-web-e2e.yml`, renamed from `ui-web-e2e.yml` ->
+#   required check `Web UI E2E (served, headless Chromium)`),
+#   `gate-lint-unit.yml` (was `ci.yml`), `check-e2e-tk.yml`
+#   (was `e2e-windows.yml`), or `check-bench.yml`
+#   (was `bench-baseline.yml`).
 # * It runs NO tests and NO journey; it only packages a host-staged
 #   directory. It does not touch command_server.py / open_file.py /
 #   pytest.ini / e2e/web or branch protection.
