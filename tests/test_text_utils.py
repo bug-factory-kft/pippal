@@ -65,6 +65,45 @@ class TestSplitSentences:
     def test_strips_outer_whitespace(self):
         assert split_sentences("  hello  ") == ["hello"]
 
+    # --- newline-boundary tests ---
+
+    def test_bullet_list_each_line_is_separate_chunk(self):
+        text = "- Apples\n- Oranges\n- Bananas"
+        chunks = split_sentences(text)
+        assert chunks == ["- Apples", "- Oranges", "- Bananas"]
+
+    def test_numbered_list_each_line_is_separate_chunk(self):
+        text = "1. Cat\n2. Dog\n3. Bird"
+        chunks = split_sentences(text)
+        assert chunks == ["1. Cat", "2. Dog", "3. Bird"]
+
+    def test_blank_lines_ignored(self):
+        text = "- Apples\n\n- Oranges\n\n- Bananas"
+        chunks = split_sentences(text)
+        assert chunks == ["- Apples", "- Oranges", "- Bananas"]
+
+    def test_leading_trailing_whitespace_trimmed_per_line(self):
+        text = "  - Apples  \n  - Oranges  "
+        chunks = split_sentences(text)
+        assert chunks == ["- Apples", "- Oranges"]
+
+    def test_prose_still_splits_on_punctuation(self):
+        # Normal sentences with terminal punctuation must still pack under
+        # the cap — no regression for prose paragraphs.
+        text = "The cat sat. The dog ran."
+        chunks = split_sentences(text)
+        # Both short sentences fit in one chunk (single line, no newline).
+        assert chunks == ["The cat sat. The dog ran."]
+
+    def test_mixed_list_and_prose_line(self):
+        # A line that itself contains multiple sentences is split by
+        # punctuation, while the newline forces a new chunk.
+        text = "Hello world. How are you?\n- Apples\n- Oranges"
+        chunks = split_sentences(text)
+        assert chunks[0] == "Hello world. How are you?"
+        assert "- Apples" in chunks
+        assert "- Oranges" in chunks
+
 
 class TestCountSyllables:
     @pytest.mark.parametrize("word,expected", [
