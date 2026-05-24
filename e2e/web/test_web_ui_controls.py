@@ -211,7 +211,7 @@ def test_onboarding_install_default_voice_real_effect(
     the live config voice is updated — the bridge/installer code path is
     entirely real."""
     from pippal import voices as voices_mod
-    from pippal.ui import voice_manager as vm
+    from pippal import voice_install as vm
 
     step("force readiness = missing_voice; stub only the network download")
     readiness["missing_voice"]()
@@ -699,7 +699,7 @@ def test_voice_manager_row_install_real_effect(
     model file lands in the real per-test voices dir and the row flips
     to 'installed'."""
     from pippal import voices as voices_mod
-    from pippal.ui import voice_manager as vm
+    from pippal import voice_install as vm
 
     def _fake_download(url: str, dest: Path, *a, **k) -> None:
         dest.write_bytes(b"stub-voice-model-bytes")

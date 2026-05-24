@@ -6,10 +6,8 @@ talks back through the injected ``js_api`` bridge (and the same HTTP
 ``/bridge`` endpoint as a fallback / E2E transport).
 
 Native chrome stays minimal: Settings / Voice Manager / Onboarding /
-Notices keep a frameless dark window (the UI draws its own title bar,
-matching the Tk chromeless feel). The reader overlay is a frameless,
-on-top, transparent panel — the web analogue of
-``pippal.ui.overlay.Overlay``.
+Notices keep a frameless dark window (the UI draws its own title bar).
+The reader overlay is a frameless, on-top, transparent panel.
 
 WebView2 (Chromium) is the runtime on Windows; pywebview picks it
 automatically.
@@ -20,9 +18,12 @@ from __future__ import annotations
 import threading
 from typing import Any
 
-import webview
+# ``webview`` (pywebview) is imported lazily inside the methods that
+# actually create / run windows so that importing this module — and
+# therefore ``import pippal`` — does not require the GUI runtime to be
+# installed (e.g. on a headless CI host that only runs the unit suite).
 
-# Per-surface window geometry, mirroring the Tk dialogs' sizes.
+# Per-surface window geometry.
 _SURFACES: dict[str, dict[str, Any]] = {
     "settings": {"title": "PipPal", "width": 600, "height": 720},
     "voices": {"title": "Voices", "width": 820, "height": 640},
@@ -51,6 +52,8 @@ class WebWindowManager:
     # ------------------------------------------------------------------
 
     def _make_window(self, surface: str) -> Any:
+        import webview
+
         spec = _SURFACES.get(surface, _SURFACES["settings"])
         url = f"{self._base_url}/index.html?view={surface}"
         kwargs: dict[str, Any] = {
@@ -131,12 +134,16 @@ class WebWindowManager:
             except Exception:
                 pass
         try:
+            import webview
+
             webview.windows.clear()
         except Exception:
             pass
 
     def run(self) -> None:
         """Block on the pywebview GUI loop until all windows close."""
+        import webview
+
         if not self._windows:
             # Nothing queued — open Settings so the app has a face.
             self.open("settings")

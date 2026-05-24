@@ -534,7 +534,7 @@ def test_notices_file_missing_fallback_copy_in_served_dom(
     at real *empty* per-test temp dirs. Depends only on file *absence*
     under a temp dir → byte-for-byte identical for any caller on the
     LocalSystem runner; nothing host-global is touched."""
-    import pippal.ui.notices_card as notices_card
+    import pippal.notices as notices_card
 
     bridge = backend["bridge"]
     profile: Path = backend["profile"]
@@ -576,11 +576,11 @@ def test_notices_file_missing_fallback_copy_in_served_dom(
 
     # The real resolver genuinely returns None now (assert the real seam
     # effect, not a mock return).
-    assert notices_card._resolve_notices_path() is None, (
-        "the real _resolve_notices_path must genuinely return None when "
+    assert notices_card.resolve_notices_path() is None, (
+        "the real resolve_notices_path must genuinely return None when "
         "no candidate file exists under any root"
     )
-    step.check("real notices_card._resolve_notices_path() genuinely "
+    step.check("real notices.resolve_notices_path() genuinely "
                "returns None (no file under any candidate root)")
 
     # The REAL bridge.get_notices fallback branch (bridge.py:352-357).

@@ -160,63 +160,6 @@ class TestWordTimingWeight:
         assert isinstance(word_timing_weight("hello"), float)
 
 
-class TestComputeWordLayout:
-    """`compute_word_layout` produces the per-word timing/geometry that
-    the karaoke overlay paints. Pure function — easy to pin."""
-
-    def test_empty_text_returns_empty(self):
-        from pippal.ui.overlay_paint import compute_word_layout
-
-        layout = compute_word_layout("", 5.0, _FakeFont(8), 760, 32, 4)
-        assert layout == []
-
-    def test_zero_duration_returns_empty(self):
-        from pippal.ui.overlay_paint import compute_word_layout
-
-        layout = compute_word_layout("hello world", 0.0, _FakeFont(8), 760, 32, 4)
-        assert layout == []
-
-    def test_words_have_increasing_timestamps(self):
-        from pippal.ui.overlay_paint import compute_word_layout
-
-        layout = compute_word_layout(
-            "one two three four five", 4.0, _FakeFont(8), 760, 32, 4,
-        )
-        for i in range(1, len(layout)):
-            assert layout[i].ts >= layout[i - 1].ts
-            assert layout[i].te >= layout[i - 1].te
-
-    def test_wraps_when_a_word_overflows_the_line(self):
-        # With a 60 px width and 32 px padding, the available area is
-        # ~-4 px → effectively 0; every word forces a wrap.
-        from pippal.ui.overlay_paint import compute_word_layout
-
-        layout = compute_word_layout(
-            "one two three", 1.0, _FakeFont(40), 100, 30, 4,
-        )
-        # Three words; each on its own line.
-        assert {w.y for w in layout} == {0, 1, 2}
-
-    def test_single_line_when_words_fit(self):
-        from pippal.ui.overlay_paint import compute_word_layout
-
-        layout = compute_word_layout(
-            "one two three", 1.0, _FakeFont(8), 760, 32, 4,
-        )
-        # All three on the same line.
-        assert {w.y for w in layout} == {0}
-
-
-class _FakeFont:
-    """Stand-in for tkinter.font.Font so this test can run without a
-    real Tk root."""
-    def __init__(self, char_w: int) -> None:
-        self.char_w = char_w
-
-    def measure(self, text: str) -> int:
-        return len(text) * self.char_w
-
-
 class TestIterWordSpans:
     def test_yields_words(self):
         spans = list(iter_word_spans("hello world"))

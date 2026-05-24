@@ -11,5 +11,5 @@ if errorlevel 1 (
     exit /b 1
 )
 
-python reader_app.py
+python reader_app_web.py
 pause

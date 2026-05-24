@@ -21,7 +21,6 @@ from pippal.text_utils import (
     split_sentences,
     word_timing_weight,
 )
-from pippal.ui.overlay_paint import compute_word_layout
 
 # Sample texts kept small enough to run fast in CI but representative
 # of the real-world inputs PipPal sees.
@@ -78,18 +77,3 @@ def test_iter_word_spans_paragraph(benchmark):
     # Materialise the iterator into a list — the iterator itself is
     # lazy, so without consuming it we'd time the regex compile only.
     benchmark(lambda: list(iter_word_spans(_PARAGRAPH)))
-
-
-def test_compute_word_layout(benchmark):
-    """Karaoke layout for a paragraph at typical TTS chunk duration.
-    Uses a stub font that returns a fixed pixel width per character so
-    the benchmark doesn't depend on Tk being initialised."""
-
-    class _StubFont:
-        def measure(self, s: str) -> int:
-            return 8 * len(s)
-
-    benchmark(
-        compute_word_layout,
-        _PARAGRAPH, 12.0, _StubFont(), 760, 32, 4,
-    )

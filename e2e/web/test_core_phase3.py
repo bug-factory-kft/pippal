@@ -727,7 +727,7 @@ def test_ucc9_first_run_vm_install_completion_flips_onboarding_ready(
     exactly like the Tk ``apply_installed_voice`` flow (the same shared
     onboarding logic, reused not forked)."""
     from pippal import voices as voices_mod
-    from pippal.ui import voice_manager as vm
+    from pippal import voice_install as vm
 
     bridge = backend["bridge"]
     cfg = backend["config"]

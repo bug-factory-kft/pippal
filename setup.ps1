@@ -63,10 +63,10 @@ if (-not $python) {
     exit 1
 }
 Write-Host "Installing Python dependencies..." -ForegroundColor Yellow
-& $python -m pip install --quiet --user keyboard pyperclip pystray Pillow
+& $python -m pip install --quiet --user keyboard pyperclip pystray Pillow pywebview
 
 Write-Host ""
 Write-Host "Setup complete." -ForegroundColor Green
-Write-Host "Run with:    pythonw reader_app.py"
+Write-Host "Run with:    pythonw reader_app_web.py"
 Write-Host "Autostart:   create a Startup shortcut to start_server.vbs (see README)"
 Write-Host "Core setup: Piper engine + default voice are ready."
