@@ -1,13 +1,11 @@
-"""Web-based frontend for PipPal (migration spike).
+"""Web-based frontend for PipPal.
 
-A parallel frontend that hosts the static UI under ``webui/`` in a
-pywebview window and bridges it to the EXISTING backend. The Tkinter UI
-(``pippal.ui``) is left fully intact — this package adds windows, it
-does not replace them.
+The only PipPal frontend: it hosts the static UI under ``webui/`` in a
+pywebview (WebView2) window and bridges it to the backend.
 
 Nothing here changes backend behaviour: the bridge only reads/writes
 config through ``pippal.config``, lists/installs voices through
-``pippal.voices`` / ``pippal.ui.voice_manager``, and drives playback
+``pippal.voices`` / ``pippal.voice_install``, and drives playback
 through an injected ``TTSEngine``.
 """
 

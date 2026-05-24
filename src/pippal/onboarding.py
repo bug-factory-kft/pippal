@@ -23,15 +23,11 @@ import winsound
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from .config import DEFAULT_CONFIG
 from .paths import ASSET_NO_VOICE_WAV, DATA_ROOT, PIPER_EXE, VOICES_DIR
 from .voices import KNOWN_VOICES, PiperVoice, installed_voices, voice_filename
-
-if TYPE_CHECKING:  # pragma: no cover
-    from .ui import Overlay
-
 
 # Verbatim text of the bundled WAV. Kept here (next to the path it
 # describes) so when we re-record we can update both in one place.
@@ -335,7 +331,7 @@ def _wav_duration_s(path) -> float:
         return 0.0
 
 
-def play_no_voice_clip(overlay: Overlay | None = None) -> float:
+def play_no_voice_clip(overlay: Any | None = None) -> float:
     """Play the bundled "I can't read anything yet, install a voice"
     clip asynchronously and start the karaoke overlay alongside.
 

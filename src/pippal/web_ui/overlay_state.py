@@ -1,30 +1,23 @@
 """Headless overlay-state mirror for the web reader panel.
 
-The Tk :class:`pippal.ui.overlay.Overlay` is bound to tkinter (Canvas,
-``tk.after`` animation loop). The web overlay can't use it, but the
-backend (``pippal.engine`` / ``pippal.playback``) talks to whatever
+The backend (``pippal.engine`` / ``pippal.playback``) talks to whatever
 object satisfies the overlay protocol — ``set_state`` / ``start_chunk``
 / ``show_message`` / ``set_paused`` / ``set_action_label``.
 
 ``WebOverlay`` implements exactly that protocol with plain Python
-state. It computes per-word karaoke timings with the SAME pure helpers
-(``text_utils.word_timing_weight`` / ``iter_word_spans``) the Tk
-``overlay_paint.compute_word_layout`` uses, so the highlight cadence
-matches. The browser polls :meth:`snapshot` and does the painting.
+state. It computes per-word karaoke timings with the pure helpers
+(``text_utils.word_timing_weight`` / ``iter_word_spans``), so the
+highlight cadence is deterministic. The browser polls :meth:`snapshot`
+and does the painting.
 
-**Auto-hide parity.** The Tk overlay arms ``root.after(delay, hide)``
-when the engine flips it to ``done`` (delay =
-``max(OVERLAY_HIDE_MIN_MS, auto_hide_ms)``) and ``root.after(
-OVERLAY_MESSAGE_MS, hide)`` for a one-shot message. ``_NullRoot.after``
-in the web app runs callbacks inline, so a timed hide there would fire
-immediately. ``WebOverlay`` therefore owns its OWN ``threading.Timer``
-so the panel stays visible for the configured ``auto_hide_ms`` and then
-genuinely hides — matching the Tk behaviour exactly. Any new
-``set_state`` / ``start_chunk`` / explicit ``hide`` cancels a pending
-timer first, mirroring the Tk ``_cancel_hide``.
-
-This adds an alternative overlay sink; it does not change any backend
-behaviour.
+**Auto-hide.** When the engine flips the overlay to ``done`` it should
+stay visible for ``max(OVERLAY_HIDE_MIN_MS, auto_hide_ms)`` and a
+one-shot message for ``OVERLAY_MESSAGE_MS``. ``_NullRoot.after`` in the
+web app runs immediate callbacks inline, so a timed hide there would
+fire instantly. ``WebOverlay`` therefore owns its OWN
+``threading.Timer`` so the panel stays visible for the configured
+``auto_hide_ms`` and then genuinely hides. Any new ``set_state`` /
+``start_chunk`` / explicit ``hide`` cancels a pending timer first.
 """
 
 from __future__ import annotations
@@ -39,9 +32,8 @@ from ..timing import OVERLAY_HIDE_MIN_MS, OVERLAY_MESSAGE_MS
 
 
 class WebOverlay:
-    """Thread-safe, tk-free overlay state the engine drives and the web
-    UI polls. Mirrors the public surface of ``pippal.ui.overlay.Overlay``
-    that the engine/playback loop actually calls."""
+    """Thread-safe overlay state the engine drives and the web UI polls.
+    Implements the overlay protocol the engine/playback loop calls."""
 
     def __init__(self, config: dict[str, Any]) -> None:
         self.config = config
@@ -209,9 +201,9 @@ class WebOverlay:
 
 
 def _word_timings(text: str, duration: float) -> list[dict[str, float]]:
-    """Per-word (word, ts, te) using the same weighting the Tk overlay
-    uses (``overlay_paint.compute_word_layout``), minus the pixel
-    layout the browser reflows on its own."""
+    """Per-word (word, ts, te) using the syllable-weighted timing in
+    ``text_utils``, minus the pixel layout the browser reflows on its
+    own."""
     words = list(iter_word_spans(text))
     if not words or duration <= 0:
         return []

@@ -111,9 +111,9 @@ class PipPalBridge:
         values: dict[str, Any],
         close: bool = False,
     ) -> dict[str, Any]:
-        """Persist form values. Mirrors SettingsWindow._persist:
-        validates engine, normalises hotkeys, rebinds hotkeys, drops the
-        cached backend so the next synth picks up new config."""
+        """Persist form values: validate engine, normalise hotkeys,
+        rebind hotkeys, drop the cached backend so the next synth picks
+        up the new config."""
         candidate = dict(self.config)
         values = dict(values or {})
 
@@ -162,7 +162,7 @@ class PipPalBridge:
         else:
             # No host hook (served/E2E mode): drop the backend cache
             # directly so the next synth honours the new config — same
-            # net effect as SettingsWindow's on_engine_change.
+            # net effect as the settings on_engine_change hook.
             try:
                 self.engine.reset_backend()
             except Exception:
@@ -171,7 +171,7 @@ class PipPalBridge:
         return result
 
     # ------------------------------------------------------------------
-    # Voices (pippal.voices / pippal.ui.voice_manager — unchanged)
+    # Voices (pippal.voices / pippal.voice_install)
     # ------------------------------------------------------------------
 
     def get_installed_voices(self) -> list[str]:
@@ -207,22 +207,17 @@ class PipPalBridge:
         raise RuntimeError(f"unknown voice: {voice_id}")
 
     def install_voice(self, voice_id: str) -> dict[str, Any]:
-        from ..ui.voice_manager import install_piper_voice
+        from ..voice_install import install_piper_voice
 
         with self._install_lock:
             v = self._voice_by_id(voice_id)
             filename = install_piper_voice(v)
-        # Install-completion signal back into onboarding/activation —
-        # the web analogue of the Tk first-run flow, where the Voice
-        # Manager's on_installed callback runs the activation panel's
-        # apply_installed_voice (app.py:577-583 → activation_panel.py:415
-        # → _finish_voice_install: ``self.config["voice"] = installed
-        # _filename``). Make the just-installed voice the configured
-        # voice on the SAME shared config dict the shared
-        # onboarding.build_activation_readiness reads, so the readiness/
-        # onboarding surface flips to ready exactly like Tk. This mirrors
-        # install_default_voice below (and the Tk panel) — the shared
-        # onboarding logic is reused untouched, no Tk/web drift.
+        # Install-completion signal back into onboarding/activation: make
+        # the just-installed voice the configured voice on the SAME shared
+        # config dict that onboarding.build_activation_readiness reads, so
+        # the readiness / onboarding surface flips to ready immediately.
+        # Mirrors install_default_voice below — the shared onboarding logic
+        # is reused untouched.
         self.config["voice"] = filename
         try:
             self.engine.reset_backend()
@@ -247,7 +242,7 @@ class PipPalBridge:
         return {"ok": True}
 
     def install_default_voice(self) -> dict[str, Any]:
-        from ..ui.voice_manager import install_piper_voice
+        from ..voice_install import install_piper_voice
 
         with self._install_lock:
             filename = install_piper_voice(default_piper_voice())
@@ -354,13 +349,13 @@ class PipPalBridge:
         return self.engine.get_history()
 
     # ------------------------------------------------------------------
-    # Notices (pippal.ui.notices_card resolver — unchanged)
+    # Notices (pippal.notices resolver)
     # ------------------------------------------------------------------
 
     def get_notices(self) -> str:
-        from ..ui.notices_card import _resolve_notices_path
+        from ..notices import resolve_notices_path
 
-        path = _resolve_notices_path()
+        path = resolve_notices_path()
         if path is None:
             return (
                 "Open-source notices were not found.\n\n"

@@ -17,7 +17,7 @@ freshly reset application:**
   created *per test* and the path constants every backend module bound at
   import (``pippal.paths`` + the ``from ..paths import VOICES_DIR`` style
   copies in ``config`` / ``voices`` / ``history`` / ``onboarding`` /
-  ``web_ui.bridge`` / ``ui.voice_manager`` / ``engines.piper``) are
+  ``web_ui.bridge`` / ``voice_install`` / ``engines.piper``) are
   re-pointed into it. The previous test's temp dir is torn down. Nothing
   on disk survives a test boundary.
 
@@ -192,7 +192,7 @@ _PATH_REBINDS: tuple[tuple[str, dict[str, str]], ...] = (
     }),
     ("pippal.playback", {"TEMP_DIR": "TEMP_DIR"}),
     ("pippal.web_ui.bridge", {"VOICES_DIR": "VOICES_DIR"}),
-    ("pippal.ui.voice_manager", {"VOICES_DIR": "VOICES_DIR"}),
+    ("pippal.voice_install", {"VOICES_DIR": "VOICES_DIR"}),
     ("pippal.engines.piper", {"VOICES_DIR": "VOICES_DIR"}),
 )
 
@@ -213,7 +213,7 @@ _DEFAULT_ARG_REBINDS: tuple[tuple[str, str, dict[str, str]], ...] = (
      {"voices_dir": "VOICES_DIR"}),
     ("pippal.onboarding", "is_default_engine_ready",
      {"voices_dir": "VOICES_DIR"}),
-    ("pippal.ui.voice_manager", "install_piper_voice",
+    ("pippal.voice_install", "install_piper_voice",
      {"voices_dir": "VOICES_DIR"}),
 )
 

@@ -1,15 +1,10 @@
-"""Web-frontend application composition (parallel to pippal.app).
+"""Web-frontend application composition — PipPal's only entry point.
 
-Same wiring as :mod:`pippal.app` — load config, build the real
-``TTSEngine``, register the native global hotkeys, build the native
-pystray tray — but the **windows** are pywebview windows hosting the
-static UI in ``webui/`` instead of Tk Toplevels.
+Load config, build the real ``TTSEngine``, register the native global
+hotkeys, build the native pystray tray — and host the **windows** as
+pywebview (WebView2) windows serving the static UI in ``webui/``.
 
-The Tk app (``pippal.app`` / ``reader_app.py``) is untouched and still
-works; this is an additive, parallel entry point.
-
-System tray + global hotkey stay native: ``pystray`` and ``keyboard``
-are exactly the same code paths the Tk app uses.
+System tray + global hotkey are native: ``pystray`` and ``keyboard``.
 """
 
 from __future__ import annotations
@@ -123,12 +118,12 @@ def main() -> None:
             file=sys.stderr,
         )
 
-    # ----- Backend (identical to pippal.app) -----
+    # ----- Backend -----
     overlay = WebOverlay(config)
     engine = TTSEngine(config=config, root=_NullRoot(), overlay_ref=lambda: overlay)
     engine.attach_history(load_history(), save_history)
 
-    # ----- Hotkeys (native — same HotkeyManager as the Tk app) -----
+    # ----- Hotkeys (native HotkeyManager) -----
     from ..hotkey import HotkeyManager, duplicate_combo_failures
 
     hotkey_manager = HotkeyManager()
@@ -193,7 +188,7 @@ def main() -> None:
     base_url = f"http://127.0.0.1:{port}"
     windows.configure(base_url, bridge)
 
-    # ----- Local IPC / single-instance gate (same as pippal.app) -----
+    # ----- Local IPC / single-instance gate -----
     command_callbacks = {
         "settings": lambda: windows.open("settings"),
         "stop": engine.stop,
@@ -220,7 +215,7 @@ def main() -> None:
             pass
         raise SystemExit(0)
 
-    # ----- Tray (native pystray — same as pippal.app) -----
+    # ----- Tray (native pystray) -----
     tray: dict[str, Any] = {"icon": None}
 
     def update_tray_icon() -> None:

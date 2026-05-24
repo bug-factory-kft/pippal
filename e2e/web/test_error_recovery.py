@@ -187,7 +187,7 @@ def test_onboarding_install_default_voice_failure_recovers(
     is honestly stuck, and nothing partial is left on disk or in config.
     """
     from pippal import voices as voices_mod
-    from pippal.ui import voice_manager as vm
+    from pippal import voice_install as vm
 
     step("force readiness = missing_voice (real stub piper.exe, no voice)")
     readiness["missing_voice"]()
@@ -328,7 +328,7 @@ def test_voice_manager_row_install_failure_ui(
     the origin is a real closed / resetting socket.
     """
     from pippal import voices as voices_mod
-    from pippal.ui import voice_manager as vm
+    from pippal import voice_install as vm
 
     reset_origin: _ResetMidStreamOrigin | None = None
     if mode == "no_network":
