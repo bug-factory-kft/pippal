@@ -46,6 +46,43 @@ class _FakeKeyboard:
             self.clipboard.value = self.copied_text
 
 
+class _DelayedCopyClipboard(_FakeClipboard):
+    def __init__(self, initial: str, probe_token: str, selected_text: str):
+        super().__init__(initial)
+        self.probe_token = probe_token
+        self.selected_text = selected_text
+        self.copy_requested_at: float | None = None
+        self.ready_at: float | None = None
+        self.now = 0.0
+
+    def paste(self) -> str:
+        if (
+            self.copy_requested_at is not None
+            and self.ready_at is not None
+            and self.now >= self.ready_at
+        ):
+            return self.selected_text
+        return self.value
+
+
+class _DelayedCopyKeyboard(_FakeKeyboard):
+    def __init__(
+        self,
+        clipboard: _DelayedCopyClipboard,
+        *,
+        settle_after_s: float,
+    ):
+        super().__init__(copied_text=clipboard.selected_text)
+        self.clipboard = clipboard
+        self.settle_after_s = settle_after_s
+
+    def send(self, hotkey: str) -> None:
+        self.sent.append(hotkey)
+        if hotkey == "ctrl+c":
+            self.clipboard.copy_requested_at = self.clipboard.now
+            self.clipboard.ready_at = self.clipboard.now + self.settle_after_s
+
+
 class _DummyEngine:
     def __init__(self):
         self._capture_lock = threading.Lock()
@@ -123,6 +160,32 @@ class TestCaptureSelectionCopyInjection:
         assert "alt" not in keyboard.released
         assert clipboard.value == "previous clipboard"
         assert clipboard.copied[-1] == "previous clipboard"
+
+    def test_waits_for_delayed_clipboard_capture_instead_of_false_no_selection(
+        self, monkeypatch,
+    ):
+        clipboard = _DelayedCopyClipboard(
+            "previous clipboard",
+            clipboard_capture.CLIPBOARD_PROBE_TOKEN,
+            "delayed selected text",
+        )
+        keyboard = _DelayedCopyKeyboard(clipboard, settle_after_s=0.75)
+        monkeypatch.setattr(clipboard_capture, "pyperclip", clipboard)
+        monkeypatch.setattr(clipboard_capture, "keyboard", keyboard)
+        monkeypatch.setattr(clipboard_capture.time, "time", lambda: clipboard.now)
+        monkeypatch.setattr(
+            clipboard_capture.time,
+            "sleep",
+            lambda delay: setattr(clipboard, "now", clipboard.now + delay),
+        )
+
+        captured = clipboard_capture.capture_selection(
+            _DummyEngine(), "windows+shift+r",
+        )
+
+        assert captured == "delayed selected text"
+        assert keyboard.sent == ["ctrl+c"]
+        assert clipboard.value == "previous clipboard"
 
 
 class TestConfigKeyFor:
