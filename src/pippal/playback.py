@@ -10,9 +10,11 @@ deserve its own file."""
 
 from __future__ import annotations
 
+import tempfile
 import threading
 import time
 import uuid
+import wave
 import winsound
 from dataclasses import dataclass, field
 from enum import Enum
@@ -38,15 +40,18 @@ if TYPE_CHECKING:  # pragma: no cover
 
 class WaitResult(Enum):
     """Outcome of waiting for one chunk's playback."""
-    COMPLETED = "completed"   # natural end of chunk
-    SEEKED = "seeked"         # user requested prev/next/replay
-    CANCELLED = "cancelled"   # stop() bumped the token
+
+    COMPLETED = "completed"  # natural end of chunk
+    SEEKED = "seeked"  # user requested prev/next/replay
+    RETRYABLE = "retryable"  # playback fallback failed; keep current chunk
+    CANCELLED = "cancelled"  # stop() bumped the token
 
 
 @dataclass(slots=True)
 class PlaybackSession:
     """One run of `play_one` — owns the per-call state so the playback
     loop can pass it around instead of dragging seven parameters."""
+
     chunks: list[str]
     chunk_paths: list[Path]
     backend: TTSBackend | None = None
@@ -56,6 +61,7 @@ class PlaybackSession:
 # ---------------------------------------------------------------------------
 # Top-level flows
 # ---------------------------------------------------------------------------
+
 
 def synthesize_and_play(
     engine: TTSEngine,
@@ -96,6 +102,7 @@ def play_one(
         text = get_dictionary().apply(text).text
     except Exception as exc:  # pragma: no cover - defensive
         import sys
+
         print(f"[playback] pronunciation apply failed: {exc}", file=sys.stderr)
     chunks = split_sentences(text)
     if not chunks:
@@ -152,6 +159,7 @@ def play_one(
 # Per-chunk helpers
 # ---------------------------------------------------------------------------
 
+
 def _chunk_paths(my_token: int, count: int) -> list[Path]:
     """Return fresh temp paths for one playback session.
 
@@ -170,8 +178,7 @@ def _prepare_first_chunk(
 ) -> bool:
     """Synth the first chunk synchronously so playback starts fast.
     Publishes session state under engine.lock for the mini-player."""
-    if not engine._synthesize(session.chunks[0], session.chunk_paths[0],
-                              backend=session.backend):
+    if not engine._synthesize(session.chunks[0], session.chunk_paths[0], backend=session.backend):
         ov = engine._overlay()
         if ov is not None:
             ov.show_message("Synthesis failed")
@@ -210,8 +217,7 @@ def _ensure_chunk_ready(
     # Join finished (or there was no prefetch) — drop the dead handle.
     session.prefetch_threads.pop(idx, None)
     if not wav_path.exists() or wav_path.stat().st_size == 0:
-        if not engine._synthesize(session.chunks[idx], wav_path,
-                                   backend=session.backend):
+        if not engine._synthesize(session.chunks[idx], wav_path, backend=session.backend):
             safe_unlink(wav_path)
             return False
     return True
@@ -269,7 +275,12 @@ def _play_chunk(
         ov.start_chunk(chunks[idx], dur, idx, len(chunks), offset_s=offset)
 
     result = _wait_for_chunk_end(
-        engine, my_token, dur, wav_path, chunks, idx,
+        engine,
+        my_token,
+        dur,
+        wav_path,
+        chunks,
+        idx,
     )
     if result is WaitResult.CANCELLED:
         _cancel_exit(session)
@@ -284,9 +295,49 @@ def _play_chunk(
             engine._skip_to = None
         if target is not None:
             return max(0, min(len(chunks) - 1, target))
+    if result is WaitResult.RETRYABLE:
+        return idx
 
     safe_unlink(wav_path)
     return idx + 1
+
+
+def _tail_wav_from_elapsed(wav_path: Path, elapsed_s: float) -> tuple[Path, float] | None:
+    """Create a temporary WAV containing only frames after `elapsed_s`."""
+    try:
+        with wave.open(str(wav_path), "rb") as src:
+            params = src.getparams()
+            frame_rate = src.getframerate()
+            total_frames = src.getnframes()
+            start_frame = max(0, min(total_frames, int(elapsed_s * frame_rate)))
+            remaining_frames = total_frames - start_frame
+            if remaining_frames <= 0:
+                return None
+            src.setpos(start_frame)
+            frames = src.readframes(remaining_frames)
+    except (OSError, wave.Error):
+        return None
+
+    try:
+        tail_file = tempfile.NamedTemporaryFile(
+            prefix=f"{wav_path.stem}_tail_",
+            suffix=".wav",
+            dir=wav_path.parent,
+            delete=False,
+        )
+    except OSError:
+        return None
+    tail_path = Path(tail_file.name)
+    tail_file.close()
+    try:
+        with wave.open(str(tail_path), "wb") as dst:
+            dst.setparams(params)
+            dst.writeframes(frames)
+    except (OSError, wave.Error):
+        safe_unlink(tail_path)
+        return None
+
+    return tail_path, remaining_frames / frame_rate
 
 
 def _wait_for_chunk_end(
@@ -301,22 +352,59 @@ def _wait_for_chunk_end(
     cancelled. Cleanup of files and prefetch threads happens at the
     `_play_chunk` cancel branch via `_cancel_exit`."""
     deadline = time.time() + dur + CHUNK_DEADLINE_PAD_S
+    playback_started_at = time.monotonic()
+    resume_tail_path: Path | None = None
     ov = engine._overlay()
+
+    def purge_audio() -> None:
+        try:
+            winsound.PlaySound(None, winsound.SND_PURGE)
+        except Exception:
+            pass
+
+    def cleanup_resume_tail(*, purge_first: bool = False) -> None:
+        nonlocal resume_tail_path
+        if resume_tail_path is None:
+            return
+        if purge_first:
+            purge_audio()
+        safe_unlink(resume_tail_path)
+        resume_tail_path = None
+
+    def restart_original_chunk() -> bool:
+        nonlocal deadline, playback_started_at
+        cleanup_resume_tail(purge_first=True)
+        try:
+            winsound.PlaySound(
+                str(wav_path),
+                winsound.SND_FILENAME | winsound.SND_ASYNC,
+            )
+        except Exception:
+            return False
+        if ov is not None:
+            offset = _karaoke_offset_s(engine)
+            ov.start_chunk(chunks[idx], dur, idx, len(chunks), offset_s=offset)
+        playback_started_at = time.monotonic()
+        deadline = time.time() + dur + CHUNK_DEADLINE_PAD_S
+        return True
+
     while time.time() < deadline:
         if engine._is_cancelled(my_token):
-            try:
-                winsound.PlaySound(None, winsound.SND_PURGE)
-            except Exception:
-                pass
+            purge_audio()
+            cleanup_resume_tail()
             return WaitResult.CANCELLED
         with engine.lock:
             if engine._skip_to is not None:
+                cleanup_resume_tail(purge_first=True)
                 return WaitResult.SEEKED
             paused = engine._is_paused
         if paused:
+            elapsed_s = max(0.0, min(dur, time.monotonic() - playback_started_at))
             # Hold; pause_toggle silenced audio and froze the overlay.
             while True:
                 if engine._is_cancelled(my_token):
+                    purge_audio()
+                    cleanup_resume_tail()
                     return WaitResult.CANCELLED
                 with engine.lock:
                     if not engine._is_paused or engine._skip_to is not None:
@@ -326,32 +414,46 @@ def _wait_for_chunk_end(
             # back WITHOUT restarting playback.
             with engine.lock:
                 if engine._skip_to is not None:
+                    cleanup_resume_tail(purge_first=True)
                     return WaitResult.SEEKED
-            # Resumed: replay current chunk from the start.
+            # Resumed: continue from the remaining WAV frames instead of
+            # replaying the full chunk from the beginning when possible.
+            tail = _tail_wav_from_elapsed(wav_path, elapsed_s)
+            if tail is None:
+                if not restart_original_chunk():
+                    return WaitResult.RETRYABLE
+                continue
+            cleanup_resume_tail(purge_first=True)
+            resume_tail_path, remaining_dur = tail
             try:
                 winsound.PlaySound(
-                    str(wav_path),
+                    str(resume_tail_path),
                     winsound.SND_FILENAME | winsound.SND_ASYNC,
                 )
             except Exception:
-                return WaitResult.COMPLETED
+                if not restart_original_chunk():
+                    return WaitResult.RETRYABLE
+                continue
             if ov is not None:
-                offset = _karaoke_offset_s(engine)
-                ov.start_chunk(chunks[idx], dur, idx, len(chunks),
-                               offset_s=offset)
-            deadline = time.time() + dur + CHUNK_DEADLINE_PAD_S
+                offset = _karaoke_offset_s(engine) + elapsed_s
+                ov.start_chunk(chunks[idx], remaining_dur, idx, len(chunks), offset_s=offset)
+            playback_started_at = time.monotonic() - elapsed_s
+            deadline = time.time() + remaining_dur + CHUNK_DEADLINE_PAD_S
             continue
         time.sleep(PLAYBACK_POLL_S)
+    cleanup_resume_tail()
     return WaitResult.COMPLETED
 
 
 def _karaoke_offset_s(engine: TTSEngine) -> float:
     """How far the karaoke timer is shifted into the future to compensate
     for winsound startup latency."""
-    return float(
-        engine.config.get("karaoke_offset_ms",
-                          DEFAULT_CONFIG["karaoke_offset_ms"]),
-    ) / 1000.0
+    return (
+        float(
+            engine.config.get("karaoke_offset_ms", DEFAULT_CONFIG["karaoke_offset_ms"]),
+        )
+        / 1000.0
+    )
 
 
 def _cleanup_chunk_paths(paths: list[Path]) -> None:
