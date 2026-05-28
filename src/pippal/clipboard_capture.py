@@ -119,7 +119,7 @@ def capture_selection(engine: TTSEngine, hotkey_combo: str = "") -> str:
                 cur = pyperclip.paste()
             except Exception:
                 cur = CLIPBOARD_PROBE_TOKEN
-            if cur != CLIPBOARD_PROBE_TOKEN:
+            if cur != CLIPBOARD_PROBE_TOKEN and cur != "":
                 text = cur
                 break
             time.sleep(CLIPBOARD_POLL_S)
