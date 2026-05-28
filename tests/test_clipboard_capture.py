@@ -83,6 +83,17 @@ class _DelayedCopyKeyboard(_FakeKeyboard):
             self.clipboard.ready_at = self.clipboard.now + self.settle_after_s
 
 
+class _EmptyThenDelayedCopyClipboard(_DelayedCopyClipboard):
+    def paste(self) -> str:
+        if (
+            self.copy_requested_at is not None
+            and self.ready_at is not None
+            and self.now < self.ready_at
+        ):
+            return ""
+        return super().paste()
+
+
 class _DummyEngine:
     def __init__(self):
         self._capture_lock = threading.Lock()
@@ -184,6 +195,32 @@ class TestCaptureSelectionCopyInjection:
         )
 
         assert captured == "delayed selected text"
+        assert keyboard.sent == ["ctrl+c"]
+        assert clipboard.value == "previous clipboard"
+
+    def test_keeps_polling_when_delayed_browser_copy_reports_empty_first(
+        self, monkeypatch,
+    ):
+        clipboard = _EmptyThenDelayedCopyClipboard(
+            "previous clipboard",
+            clipboard_capture.CLIPBOARD_PROBE_TOKEN,
+            "browser selected text",
+        )
+        keyboard = _DelayedCopyKeyboard(clipboard, settle_after_s=0.25)
+        monkeypatch.setattr(clipboard_capture, "pyperclip", clipboard)
+        monkeypatch.setattr(clipboard_capture, "keyboard", keyboard)
+        monkeypatch.setattr(clipboard_capture.time, "time", lambda: clipboard.now)
+        monkeypatch.setattr(
+            clipboard_capture.time,
+            "sleep",
+            lambda delay: setattr(clipboard, "now", clipboard.now + delay),
+        )
+
+        captured = clipboard_capture.capture_selection(
+            _DummyEngine(), "windows+shift+r",
+        )
+
+        assert captured == "browser selected text"
         assert keyboard.sent == ["ctrl+c"]
         assert clipboard.value == "previous clipboard"
 
