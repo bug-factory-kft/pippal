@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock
@@ -43,6 +44,10 @@ def test_playback_does_not_reuse_stale_token_index_chunks(
     assert stale.exists()
     assert stale.read_bytes() == b"stale wav from old process"
     assert all(path.name != "out_1_1.wav" for _text, path in calls)
+    assert all(
+        re.fullmatch(r"out_1_[0-9a-f]{32}_\d+\.wav", path.name)
+        for _text, path in calls
+    )
 
 
 def test_resume_plays_remaining_tail_wav_not_full_original(
@@ -176,6 +181,37 @@ def test_seek_during_resumed_tail_playback_purges_before_tail_cleanup(
     assert tail_wav is not None
     assert not tail_wav.exists()
     assert unlink_attempts == [(tail_wav, False)]
+
+
+def test_seeked_clamps_returns_and_clears_skip_target(
+    engine: TTSEngine,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    chunk_paths = [tmp_path / f"chunk_{i}.wav" for i in range(3)]
+    for path in chunk_paths:
+        path.write_bytes(b"wav")
+
+    with engine.lock:
+        engine._skip_to = 99
+
+    monkeypatch.setattr(playback, "wav_duration", lambda _path: 1.0)
+    monkeypatch.setattr(playback.winsound, "PlaySound", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        playback,
+        "_wait_for_chunk_end",
+        lambda *_args, **_kwargs: playback.WaitResult.SEEKED,
+    )
+
+    result = playback._play_chunk(
+        engine,
+        playback.PlaybackSession(["one", "two", "three"], chunk_paths),
+        idx=0,
+        my_token=engine.token,
+    )
+
+    assert result == 2
+    assert engine._skip_to is None
 
 
 def test_resume_replays_original_chunk_when_tail_wav_creation_fails(
