@@ -1,0 +1,438 @@
+/* PipPal web UI — palette + chrome ported 1:1 from src/pippal/ui/theme.py
+   (the Tk `UI` dict) so the web frontend reads as the same product. */
+
+:root {
+  --bg: #13151c;
+  --bg-card: #1a1d28;
+  --bg-input: #1f2230;
+  --bg-hover: #262a3a;
+  --border: #262a3a;
+  --border-lt: #2f3447;
+  --text: #e8ebfa;
+  --text-dim: #8a90a8;
+  --text-mute: #6c7088;
+  --accent: #6dd9b8;
+  --accent-dk: #0c1e1a;
+  --accent-lt: #82e6c5;
+  --danger: #c14d4d;
+  --danger-fg: #e8b0b0;
+  --danger-border: #5a2a2a;
+  --radius: 14px;
+  --radius-card: 10px;
+  --font: "Segoe UI", "Segoe UI Variable", system-ui, -apple-system, sans-serif;
+  --font-semibold: "Segoe UI Semibold", "Segoe UI", system-ui, sans-serif;
+  --font-mono: Consolas, "Cascadia Mono", monospace;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+html, body {
+  height: 100%;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font);
+  font-size: 14px;
+  /* Web UI runs chromeless inside the pywebview frame — drag the
+     custom title bar, never select stray text. */
+  user-select: none;
+  -webkit-user-select: none;
+  overflow: hidden;
+}
+
+body { display: flex; flex-direction: column; }
+
+/* Win 11 rounded-corner feel for the chromeless frame. */
+#root {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  overflow: hidden;
+  background: var(--bg);
+}
+
+/* ---- Custom title bar (chromeless windows keep no native chrome) ---- */
+.titlebar {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 10px 14px;
+  background: var(--bg);
+  -webkit-app-region: drag;
+  app-region: drag;
+  flex: 0 0 auto;
+  border-bottom: 1px solid var(--border);
+}
+.titlebar img { width: 18px; height: 18px; }
+.titlebar .brand { font-size: 12px; color: var(--text-dim); flex: 1; }
+.titlebar .winbtn {
+  -webkit-app-region: no-drag;
+  app-region: no-drag;
+  width: 30px; height: 24px;
+  display: flex; align-items: center; justify-content: center;
+  color: var(--text-dim);
+  cursor: pointer;
+  border-radius: 6px;
+  font-size: 13px;
+  border: 0;
+  background: transparent;
+}
+.titlebar .winbtn:hover { background: var(--bg-hover); color: var(--text); }
+.titlebar .winbtn.close:hover { background: #5a2a2a; color: #e8b0b0; }
+
+/* ---- Scroll body ---- */
+.scroll-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 20px 20px 0 20px;
+}
+.scroll-body::-webkit-scrollbar { width: 12px; }
+.scroll-body::-webkit-scrollbar-track { background: var(--bg); }
+.scroll-body::-webkit-scrollbar-thumb {
+  background: var(--bg-input);
+  border-radius: 6px;
+  border: 3px solid var(--bg);
+}
+
+/* ---- Cards ---- */
+.card {
+  background: var(--bg-card);
+  border-radius: var(--radius-card);
+  padding: 16px 20px;
+  margin-bottom: 12px;
+}
+.card-title {
+  font-family: var(--font-semibold);
+  font-weight: 600;
+  font-size: 9px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+  margin-bottom: 12px;
+}
+.card-hint {
+  color: var(--text-mute);
+  font-size: 12px;
+  line-height: 1.5;
+  margin-top: 8px;
+}
+.card-label { color: var(--text); font-size: 14px; }
+
+/* ---- Form rows ---- */
+.row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 10px;
+}
+.row:first-of-type { margin-top: 0; }
+.row > label.field-label {
+  width: 130px;
+  flex: 0 0 130px;
+  color: var(--text);
+}
+.row .grow { flex: 1; min-width: 0; }
+
+/* ---- Inputs ---- */
+input[type="text"], input[type="number"], select {
+  background: var(--bg-input);
+  color: var(--text);
+  border: 1px solid var(--border-lt);
+  border-radius: 6px;
+  padding: 7px 9px;
+  font-family: var(--font);
+  font-size: 13px;
+  outline: none;
+  user-select: text;
+  -webkit-user-select: text;
+}
+input[type="text"]:focus, input[type="number"]:focus, select:focus {
+  border-color: var(--accent);
+}
+select {
+  appearance: none;
+  background-image:
+    url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='6'><path d='M0 0l5 6 5-6z' fill='%238a90a8'/></svg>");
+  background-repeat: no-repeat;
+  background-position: right 9px center;
+  padding-right: 26px;
+  cursor: pointer;
+}
+select option { background: var(--bg-input); color: var(--text); }
+input:disabled, select:disabled { opacity: 0.55; cursor: not-allowed; }
+
+/* ---- Sliders ---- */
+input[type="range"] {
+  -webkit-appearance: none;
+  appearance: none;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--bg-input);
+  cursor: pointer;
+  flex: 1;
+}
+input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 14px; height: 14px;
+  border-radius: 50%;
+  background: var(--accent);
+  border: 0;
+  margin-top: 0;
+}
+.slider-value {
+  width: 56px;
+  text-align: right;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---- Checkboxes ---- */
+.checkrow {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin-top: 4px;
+  cursor: pointer;
+}
+.checkrow:first-of-type { margin-top: 0; }
+.checkrow input[type="checkbox"] {
+  appearance: none;
+  width: 16px; height: 16px;
+  border-radius: 4px;
+  background: var(--bg-input);
+  border: 1px solid var(--border-lt);
+  cursor: pointer;
+  position: relative;
+  flex: 0 0 16px;
+}
+.checkrow input[type="checkbox"]:checked { background: var(--accent); border-color: var(--accent); }
+.checkrow input[type="checkbox"]:checked::after {
+  content: "";
+  position: absolute;
+  left: 5px; top: 1px;
+  width: 4px; height: 9px;
+  border: solid var(--accent-dk);
+  border-width: 0 2px 2px 0;
+  transform: rotate(45deg);
+}
+
+/* ---- Buttons ---- */
+button {
+  background: var(--bg-input);
+  color: var(--text);
+  border: 1px solid var(--border-lt);
+  border-radius: 6px;
+  padding: 7px 14px;
+  font-family: var(--font);
+  font-size: 13px;
+  cursor: pointer;
+}
+button:hover { background: var(--bg-hover); border-color: var(--accent); }
+button:active { background: var(--bg-hover); }
+button:disabled { opacity: 0.5; cursor: not-allowed; }
+button.primary {
+  background: var(--accent);
+  color: var(--accent-dk);
+  border-color: var(--accent);
+  font-family: var(--font-semibold);
+  font-weight: 600;
+  padding: 7px 16px;
+}
+button.primary:hover { background: var(--accent-lt); border-color: var(--accent-lt); }
+button.danger {
+  color: var(--danger-fg);
+  border-color: var(--danger-border);
+  background: var(--bg-input);
+}
+button.danger:hover { background: #3a2030; border-color: var(--danger); }
+
+/* ---- Links ---- */
+a, .link {
+  color: var(--accent);
+  text-decoration: underline;
+  cursor: pointer;
+  font-size: 13px;
+}
+.link-row { display: flex; flex-wrap: wrap; gap: 16px; margin-top: 10px; }
+
+/* ---- Footer ---- */
+.footer {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 24px 16px;
+  background: var(--bg);
+  border-top: 1px solid var(--border);
+}
+.footer .spacer { flex: 1; }
+
+/* ---- Titles / subtitles (onboarding) ---- */
+.title { font-family: var(--font-semibold); font-weight: 600; font-size: 16px; color: var(--text); }
+.subtitle { color: var(--text-dim); font-size: 13px; line-height: 1.5; margin-top: 6px; white-space: pre-line; }
+
+/* ---- Status pills used by voice rows ---- */
+.vrow {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.vrow .vmeta { flex: 1; min-width: 0; }
+.vrow .vname { font-family: var(--font-semibold); font-weight: 600; }
+.vrow .vsub { color: var(--text-mute); font-size: 12px; margin-top: 2px; }
+.vrow .vstatus { color: var(--text-mute); font-size: 12px; white-space: nowrap; }
+.vstatus.ok { color: var(--accent); }
+.vstatus.err { color: var(--danger-fg); }
+
+.empty { color: var(--text-mute); font-size: 12px; padding-top: 20px; }
+
+/* ---- Toast (replaces Tk messageboxes) ---- */
+.toast {
+  position: fixed;
+  left: 50%;
+  bottom: 78px;
+  transform: translateX(-50%);
+  background: var(--bg-input);
+  border: 1px solid var(--border-lt);
+  color: var(--text);
+  padding: 10px 18px;
+  border-radius: 8px;
+  font-size: 13px;
+  box-shadow: 0 6px 24px rgba(0,0,0,0.5);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.18s ease;
+  z-index: 1000;
+  max-width: 460px;
+}
+.toast.show { opacity: 1; }
+.toast.err { border-color: var(--danger); }
+
+/* ---- Reader overlay panel ---- */
+body.overlay-mode { background: transparent; overflow: hidden; }
+body.overlay-mode #root { border: none; background: transparent; }
+.overlay-panel {
+  width: max-content;
+  max-width: fit-content;
+  position: fixed;
+  left: 50%;
+  bottom: 10px;
+  transform: translateX(-50%);
+  background: rgba(13, 17, 24, 0.72);
+  background: linear-gradient(180deg, color-mix(in srgb, green 22%, transparent), rgba(15, 18, 29, 0.72)), rgba(13, 17, 24, 0.72);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 10px 18px 14px;
+  -webkit-app-region: drag;
+  app-region: drag;
+}
+.overlay-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 24px;
+}
+.overlay-head img { width: 18px; height: 18px; }
+.overlay-dot { width: 8px; height: 8px; border-radius: 50%; background: #5a5e74; }
+.overlay-dot.reading { background: var(--accent); }
+.overlay-dot.thinking { background: #5b8def; }
+.overlay-head .ohlabel { color: #7d8398; font-size: 11px; flex: 1; }
+.overlay-close {
+  -webkit-app-region: no-drag;
+  app-region: no-drag;
+  width: 20px; height: 20px; border-radius: 50%;
+  color: #7d8398;
+  display: flex; align-items: center; justify-content: center;
+  cursor: pointer; border: 0; font-size: 12px;
+}
+.overlay-close:hover { background: rgba(28, 31, 44, 0.78); color: var(--text); }
+.overlay-close:focus { background: rgba(28, 31, 44, 0.78); color: var(--text); }
+.overlay-body {
+  margin-top: 8px;
+  font-size: 14px;
+  line-height: 30px;
+  min-height: 30px;
+  color: #c8cde0;
+}
+.overlay-body .w { color: #60657a; transition: color 0.12s linear; }
+.overlay-body .w.cur { color: #fff; font-family: var(--font-semibold); font-weight: 700; }
+.overlay-body .w.future { color: #c8cde0; }
+.overlay-progress {
+  -webkit-app-region: no-drag;
+  app-region: no-drag;
+  display: flex; align-items: center; gap: 4px;
+  margin-top: 10px;
+}
+.overlay-progress .obtn {
+  width: 22px; height: 22px;
+  display: flex; align-items: center; justify-content: center;
+  color: #9aa0b8; cursor: pointer; background: transparent; border: 0;
+  font-size: 12px;
+}
+.overlay-progress .obtn:hover { color: var(--text); }
+.overlay-bar { flex: 1; height: 4px; background: #1f2230; border-radius: 2px; margin: 0 6px; overflow: hidden; }
+.overlay-bar > div { height: 100%; background: var(--accent); width: 0%; }
+.overlay-counter { color: #7d8398; font-size: 11px; min-width: 34px; text-align: right; }
+.overlay-paused {
+  display: inline-block;
+  background: #3a2f1f; color: #e8c787;
+  border: 1px solid #a07a3a;
+  border-radius: 8px;
+  font-family: var(--font-semibold); font-weight: 600;
+  font-size: 11px;
+  padding: 2px 10px;
+  margin: 4px auto;
+}
+
+.hidden { display: none !important; }
+.notices-text {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  white-space: pre-wrap;
+  user-select: text;
+  -webkit-user-select: text;
+  color: var(--text);
+  line-height: 1.5;
+}
+
+/* ---- Confirm modal (restores Tk messagebox.askyesno gate) ---- */
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 2000;
+}
+.modal {
+  background: var(--bg-card);
+  border: 1px solid var(--border-lt);
+  border-radius: var(--radius-card);
+  padding: 20px 22px;
+  width: 380px;
+  max-width: calc(100vw - 48px);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.6);
+}
+.modal-title {
+  font-family: var(--font-semibold);
+  font-weight: 600;
+  font-size: 15px;
+  color: var(--text);
+  margin-bottom: 10px;
+}
+.modal-body {
+  color: var(--text-dim);
+  font-size: 13px;
+  line-height: 1.5;
+  margin-bottom: 18px;
+}
+.modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}

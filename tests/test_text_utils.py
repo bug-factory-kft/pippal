@@ -65,6 +65,45 @@ class TestSplitSentences:
     def test_strips_outer_whitespace(self):
         assert split_sentences("  hello  ") == ["hello"]
 
+    # --- newline-boundary tests ---
+
+    def test_bullet_list_each_line_is_separate_chunk(self):
+        text = "- Apples\n- Oranges\n- Bananas"
+        chunks = split_sentences(text)
+        assert chunks == ["- Apples", "- Oranges", "- Bananas"]
+
+    def test_numbered_list_each_line_is_separate_chunk(self):
+        text = "1. Cat\n2. Dog\n3. Bird"
+        chunks = split_sentences(text)
+        assert chunks == ["1. Cat", "2. Dog", "3. Bird"]
+
+    def test_blank_lines_ignored(self):
+        text = "- Apples\n\n- Oranges\n\n- Bananas"
+        chunks = split_sentences(text)
+        assert chunks == ["- Apples", "- Oranges", "- Bananas"]
+
+    def test_leading_trailing_whitespace_trimmed_per_line(self):
+        text = "  - Apples  \n  - Oranges  "
+        chunks = split_sentences(text)
+        assert chunks == ["- Apples", "- Oranges"]
+
+    def test_prose_still_splits_on_punctuation(self):
+        # Normal sentences with terminal punctuation must still pack under
+        # the cap — no regression for prose paragraphs.
+        text = "The cat sat. The dog ran."
+        chunks = split_sentences(text)
+        # Both short sentences fit in one chunk (single line, no newline).
+        assert chunks == ["The cat sat. The dog ran."]
+
+    def test_mixed_list_and_prose_line(self):
+        # A line that itself contains multiple sentences is split by
+        # punctuation, while the newline forces a new chunk.
+        text = "Hello world. How are you?\n- Apples\n- Oranges"
+        chunks = split_sentences(text)
+        assert chunks[0] == "Hello world. How are you?"
+        assert "- Apples" in chunks
+        assert "- Oranges" in chunks
+
 
 class TestCountSyllables:
     @pytest.mark.parametrize("word,expected", [
@@ -119,63 +158,6 @@ class TestWordTimingWeight:
 
     def test_returns_float(self):
         assert isinstance(word_timing_weight("hello"), float)
-
-
-class TestComputeWordLayout:
-    """`compute_word_layout` produces the per-word timing/geometry that
-    the karaoke overlay paints. Pure function — easy to pin."""
-
-    def test_empty_text_returns_empty(self):
-        from pippal.ui.overlay_paint import compute_word_layout
-
-        layout = compute_word_layout("", 5.0, _FakeFont(8), 760, 32, 4)
-        assert layout == []
-
-    def test_zero_duration_returns_empty(self):
-        from pippal.ui.overlay_paint import compute_word_layout
-
-        layout = compute_word_layout("hello world", 0.0, _FakeFont(8), 760, 32, 4)
-        assert layout == []
-
-    def test_words_have_increasing_timestamps(self):
-        from pippal.ui.overlay_paint import compute_word_layout
-
-        layout = compute_word_layout(
-            "one two three four five", 4.0, _FakeFont(8), 760, 32, 4,
-        )
-        for i in range(1, len(layout)):
-            assert layout[i].ts >= layout[i - 1].ts
-            assert layout[i].te >= layout[i - 1].te
-
-    def test_wraps_when_a_word_overflows_the_line(self):
-        # With a 60 px width and 32 px padding, the available area is
-        # ~-4 px → effectively 0; every word forces a wrap.
-        from pippal.ui.overlay_paint import compute_word_layout
-
-        layout = compute_word_layout(
-            "one two three", 1.0, _FakeFont(40), 100, 30, 4,
-        )
-        # Three words; each on its own line.
-        assert {w.y for w in layout} == {0, 1, 2}
-
-    def test_single_line_when_words_fit(self):
-        from pippal.ui.overlay_paint import compute_word_layout
-
-        layout = compute_word_layout(
-            "one two three", 1.0, _FakeFont(8), 760, 32, 4,
-        )
-        # All three on the same line.
-        assert {w.y for w in layout} == {0}
-
-
-class _FakeFont:
-    """Stand-in for tkinter.font.Font so this test can run without a
-    real Tk root."""
-    def __init__(self, char_w: int) -> None:
-        self.char_w = char_w
-
-    def measure(self, text: str) -> int:
-        return len(text) * self.char_w
 
 
 class TestIterWordSpans:

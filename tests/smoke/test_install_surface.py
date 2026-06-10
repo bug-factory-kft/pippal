@@ -57,15 +57,15 @@ def test_setup_and_launcher_contracts_are_shippable() -> None:
 
     assert "PIPPAL_DATA_DIR" in setup
     assert "$voicesDir = Join-Path $dataRoot 'voices'" in setup
-    assert "pythonw reader_app.py" in setup
+    assert "pythonw reader_app_web.py" in setup
     assert "copy start_server.vbs" not in setup
     assert "Startup shortcut to start_server.vbs" in setup
 
     assert "%~dp0" in console
-    assert "python reader_app.py" in console
+    assert "python reader_app_web.py" in console
 
     assert "WScript.ScriptFullName" in server
-    assert 'fso.BuildPath(scriptDir, "reader_app.py")' in server
+    assert 'fso.BuildPath(scriptDir, "reader_app_web.py")' in server
     assert "pythonw.exe" in server
 
 

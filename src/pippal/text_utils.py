@@ -6,6 +6,7 @@ import re
 from collections.abc import Iterable
 
 _PUNCT_SENTENCE = re.compile(r"(?<=[.!?])\s+")
+_NEWLINE_SPLIT = re.compile(r"[ \t]*\n+[ \t]*")
 _WORD_RE = re.compile(r"\S+")
 _VOWELS = "aeiouyáéíóöőúüű"
 _TRIM_CHARS = "'\"-.,;:!?()[]{}<>/«»“”…"
@@ -17,27 +18,43 @@ def split_sentences(text: str, max_chunk_len: int = 400) -> list[str]:
     inputs for natural prosody. A single sentence longer than
     `max_chunk_len` is hard-wrapped on whitespace as a fallback, with
     oversized unbroken tokens split directly so a paragraph-shaped
-    one-sentence input never exceeds the cap."""
+    one-sentence input never exceeds the cap.
+
+    Newlines are treated as hard chunk boundaries so that bullet lists
+    and numbered lists are read item-by-item rather than merged into a
+    single TTS run.
+    """
     text = (text or "").strip()
     if not text:
         return []
 
-    parts = _PUNCT_SENTENCE.split(text)
     chunks: list[str] = []
     buf = ""
-    for part in parts:
-        if not part:
+
+    # Split on newlines first, preserving line-level boundaries.
+    lines = _NEWLINE_SPLIT.split(text)
+    for line in lines:
+        line = line.strip()
+        if not line:
             continue
-        for sub in _wrap_long(part, max_chunk_len):
-            if not buf:
-                buf = sub
-            elif len(buf) + 1 + len(sub) <= max_chunk_len:
-                buf = f"{buf} {sub}"
-            else:
-                chunks.append(buf)
-                buf = sub
-    if buf:
-        chunks.append(buf)
+        # Within each line apply the existing sentence-punctuation split.
+        parts = _PUNCT_SENTENCE.split(line)
+        for part in parts:
+            if not part:
+                continue
+            for sub in _wrap_long(part, max_chunk_len):
+                if not buf:
+                    buf = sub
+                elif len(buf) + 1 + len(sub) <= max_chunk_len:
+                    buf = f"{buf} {sub}"
+                else:
+                    chunks.append(buf)
+                    buf = sub
+        # Flush the buffer at each line boundary so lines are never merged.
+        if buf:
+            chunks.append(buf)
+            buf = ""
+
     return chunks
 
 

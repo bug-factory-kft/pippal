@@ -6,7 +6,7 @@ integration. Optional extension packages can self-register additional
 engines and selection-driven actions through ``pippal.plugins``.
 
 Public API:
-- `main()`     — entry point used by `python -m pippal` and reader_app.py
+- `main()`     — entry point used by `python -m pippal` and reader_app_web.py
 - `TTSEngine`  — orchestration class
 """
 # ruff: noqa: E402
@@ -22,8 +22,12 @@ from . import plugins as _plugins
 # through pippal.plugins; failures are logged loudly rather than swallowed.
 _plugins.load_extension_plugins()
 
-from .app import main
+# Define the package version BEFORE importing the web UI: the web bridge
+# does ``from .. import __version__`` at import time, so the name must
+# already exist on the partially-initialised package.
+__version__ = "0.2.4"
+
 from .engine import TTSEngine
+from .web_ui.app_web import main
 
 __all__ = ["TTSEngine", "main"]
-__version__ = "0.2.4"

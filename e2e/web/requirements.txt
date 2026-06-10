@@ -1,0 +1,10 @@
+# Playwright E2E for the PipPal web UI (test-only; Apache-2.0).
+# Install: py -3.11 -m pip install -r e2e/web/requirements.txt
+#          py -3.11 -m playwright install chromium
+pytest>=7
+pytest-playwright>=0.5
+playwright>=1.49
+# Self-contained HTML report for the CI artifact (MIT). The Playwright
+# traces/screenshots are emitted by --tracing/--screenshot into the
+# same artifact directory.
+pytest-html>=4

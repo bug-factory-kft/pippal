@@ -1,0 +1,127 @@
+name: UI Web E2E
+
+# The merge-required UI E2E gate for the migrated web frontend.
+#
+# Runs the Playwright suite in e2e/web/ against the REAL served
+# frontend (webui/ + pippal.web_ui.server) wired to the REAL backend
+# (TTSEngine / config / voices), in **served + headless** mode:
+#
+#   * conftest.py starts pippal.web_ui.server (the same localhost
+#     static + /bridge JSON server the desktop pywebview window uses)
+#     on a free port — NO pywebview desktop window is created;
+#   * pytest-playwright launches **headless** Chromium (the default —
+#     no --headed flag is passed) and points it at that local server.
+#
+# So there is NO pywebview window and NO interactive desktop / Session
+# 1 requirement: this runs unattended on the headless LocalSystem
+# self-hosted Windows runner. The job fails if any test fails (pytest's
+# exit code is the job result).
+#
+# Scope guard: this is additive. It does NOT touch ci.yml /
+# e2e-windows.yml / bench-baseline.yml, and the web e2e dir stays
+# excluded from the default `python -m pytest` (pytest.ini:
+# testpaths = tests), so the unit/e2e-windows jobs are unaffected.
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  web-ui-e2e:
+    name: Web UI E2E (served, headless Chromium)
+    # Org-level self-hosted Windows runner (LocalSystem, headless).
+    # actions/setup-python@v5 works there. No interactive desktop is
+    # needed because the suite is served + headless (see header).
+    runs-on: [self-hosted, windows, pippal-windows]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install package + web deps + Playwright e2e requirements
+        shell: pwsh
+        run: |
+          python -m pip install --upgrade pip
+          # The package itself (real backend the served UI talks to).
+          python -m pip install -e .
+          # Web frontend runtime dep (BSD-3). Not strictly needed in
+          # served/headless mode, but install it so the web_ui package
+          # imports identically to the desktop path.
+          python -m pip install pywebview
+          # Playwright + pytest-playwright + pytest-html (test-only).
+          python -m pip install -r e2e/web/requirements.txt
+
+      - name: Install Chromium for Playwright
+        shell: pwsh
+        run: |
+          python -m playwright install chromium
+
+      - name: Run web Playwright suite (served + headless, VERBOSE)
+        shell: pwsh
+        env:
+          # The step lines use → / ✓ glyphs. The self-hosted runner's
+          # console is cp1252 by default, which renders them (and the
+          # newlines pytest's live-log writes) as escapes. Force UTF-8
+          # IO so the CI log shows the human-readable steps verbatim.
+          # Scoped to THIS step only — the default `python -m pytest`
+          # (tests/) job in ci.yml is untouched.
+          PYTHONUTF8: "1"
+          PYTHONIOENCODING: "utf-8"
+        run: |
+          # Headless is the pytest-playwright default — no --headed is
+          # passed, so no browser window and no pywebview window. The
+          # conftest serves the UI in-process; Chromium hits localhost.
+          #
+          # Visibility for PASSING tests (the whole point of this
+          # change): -v + --log-cli-level=INFO streams every test's
+          # human-readable step lines live, and -rA prints the captured
+          # step log for PASSES too (not just failures) — so a green CI
+          # run now shows exactly what each test did instead of
+          # "Passed ... no log output captured".
+          #
+          # Playwright artifacts ALWAYS (not only on failure):
+          # --tracing=on --video=on --screenshot=on write a trace.zip +
+          # video + screenshot for EVERY test under
+          # playwright-report/artifacts, alongside the self-contained
+          # HTML report — all uploaded by the always() step below.
+          #
+          # These flags live in the workflow command (NOT the root
+          # pytest.ini), so the default `python -m pytest` (tests/)
+          # suite and its config are completely unaffected, and e2e/web
+          # stays excluded from the default suite (pytest.ini:
+          # testpaths = tests).
+          #
+          # pytest's non-zero exit on any failure still fails this job.
+          New-Item -ItemType Directory -Force -Path playwright-report | Out-Null
+          python -m pytest e2e/web `
+            -v -rA --log-cli-level=INFO `
+            --browser chromium `
+            --tracing=on `
+            --video=on `
+            --screenshot=on `
+            --output=playwright-report/artifacts `
+            --html=playwright-report/report.html `
+            --self-contained-html
+
+      - name: Upload Playwright report + traces + videos + screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          # Always-on artifact (if: always()) — even on a fully green
+          # run: per-test trace.zip (open with
+          # `playwright show-trace <file>`), per-test video (.webm),
+          # per-test screenshot, and the self-contained HTML report.
+          # See e2e/web/README.md for how to open each.
+          name: web-ui-e2e-playwright-report
+          path: playwright-report/
+          if-no-files-found: warn
+          retention-days: 14

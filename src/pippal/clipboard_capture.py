@@ -35,6 +35,7 @@ if TYPE_CHECKING:  # pragma: no cover
     from .engine import TTSEngine
 
 CLIPBOARD_PROBE_TOKEN: str = "__pippal_no_selection__"
+CLIPBOARD_CAPTURE_SETTLE_DEADLINE_S: float = 0.9
 UNIVERSAL_MODIFIER_KEYS: set[str] = {"ctrl", "shift", "alt", "super", "windows"}
 
 __all__ = ["CLIPBOARD_PROBE_TOKEN",
@@ -109,13 +110,16 @@ def capture_selection(engine: TTSEngine, hotkey_combo: str = "") -> str:
             pass
 
         text = ""
-        deadline = time.time() + CLIPBOARD_READ_DEADLINE_S
+        deadline = time.time() + max(
+            CLIPBOARD_READ_DEADLINE_S,
+            CLIPBOARD_CAPTURE_SETTLE_DEADLINE_S,
+        )
         while time.time() < deadline:
             try:
                 cur = pyperclip.paste()
             except Exception:
                 cur = CLIPBOARD_PROBE_TOKEN
-            if cur != CLIPBOARD_PROBE_TOKEN:
+            if cur != CLIPBOARD_PROBE_TOKEN and cur != "":
                 text = cur
                 break
             time.sleep(CLIPBOARD_POLL_S)
