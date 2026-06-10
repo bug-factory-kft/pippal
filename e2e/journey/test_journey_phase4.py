@@ -178,7 +178,20 @@ def corrupt_config_app(request: pytest.FixtureRequest) -> Iterator[RealApp]:
         browser = pw_cm.chromium.connect_over_cdp(
             f"http://127.0.0.1:{cdp_port}"
         )
-        page = _resolve_app_page(browser)
+
+        def _reconnect_browser():
+            nonlocal browser
+            old = browser
+            browser = pw_cm.chromium.connect_over_cdp(
+                f"http://127.0.0.1:{cdp_port}"
+            )
+            try:
+                old.close()
+            except Exception:
+                pass
+            return browser
+
+        page = _resolve_app_page(browser, reconnect_fn=_reconnect_browser)
         bridge_base = ""
         try:
             u = page.url

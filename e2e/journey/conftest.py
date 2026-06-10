@@ -404,9 +404,28 @@ def _wait_cdp(port: int, proc: subprocess.Popen, timeout: float = 75.0) -> dict:
     )
 
 
-def _resolve_app_page(browser: Any, timeout: float = 25.0):
-    """Find the real pywebview app page among the CDP contexts."""
+def _resolve_app_page(
+    browser: Any,
+    timeout: float = 25.0,
+    *,
+    reconnect_fn: Any | None = None,
+    reconnect_every: float = 3.0,
+):
+    """Find the real pywebview app page among the CDP contexts.
+
+    pywebview/WebView2 windows that are created AFTER the initial
+    ``connect_over_cdp`` call are NOT automatically discovered via CDP
+    events in WebView2 (unlike stock Chromium). A periodic fresh
+    ``connect_over_cdp`` is the only reliable way to pick them up.
+
+    ``reconnect_fn`` is an optional no-arg callable that returns a fresh
+    browser object (and closes the old one). When provided, this function
+    reconnects every ``reconnect_every`` seconds so newly-created windows
+    appear even if they were opened after the first connect-over-CDP
+    snapshot.
+    """
     deadline = time.time() + timeout
+    next_reconnect = time.time() + reconnect_every
     last = None
     while time.time() < deadline:
         for ctx in browser.contexts:
@@ -419,6 +438,16 @@ def _resolve_app_page(browser: Any, timeout: float = 25.0):
                     return pg
                 if url and url != "about:blank":
                     last = pg
+        # Reconnect to discover WebView2 windows created after the
+        # initial connect (WebView2 does not push Target.targetCreated
+        # events to an existing Playwright CDP session the same way
+        # stock Chromium does — a fresh connect enumerates all targets).
+        if reconnect_fn is not None and time.time() >= next_reconnect:
+            try:
+                browser = reconnect_fn()
+            except Exception:
+                pass
+            next_reconnect = time.time() + reconnect_every
         time.sleep(0.3)
     if last is not None:
         return last
@@ -513,7 +542,20 @@ def real_app(request: pytest.FixtureRequest) -> Iterator[RealApp]:
         browser = pw_cm.chromium.connect_over_cdp(
             f"http://127.0.0.1:{cdp_port}"
         )
-        page = _resolve_app_page(browser)
+
+        def _reconnect_browser():
+            nonlocal browser
+            old = browser
+            browser = pw_cm.chromium.connect_over_cdp(
+                f"http://127.0.0.1:{cdp_port}"
+            )
+            try:
+                old.close()
+            except Exception:
+                pass
+            return browser
+
+        page = _resolve_app_page(browser, reconnect_fn=_reconnect_browser)
         # Derive the bridge base from the live app URL (the real app
         # picked its own OS-assigned bridge port).
         bridge_base = ""
