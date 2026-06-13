@@ -27,6 +27,7 @@ from ..tray import make_tray_icon
 from .bridge import PipPalBridge
 from .overlay_state import WebOverlay
 from .server import start_web_ui_server
+from .startup_toast import show_startup_toast
 from .windows import WebWindowManager
 
 
@@ -252,6 +253,11 @@ def main() -> None:
     )
     tray["icon"] = icon
     icon.run_detached()
+
+    # Show a brief "running in background" toast once at startup.
+    # Fires ~200 ms after the tray icon is ready; silently skipped in CI
+    # (PIPPAL_NO_STARTUP_NOTIFICATION=1) and on any display error.
+    show_startup_toast()
 
     if _selected_piper_missing(config) or should_show_activation_panel():
         windows.open("onboarding")
