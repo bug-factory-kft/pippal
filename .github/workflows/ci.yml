@@ -16,37 +16,39 @@ jobs:
   # reported immediately while the test job is still pulling deps.
   lint:
     name: Lint
-    runs-on: pippal-runner
+    runs-on: [self-hosted, windows, pippal-windows]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with: { python-version: "3.11" }
-      - run: python -m pip install --upgrade pip ruff
-      - run: ruff check src/pippal tests
+      - name: Install ruff
+        shell: pwsh
+        run: python -m pip install --upgrade pip ruff
+      - name: Run ruff
+        shell: pwsh
+        run: ruff check src/pippal tests
 
   # ----- Unit tests -----------------------------------------------------
   # 140 tests in tests/, benchmarks/ excluded by pytest.ini.
   unit-tests:
     name: Unit tests
-    runs-on: pippal-runner
+    runs-on: [self-hosted, windows, pippal-windows]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with: { python-version: "3.11" }
-      - name: Install xvfb + tk runtime
+      - name: Install package + dev extras
+        shell: pwsh
         run: |
-          sudo apt-get update
-          sudo apt-get install -y xvfb libtk8.6
-      - run: |
           python -m pip install --upgrade pip
           python -m pip install -e ".[dev]"
       - name: Run unit suite
         id: unit
-        # `tee` so we have the output for a possible failure comment
+        # Tee-Object so we have the output for a possible failure comment
         # while pytest's own exit code still drives the job result.
+        shell: pwsh
         run: |
-          set -o pipefail
-          xvfb-run -a python -m pytest -q | tee unit-output.txt
+          python -m pytest -q | Tee-Object -FilePath unit-output.txt
 
       # If unit tests failed, post a comment with the summary so the
       # reviewer can see what broke without hunting through the log.
@@ -54,18 +56,20 @@ jobs:
       # enough).
       - name: Format unit failure comment
         if: failure() && github.event_name == 'pull_request'
+        shell: pwsh
         run: |
-          {
-            echo "### ❌ Unit tests failed — \`${GITHUB_SHA::7}\`"
-            echo ""
-            echo "<details><summary>pytest output (tail)</summary>"
-            echo ""
-            echo '```'
-            tail -80 unit-output.txt
-            echo '```'
-            echo ""
-            echo "</details>"
-          } > unit-comment.md
+          $sha = $env:GITHUB_SHA.Substring(0, 7)
+          @(
+            "### ❌ Unit tests failed — ``$sha``"
+            ""
+            "<details><summary>pytest output (tail)</summary>"
+            ""
+            '```'
+            (Get-Content unit-output.txt -Tail 80 -ErrorAction SilentlyContinue)
+            '```'
+            ""
+            "</details>"
+          ) | Out-File -FilePath unit-comment.md -Encoding utf8
 
       - name: Find prior unit comment
         if: failure() && github.event_name == 'pull_request'
@@ -91,16 +95,14 @@ jobs:
   # against the baseline they remember from the previous PR.
   benchmarks:
     name: Benchmarks
-    runs-on: pippal-runner
+    runs-on: [self-hosted, windows, pippal-windows]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with: { python-version: "3.11" }
-      - name: Install xvfb + tk runtime
+      - name: Install package + dev extras
+        shell: pwsh
         run: |
-          sudo apt-get update
-          sudo apt-get install -y xvfb libtk8.6
-      - run: |
           python -m pip install --upgrade pip
           python -m pip install -e ".[dev]"
       # If a baseline is committed under `bench-baselines/`, compare
@@ -112,47 +114,48 @@ jobs:
       # If no baseline exists in the repo yet, the comparison flags
       # are skipped — we just print the numbers.
       - name: Run benchmarks
+        shell: pwsh
         run: |
-          set -o pipefail
-          BASELINE_FILE=$(find bench-baselines -name '0001_baseline.json' 2>/dev/null | head -1)
-          COMPARE_FLAGS=""
-          if [ -n "$BASELINE_FILE" ]; then
-            echo "Baseline found at $BASELINE_FILE — comparing with mean:30% regression threshold."
-            # Pytest-benchmark's `--benchmark-compare` accepts a
-            # file path directly, so we pass the absolute baseline
-            # JSON. The matching `--benchmark-storage` keeps the
-            # current run + comparison rooted in the same dir tree.
-            # `min:100%` — fail when the new run's fastest measurement
-            # is at least 2× the baseline's fastest. We have ns-scale
-            # benchmarks (e.g. ``voice_filename`` clocks in around
-            # 60 ns) where even ``min`` rattles 50–70 % between
-            # identical runs on a shared k8s node. Anything tighter
-            # produces false positives; this still catches a real 2×+
-            # regression cleanly.
-            COMPARE_FLAGS="--benchmark-storage=file://bench-baselines --benchmark-compare=$(basename $BASELINE_FILE .json | cut -d_ -f1) --benchmark-compare-fail=min:100%"
-          else
-            echo "No baseline in bench-baselines/. Run the 'Update benchmark baseline' workflow once to seed it."
-          fi
-          xvfb-run -a python -m pytest tests/benchmarks --benchmark-only \
-              --benchmark-columns=mean,stddev,ops \
-              --benchmark-sort=mean \
-              $COMPARE_FLAGS \
-              | tee bench-output.txt
+          # Only match baselines for the CURRENT platform (Windows-CPython-*-64bit).
+          # The Linux baseline lives under Linux-CPython-*; using it on a Windows
+          # runner causes pytest-benchmark to raise UsageError (no matching compare-id).
+          $winBaseline = Get-ChildItem -Path bench-baselines -Recurse -Filter *.json -ErrorAction SilentlyContinue `
+            | Where-Object { $_.FullName -match 'Windows-CPython' } `
+            | Select-Object -First 1
+          $compareFlags = @()
+          if ($winBaseline) {
+            $baseName = $winBaseline.BaseName -replace '_[^_]+$', ''
+            Write-Host "Baseline found at $($winBaseline.FullName) — comparing with min:100% regression threshold."
+            $compareFlags = @(
+              "--benchmark-compare=$baseName",
+              "--benchmark-compare-fail=min:100%"
+            )
+          } else {
+            Write-Host "No Windows-platform benchmark baseline found under bench-baselines/Windows-CPython-*; running measurement-only (regression gate inactive until a Windows baseline is seeded via the Update benchmark baseline workflow)."
+          }
+          python -m pytest tests/benchmarks --benchmark-only `
+            --benchmark-columns=mean,stddev,ops `
+            --benchmark-sort=mean `
+            --benchmark-storage=file://bench-baselines `
+            @compareFlags `
+            | Tee-Object -FilePath bench-output.txt
 
       - name: Format benchmark comment
         if: github.event_name == 'pull_request'
+        shell: pwsh
         run: |
-          {
-            echo "### 📊 Benchmark results — \`${GITHUB_SHA::7}\`"
-            echo ""
-            echo "<details><summary>Click to expand</summary>"
-            echo ""
-            echo '```'
-            tail -120 bench-output.txt
-            echo '```'
-            echo ""
-            echo "</details>"
-          } > bench-comment.md
+          $sha = $env:GITHUB_SHA.Substring(0, 7)
+          @(
+            "### 📊 Benchmark results — ``$sha``"
+            ""
+            "<details><summary>Click to expand</summary>"
+            ""
+            '```'
+            (Get-Content bench-output.txt -Tail 120 -ErrorAction SilentlyContinue)
+            '```'
+            ""
+            "</details>"
+          ) | Out-File -FilePath bench-comment.md -Encoding utf8
 
       - name: Find prior benchmark comment
         if: github.event_name == 'pull_request'
