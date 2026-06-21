@@ -116,22 +116,27 @@ jobs:
       - name: Run benchmarks
         shell: pwsh
         run: |
-          $baselineFile = Get-ChildItem -Path bench-baselines -Filter '0001_baseline.json' -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
+          # Only match baselines for the CURRENT platform (Windows-CPython-*-64bit).
+          # The Linux baseline lives under Linux-CPython-*; using it on a Windows
+          # runner causes pytest-benchmark to raise UsageError (no matching compare-id).
+          $winBaseline = Get-ChildItem -Path bench-baselines -Recurse -Filter *.json -ErrorAction SilentlyContinue `
+            | Where-Object { $_.FullName -match 'Windows-CPython' } `
+            | Select-Object -First 1
           $compareFlags = @()
-          if ($baselineFile) {
-            $baseName = $baselineFile.BaseName -replace '_[^_]+$', ''
-            Write-Host "Baseline found at $($baselineFile.FullName) — comparing with min:100% regression threshold."
+          if ($winBaseline) {
+            $baseName = $winBaseline.BaseName -replace '_[^_]+$', ''
+            Write-Host "Baseline found at $($winBaseline.FullName) — comparing with min:100% regression threshold."
             $compareFlags = @(
-              "--benchmark-storage=file://bench-baselines",
               "--benchmark-compare=$baseName",
               "--benchmark-compare-fail=min:100%"
             )
           } else {
-            Write-Host "No baseline in bench-baselines/. Run the 'Update benchmark baseline' workflow once to seed it."
+            Write-Host "No Windows-platform benchmark baseline found under bench-baselines/Windows-CPython-*; running measurement-only (regression gate inactive until a Windows baseline is seeded via the Update benchmark baseline workflow)."
           }
           python -m pytest tests/benchmarks --benchmark-only `
             --benchmark-columns=mean,stddev,ops `
             --benchmark-sort=mean `
+            --benchmark-storage=file://bench-baselines `
             @compareFlags `
             | Tee-Object -FilePath bench-output.txt
 
