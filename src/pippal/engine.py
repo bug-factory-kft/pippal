@@ -200,16 +200,33 @@ class TTSEngine:
 
     # ----- mini-player navigation -----
     def seek(self, delta: int) -> None:
-        """Move forward/backward `delta` chunks (or 0 to replay current)."""
+        """Move forward/backward `delta` chunks (or 0 to replay current).
+
+        Immediately updates the overlay to show the target chunk's text in a
+        'thinking' (loading) state so the UI responds instantly, independent
+        of the background re-synthesis that follows when the WAV is not cached.
+        """
         with self.lock:
             if not self._chunks:
                 return
             target = max(0, min(len(self._chunks) - 1, self._chunk_idx + delta))
             self._skip_to = target
+            # Snapshot the state needed for the overlay update while still
+            # holding the lock so we read a consistent view.
+            target_text = self._chunks[target]
+            total = len(self._chunks)
         try:
             winsound.PlaySound(None, winsound.SND_PURGE)
         except Exception:
             pass
+        # Show the target chunk text + a loading indicator immediately, before
+        # the playback loop wakes up and re-synthesises the missing WAV.
+        # duration=0.0 and offset_s=0.0 — the real values will be filled in
+        # by _play_chunk once synthesis completes and audio actually starts.
+        ov = self._overlay()
+        if ov is not None:
+            ov.start_chunk(target_text, 0.0, target, total, offset_s=0.0)
+            ov.set_state("thinking")
 
     def prev_chunk(self) -> None:
         if self._onboarding_active:
