@@ -329,3 +329,79 @@ class TestCaptureSelectionReleasesModifiers:
         assert {"ctrl", "shift", "alt", "super"} <= released
 
 
+class TestSeekOverlayInstantFeedback:
+    """seek() must update the overlay to the TARGET chunk's text +
+    'thinking' state IMMEDIATELY — before synthesis — so backward
+    navigation feels instant even when the WAV is not cached (fix #281.5).
+
+    RED on the un-patched engine: overlay is only updated after the
+    blocking re-synthesis inside the playback loop, not in seek() itself.
+    GREEN after the fix: seek() calls start_chunk + set_state before
+    returning."""
+
+    def _make_engine_with_overlay(self) -> tuple[TTSEngine, MagicMock]:
+        overlay = MagicMock()
+        engine = TTSEngine(
+            MagicMock(),
+            {"engine": "piper"},
+            overlay_ref=lambda: overlay,
+        )
+        return engine, overlay
+
+    def _seed_chunks(self, engine: TTSEngine, chunks: list[str]) -> None:
+        """Inject mini-player state as if play_one already started."""
+        with engine.lock:
+            engine._chunks = chunks
+            engine._chunk_idx = 2  # currently on chunk 2
+
+    def test_seek_backward_shows_target_text_immediately(self) -> None:
+        """Backward seek must call start_chunk with the TARGET text
+        (chunk index 1) before synthesis of any kind happens."""
+        engine, overlay = self._make_engine_with_overlay()
+        chunks = ["first sentence.", "second sentence.", "third sentence."]
+        self._seed_chunks(engine, chunks)
+
+        with patch("pippal.engine.winsound.PlaySound"):
+            engine.seek(-1)  # target = chunk idx 1
+
+        # start_chunk must have been called with the target text
+        overlay.start_chunk.assert_called_once()
+        call_args = overlay.start_chunk.call_args
+        # First positional arg is the chunk text
+        assert call_args.args[0] == "second sentence."
+
+    def test_seek_backward_shows_thinking_state_immediately(self) -> None:
+        """Backward seek must call set_state('thinking') immediately,
+        signalling the loading indicator before re-synthesis."""
+        engine, overlay = self._make_engine_with_overlay()
+        chunks = ["first sentence.", "second sentence.", "third sentence."]
+        self._seed_chunks(engine, chunks)
+
+        with patch("pippal.engine.winsound.PlaySound"):
+            engine.seek(-1)
+
+        overlay.set_state.assert_called_with("thinking")
+
+    def test_seek_noop_when_no_chunks(self) -> None:
+        """seek() with no chunks must not call overlay at all (no state)."""
+        engine, overlay = self._make_engine_with_overlay()
+        # _chunks is empty by default
+
+        with patch("pippal.engine.winsound.PlaySound"):
+            engine.seek(-1)
+
+        overlay.start_chunk.assert_not_called()
+        overlay.set_state.assert_not_called()
+
+    def test_seek_forward_shows_target_text_immediately(self) -> None:
+        """Forward seek also benefits: next chunk text shown immediately."""
+        engine, overlay = self._make_engine_with_overlay()
+        chunks = ["first sentence.", "second sentence.", "third sentence."]
+        self._seed_chunks(engine, chunks)
+
+        with patch("pippal.engine.winsound.PlaySound"):
+            engine.seek(+1)  # target = chunk idx 3, clamped to 2
+
+        overlay.start_chunk.assert_called_once()
+        call_args = overlay.start_chunk.call_args
+        assert call_args.args[0] == "third sentence."
