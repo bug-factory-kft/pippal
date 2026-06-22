@@ -424,8 +424,21 @@ def _wait_for_chunk_end(
                     return WaitResult.RETRYABLE
                 continue
             if ov is not None:
-                offset = _karaoke_offset_s(engine) + elapsed_s
-                ov.start_chunk(chunks[idx], remaining_dur, idx, len(chunks), offset_s=offset)
+                # Single source of truth for resume-elapsed: hand the
+                # audio tail's ``elapsed_s`` to the overlay clock directly
+                # via ``resume_elapsed_s`` (NOT folded into ``offset_s``).
+                # ``set_paused(False)`` no longer rebases ``_chunk_start``,
+                # so this is the only rebase on resume — the double-reset
+                # race that restarted the karaoke highlight from word 0 is
+                # gone, and the highlight stays within one word of audio.
+                ov.start_chunk(
+                    chunks[idx],
+                    remaining_dur,
+                    idx,
+                    len(chunks),
+                    offset_s=_karaoke_offset_s(engine),
+                    resume_elapsed_s=elapsed_s,
+                )
             playback_started_at = time.monotonic() - elapsed_s
             deadline = time.time() + remaining_dur + CHUNK_DEADLINE_PAD_S
             continue

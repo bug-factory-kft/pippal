@@ -43,6 +43,14 @@ class WebOverlay:
         self.action_label: str | None = None
         self.paused: bool = False
         self._paused_elapsed: float = 0.0
+        # True between ``set_paused(False)`` and the playback loop's
+        # follow-up ``start_chunk`` that re-arms the resume clock. While
+        # set, ``snapshot`` keeps reporting the frozen paused elapsed so
+        # the karaoke highlight does not flicker to word 0 in the gap.
+        self._resuming: bool = False
+        # Clock the karaoke timer reads. Injectable so tests can drive
+        # ``elapsed`` deterministically; defaults to wall time.
+        self._clock = time.time
 
         self._chunk_text: str = ""
         self._words: list[dict[str, float]] = []
@@ -68,11 +76,19 @@ class WebOverlay:
     def set_paused(self, paused: bool) -> None:
         with self._lock:
             if paused and not self.paused:
-                self._paused_elapsed = max(0.0, time.time() - self._chunk_start)
+                self._paused_elapsed = max(0.0, self._clock() - self._chunk_start)
                 self.paused = True
             elif (not paused) and self.paused:
-                self._chunk_start = time.time() - self._paused_elapsed
+                # SINGLE SOURCE OF TRUTH for resume-elapsed: do NOT rebase
+                # ``_chunk_start`` here. The playback loop re-arms the
+                # karaoke clock via ``start_chunk`` with the audio tail's
+                # elapsed; rebasing here too caused a double reset race
+                # that collapsed the snapshot ``elapsed`` to ~0 (the
+                # highlight jumped back to word 0 on resume). Keep the
+                # frozen ``_paused_elapsed`` visible until ``start_chunk``
+                # establishes the authoritative resume clock.
                 self.paused = False
+                self._resuming = True
 
     def set_state(self, state: str) -> None:
         if not self._enabled():
@@ -123,7 +139,21 @@ class WebOverlay:
         idx: int = 0,
         total: int = 1,
         offset_s: float = 0.0,
+        resume_elapsed_s: float | None = None,
     ) -> None:
+        """Arm the karaoke clock for a chunk.
+
+        ``offset_s`` is the latency compensation (karaoke_offset_s): the
+        clock starts that far in the future so the highlight does not run
+        ahead of audio startup.
+
+        ``resume_elapsed_s`` is the SINGLE SOURCE OF TRUTH for a resume.
+        When set, the chunk is treated as already ``resume_elapsed_s``
+        seconds in (the audio tail resumed there), so the snapshot
+        ``elapsed`` lands at ``resume_elapsed_s`` rather than 0. This is
+        the only place the resume clock is rebased — ``set_paused(False)``
+        deliberately does not, to avoid the double-reset race.
+        """
         words = _word_timings(text, duration)
         with self._lock:
             # A fresh chunk means a fresh reading — kill any pending
@@ -135,8 +165,13 @@ class WebOverlay:
             self._chunk_total = total
             if words:
                 self._chunk_duration = duration
-                self._chunk_start = time.time() + offset_s
+                base = resume_elapsed_s if resume_elapsed_s is not None else 0.0
+                # elapsed = clock() - _chunk_start, so to land at
+                # ``base`` now we set _chunk_start = clock() - base. The
+                # latency ``offset_s`` still pushes the clock forward.
+                self._chunk_start = self._clock() - base + offset_s
                 self.paused = False
+            self._resuming = False
 
     # ----- auto-hide scheduling (lock held by caller) -----------------
 
@@ -181,10 +216,13 @@ class WebOverlay:
 
     def snapshot(self) -> dict[str, Any]:
         with self._lock:
-            if self.paused:
+            if self.paused or self._resuming:
+                # Frozen while paused, and held frozen across the brief
+                # resume gap until ``start_chunk`` re-arms the clock — so
+                # the karaoke highlight never flickers back to word 0.
                 elapsed = self._paused_elapsed
             else:
-                elapsed = time.time() - self._chunk_start
+                elapsed = self._clock() - self._chunk_start
             return {
                 "overlay_state": self.state,
                 "overlay_message": self.message,
