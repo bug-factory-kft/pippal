@@ -191,7 +191,24 @@ def play_one(
             engine._skip_to = None
 
         if not _ensure_chunk_ready(engine, session, idx):
-            idx += 1
+            # _ensure_chunk_ready bailed. Distinguish a SUPERSESSION (a
+            # navigation arrived mid-synth and set _skip_to to a new target)
+            # from a genuine synth FAILURE / hung-prefetch (no pending nav).
+            # Supersession is *defined* by _skip_to being set, so honour it:
+            # jump the loop to the settled target instead of blindly stepping
+            # to idx + 1. Without this, the final settled target reached via
+            # the supersede path is never driven to _play_chunk ->
+            # set_state("reading") and the overlay stays stuck in "thinking"
+            # (is_synthesizing never clears) — the rapid-Forward wedge.
+            with engine.lock:
+                pending = engine._skip_to
+                if pending is not None:
+                    pending = max(0, min(len(session.chunks) - 1, pending))
+                    engine._skip_to = None
+            if pending is not None:
+                idx = pending
+            else:
+                idx += 1
             continue
         if engine._is_cancelled(my_token):
             _cancel_exit(session)

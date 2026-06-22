@@ -209,7 +209,17 @@ class TTSEngine:
         with self.lock:
             if not self._chunks:
                 return
-            target = max(0, min(len(self._chunks) - 1, self._chunk_idx + delta))
+            # Accumulate from the PENDING target when a navigation is already
+            # in flight, falling back to the engine's _chunk_idx. The loop is
+            # the sole writer of _chunk_idx and only advances it between chunks,
+            # so during a same-tick Forward x3 burst (loop blocked in
+            # _wait_for_chunk_end on chunk 0) _chunk_idx stays pinned and three
+            # naive seek(+1) would each read 0 and coalesce to target 1. Basing
+            # on _skip_to instead makes the burst accumulate 0->1->2->3
+            # (clamped to the last chunk) so the snapshot chunk_idx tracks the
+            # cumulative navigation, not a coalesced single step.
+            base = self._skip_to if self._skip_to is not None else self._chunk_idx
+            target = max(0, min(len(self._chunks) - 1, base + delta))
             self._skip_to = target
             # Snapshot the state needed for the overlay update while still
             # holding the lock so we read a consistent view.
