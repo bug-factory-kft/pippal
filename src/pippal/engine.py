@@ -301,6 +301,21 @@ class TTSEngine:
         with self.lock:
             return my_token != self.token
 
+    def _synth_superseded(self, target_idx: int) -> bool:
+        """Has a newer navigation made ``target_idx``'s synth stale?
+
+        Cancel-on-navigate hook for the playback loop: a rapid second
+        forward/back press sets ``_skip_to`` to a different target while a
+        cache-miss synth for ``target_idx`` is pending or running. When that
+        happens this returns True so the loop abandons the stale synth and
+        advances to the new target instead of blocking to completion (the
+        multi-page nav wedge). It is a plain non-blocking snapshot of
+        ``_skip_to`` under the lock — the synth worker polls it cooperatively.
+        """
+        with self.lock:
+            skip = self._skip_to
+            return skip is not None and skip != target_idx
+
     def _remember(self, text: str) -> None:
         text = (text or "").strip()
         if not text:

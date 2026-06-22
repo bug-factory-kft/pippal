@@ -272,8 +272,32 @@ def _ensure_chunk_ready(
     # Join finished (or there was no prefetch) — drop the dead handle.
     session.prefetch_threads.pop(idx, None)
     if not wav_path.exists() or wav_path.stat().st_size == 0:
+        # Genuine cache MISS: a real synth must run, so announce the loader
+        # via the authoritative synth event. (A cache HIT skips this entirely,
+        # so the loader never shows for an already-prefetched chunk — the
+        # "loader longer than the load" symptom.)
+        ov = engine._overlay()
+        if ov is not None and hasattr(ov, "begin_synth"):
+            ov.begin_synth()
+        # Cancel-on-navigate: if the user pressed forward/back again while we
+        # were about to synth (or during it), this target is now stale. Abort
+        # so the loop can advance to the new target instead of wedging behind a
+        # blocking synth. ``_synth_superseded`` is the cooperative cancel hook
+        # the engine exposes (checks _skip_to / token against this idx).
+        if engine._synth_superseded(target_idx=idx):
+            if ov is not None and hasattr(ov, "end_synth"):
+                ov.end_synth()
+            return False
         if not engine._synthesize(session.chunks[idx], wav_path, backend=session.backend):
             safe_unlink(wav_path)
+            if ov is not None and hasattr(ov, "end_synth"):
+                ov.end_synth()
+            return False
+        # The synth may have completed AFTER a navigation arrived — re-check so
+        # we don't play a stale target the user already skipped past.
+        if engine._synth_superseded(target_idx=idx):
+            if ov is not None and hasattr(ov, "end_synth"):
+                ov.end_synth()
             return False
     return True
 
@@ -337,8 +361,14 @@ def _play_chunk(
 
     ov = engine._overlay()
     if ov is not None:
-        if idx == 0:
-            ov.set_state("reading")
+        # Re-assert "reading" on EVERY chunk entry, not just idx 0. A seek
+        # (engine.seek) flips the overlay to "thinking" to show the loader
+        # while the target chunk may re-synthesise; without this unconditional
+        # re-assert, a forward/back to any non-zero chunk left the overlay
+        # stuck in "thinking"/loading forever (the BIG multi-page nav wedge).
+        # ``start_chunk`` then clears the synth flag (audio-ready event) so the
+        # loader hides exactly when this chunk's audio begins playing.
+        ov.set_state("reading")
         offset = _karaoke_offset_s(engine)
         ov.start_chunk(chunks[idx], dur, idx, len(chunks), offset_s=offset)
 
