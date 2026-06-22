@@ -10,6 +10,7 @@ deserve its own file."""
 
 from __future__ import annotations
 
+import logging
 import tempfile
 import threading
 import time
@@ -35,6 +36,71 @@ from .wav_utils import safe_unlink, wav_duration
 
 if TYPE_CHECKING:  # pragma: no cover
     from .engine import TTSEngine
+
+
+# ---------------------------------------------------------------------------
+# Structured playback diagnostics (Pro-agnostic, privacy-by-construction)
+# ---------------------------------------------------------------------------
+#
+# WHY THIS LIVES IN CORE: the user's diagnostics Trace was empty on a real
+# read because only the Pro Kokoro backend emitted any diag event — the
+# DEFAULT Piper engine and this core playback loop (the path EVERY engine
+# goes through) emitted ZERO events.  So a real read under Trace produced no
+# genuine playback/synth event for any non-Kokoro engine.
+#
+# LEAK-SAFE BY CONSTRUCTION: core must NOT import or know about Pro's
+# diagnostics module (CORE-NO-PRO-LEAK).  Instead this emits a plain stdlib
+# ``logging`` record on a DEDICATED logger name with METADATA-ONLY structured
+# fields carried in ``extra`` — never the read text.  The log message body is
+# the empty string, so even Pro's redaction layer (which blanks legacy record
+# messages) has nothing to scrub.  Pro's diagnostics handler (when installed
+# on the root logger at trace/error) recognises this dedicated logger + the
+# ``diag_evt`` marker and surfaces it as a structured, non-``legacy`` event,
+# re-whitelisting every field through its own privacy guard.  When no Pro
+# handler is attached (the public core app, or diagnostics off) this is a
+# cheap no-op: the record propagates to a root logger with no diag handler and
+# is dropped.
+#
+# The fields are strictly metadata: chunk character COUNT (an int, never the
+# text), chunk index/total, and the engine NAME (an enum-like id such as
+# "piper"/"kokoro").  No document content can flow through here.
+_PLAYBACK_DIAG_LOGGER_NAME = "pippal.playback"
+_PLAYBACK_DIAG_LOGGER = logging.getLogger(_PLAYBACK_DIAG_LOGGER_NAME)
+
+# The structured-event name a real chunk-start emits.  A consumer (Pro
+# diagnostics) keys off this value; it is duplicated as a constant there.
+PLAYBACK_DIAG_EVT_CHUNK = "playback.chunk"
+
+
+def emit_playback_chunk_diag(
+    *, char_count: int, chunk_index: int, chunk_total: int, engine: str | None
+) -> None:
+    """Emit a metadata-only structured ``playback.chunk`` diagnostic.
+
+    Fired when a real chunk genuinely begins playing so that Trace contains a
+    real playback event for EVERY engine (the default Piper read included),
+    not just the Pro Kokoro path.
+
+    Privacy: only the chunk's character COUNT, its index/total and the engine
+    id are emitted — NEVER the read text.  The log message body is empty.
+    This never raises: diagnostics must never break playback.
+    """
+    try:
+        if not _PLAYBACK_DIAG_LOGGER.isEnabledFor(logging.DEBUG):
+            # No handler wants DEBUG records (e.g. no Pro trace handler
+            # installed) — skip the makeRecord cost entirely.
+            return
+        extra = {
+            "diag_evt": PLAYBACK_DIAG_EVT_CHUNK,
+            "char_count": int(char_count),
+            "chunk_index": int(chunk_index),
+            "chunk_total": int(chunk_total),
+        }
+        if engine:
+            extra["engine"] = str(engine)
+        _PLAYBACK_DIAG_LOGGER.debug("", extra=extra)
+    except Exception:
+        pass
 
 
 class WaitResult(Enum):
@@ -255,6 +321,19 @@ def _play_chunk(
     except Exception:
         safe_unlink(wav_path)
         return idx + 1
+
+    # A real chunk is now genuinely playing — emit a metadata-only structured
+    # playback diagnostic so Trace records a real playback event for EVERY
+    # engine on the real read path (the default Piper read included), not only
+    # the Pro Kokoro synth path.  char_count is a length only; the read text
+    # never leaves this process via diagnostics.
+    backend = session.backend
+    emit_playback_chunk_diag(
+        char_count=len(chunks[idx]),
+        chunk_index=idx,
+        chunk_total=len(chunks),
+        engine=getattr(backend, "name", None) if backend is not None else None,
+    )
 
     ov = engine._overlay()
     if ov is not None:
