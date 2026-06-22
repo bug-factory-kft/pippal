@@ -59,6 +59,16 @@ class WebOverlay:
         self._chunk_idx: int = 0
         self._chunk_total: int = 1
 
+        # Authoritative "a real (cache-miss) synth is running RIGHT NOW" flag.
+        # This is the EVENT-DRIVEN loader signal: it flips True the instant a
+        # genuine synth begins (``begin_synth``) and flips False the instant
+        # audio is ready and published (``start_chunk``). The web UI binds the
+        # loading indicator directly to this flag, so the loader can never
+        # outlive the actual synth — it is NOT inferred from the coarse
+        # ``thinking`` state nor gated on a poll heuristic. For a cache-HIT
+        # chunk ``begin_synth`` is never called, so the loader never shows.
+        self._is_synthesizing: bool = False
+
         # Auto-hide timer (the web analogue of the Tk overlay's
         # ``root.after(delay, self._hide)``). Guarded by ``_lock``.
         self._hide_timer: threading.Timer | None = None
@@ -72,6 +82,28 @@ class WebOverlay:
     def set_action_label(self, label: str | None) -> None:
         with self._lock:
             self.action_label = label
+
+    def begin_synth(self) -> None:
+        """Announce that a real (cache-miss) synth has started.
+
+        This is the authoritative "loading" EVENT: the web UI shows the loader
+        only while this flag is set. The matching clear happens in
+        ``start_chunk`` (audio ready) — never on a timer. A no-op when the
+        overlay is disabled.
+        """
+        if not self._enabled():
+            return
+        with self._lock:
+            self._is_synthesizing = True
+
+    def end_synth(self) -> None:
+        """Clear the synth flag without publishing a chunk.
+
+        Used when a synth is abandoned/superseded (navigate-during-synth) so
+        the loader does not linger for a target the user already skipped past.
+        """
+        with self._lock:
+            self._is_synthesizing = False
 
     def set_paused(self, paused: bool) -> None:
         with self._lock:
@@ -131,6 +163,7 @@ class WebOverlay:
             self._words = []
             self._chunk_text = ""
             self.action_label = None
+            self._is_synthesizing = False
 
     def start_chunk(
         self,
@@ -159,6 +192,11 @@ class WebOverlay:
             # A fresh chunk means a fresh reading — kill any pending
             # auto-hide (Tk does this via _cancel_hide in _set_state).
             self._cancel_hide_locked()
+            # Audio for this chunk is ready and being published NOW — this is
+            # the authoritative "synth done / ready" edge. Clear the loader
+            # flag here (event-driven), so the loader hides exactly when the
+            # chunk text/words become available, with no poll lag.
+            self._is_synthesizing = False
             self._chunk_text = text
             self._words = words
             self._chunk_idx = idx
@@ -225,6 +263,7 @@ class WebOverlay:
                 elapsed = self._clock() - self._chunk_start
             return {
                 "overlay_state": self.state,
+                "is_synthesizing": self._is_synthesizing,
                 "overlay_message": self.message,
                 "action_label": self.action_label,
                 "is_paused": self.paused,
