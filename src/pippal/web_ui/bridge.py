@@ -93,16 +93,27 @@ class PipPalBridge:
         return {
             "version": __version__,
             "links": [
-                {"key": "website", "text": "Website",
-                 "url": "https://pippal.bugfactory.hu"},
-                {"key": "github", "text": "GitHub",
-                 "url": "https://github.com/bug-factory-kft/pippal"},
-                {"key": "licence", "text": "Licence (MIT)",
-                 "url": "https://github.com/bug-factory-kft/pippal/blob/main/LICENSE.md"},
-                {"key": "privacy", "text": "Privacy",
-                 "url": "https://github.com/bug-factory-kft/pippal/blob/main/docs/PRIVACY.md"},
-                {"key": "terms", "text": "Terms",
-                 "url": "https://github.com/bug-factory-kft/pippal/blob/main/docs/TERMS.md"},
+                {"key": "website", "text": "Website", "url": "https://pippal.bugfactory.hu"},
+                {
+                    "key": "github",
+                    "text": "GitHub",
+                    "url": "https://github.com/bug-factory-kft/pippal",
+                },
+                {
+                    "key": "licence",
+                    "text": "Licence (MIT)",
+                    "url": "https://github.com/bug-factory-kft/pippal/blob/main/LICENSE.md",
+                },
+                {
+                    "key": "privacy",
+                    "text": "Privacy",
+                    "url": "https://github.com/bug-factory-kft/pippal/blob/main/docs/PRIVACY.md",
+                },
+                {
+                    "key": "terms",
+                    "text": "Terms",
+                    "url": "https://github.com/bug-factory-kft/pippal/blob/main/docs/TERMS.md",
+                },
             ],
         }
 
@@ -135,17 +146,13 @@ class PipPalBridge:
 
         save_config(candidate)
 
-        prev_hotkeys = {
-            k: self.config.get(k, "") for k in hotkey_keys
-        }
+        prev_hotkeys = {k: self.config.get(k, "") for k in hotkey_keys}
         self.config.clear()
         self.config.update(candidate)
 
         result: dict[str, Any] = {"ok": True, "config": dict(self.config)}
 
-        hotkeys_changed = any(
-            prev_hotkeys.get(k, "") != candidate.get(k, "") for k in hotkey_keys
-        )
+        hotkeys_changed = any(prev_hotkeys.get(k, "") != candidate.get(k, "") for k in hotkey_keys)
         if hotkeys_changed and self._on_hotkey_change is not None:
             try:
                 failures = self._on_hotkey_change() or []
@@ -318,6 +325,8 @@ class PipPalBridge:
             self.engine.replay_chunk()
         elif tag == "next":
             self.engine.next_chunk()
+        elif tag == "pause":
+            self.engine.pause_toggle()
         else:
             raise RuntimeError(f"unknown overlay action: {tag}")
         return {"ok": True}
@@ -327,19 +336,20 @@ class PipPalBridge:
             "brand_name": self.config.get("brand_name", "PipPal"),
             # Karaoke offset (ms): the Tk overlay applies it as the chunk
             # start offset; the web overlay shifts the highlight cursor.
-            "karaoke_offset_ms": int(
-                self.config.get("karaoke_offset_ms", 0) or 0
-            ),
+            "karaoke_offset_ms": int(self.config.get("karaoke_offset_ms", 0) or 0),
         }
         if self.overlay is not None and hasattr(self.overlay, "snapshot"):
             snap.update(self.overlay.snapshot())
         with self.engine.lock:
             snap["is_speaking"] = bool(self.engine.is_speaking)
+            # Read the backing field directly instead of calling the is_paused
+            # property: the property acquires engine.lock itself, which would
+            # deadlock on the non-reentrant Lock we already hold here.
+            # The value is identical — we own the lock so _is_paused is stable.
+            snap["is_paused"] = bool(self.engine._is_paused)
             snap["backend_name"] = self.engine._backend_name
             backend_cls = self.engine._backend_cls
-            snap["backend_class"] = (
-                backend_cls.__name__ if backend_cls is not None else None
-            )
+            snap["backend_class"] = backend_cls.__name__ if backend_cls is not None else None
             snap["chunk_count"] = len(self.engine._chunks)
             snap["chunk_paths"] = [str(p) for p in self.engine._chunk_paths]
             snap["queue_length"] = len(self.engine._queue)
