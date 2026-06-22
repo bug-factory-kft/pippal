@@ -342,7 +342,11 @@ class PipPalBridge:
             snap.update(self.overlay.snapshot())
         with self.engine.lock:
             snap["is_speaking"] = bool(self.engine.is_speaking)
-            snap["is_paused"] = bool(self.engine.is_paused)
+            # Read the backing field directly instead of calling the is_paused
+            # property: the property acquires engine.lock itself, which would
+            # deadlock on the non-reentrant Lock we already hold here.
+            # The value is identical — we own the lock so _is_paused is stable.
+            snap["is_paused"] = bool(self.engine._is_paused)
             snap["backend_name"] = self.engine._backend_name
             backend_cls = self.engine._backend_cls
             snap["backend_class"] = backend_cls.__name__ if backend_cls is not None else None

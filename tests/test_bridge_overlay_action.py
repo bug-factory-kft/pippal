@@ -125,3 +125,91 @@ class TestEngineStateIsPaused:
         state = bridge.engine_state()
 
         assert state.get("is_paused") is True
+
+
+# ---------------------------------------------------------------------------
+# Real-lock deadlock regression test
+# ---------------------------------------------------------------------------
+
+
+class TestEngineStateNoDeadlock:
+    """Regression: engine_state() must not deadlock when engine uses a real
+    non-reentrant Lock.
+
+    The mocked tests above hide this because MagicMock's property never
+    acquires the lock.  This test uses a minimal real engine-like object whose
+    ``is_paused`` property acquires the SAME ``threading.Lock`` that
+    ``engine_state()`` holds — exactly replicating the production code path.
+
+    On the unfixed branch, calling ``engine_state()`` inside a thread will
+    block forever (deadlock).  The test guards this with a 5-second join
+    timeout: if the thread is still alive after 5 s the lock was never
+    released and the test FAILS.  After the fix the call returns immediately.
+    """
+
+    def _make_real_lock_engine(self, *, is_paused: bool = False) -> Any:
+        """Minimal object that replicates the real TTSEngine locking contract.
+
+        Uses a real non-reentrant Lock and a real ``is_paused`` property that
+        acquires that same lock — the exact combination that causes the
+        deadlock in the unfixed bridge.
+        """
+        import threading
+
+        lock = threading.Lock()
+        _backing: dict[str, Any] = {"_is_paused": is_paused}
+
+        class _RealLockEngine:
+            """Minimal engine stub with REAL locking semantics."""
+
+            def __init__(self) -> None:
+                # Public fields read by bridge.engine_state() under self.engine.lock
+                self.is_speaking: bool = False
+                self._backend_name: str | None = "stub"
+                self._backend_cls: type | None = None
+                self._chunks: list = []
+                self._chunk_paths: list = []
+                self._queue: list = []
+                self.lock = lock
+                self._is_paused: bool = _backing["_is_paused"]
+
+            @property
+            def is_paused(self) -> bool:
+                # Real property: acquires the SAME lock as engine_state() holds.
+                # This is what causes the deadlock on the unfixed branch.
+                with self.lock:
+                    return self._is_paused
+
+        return _RealLockEngine()
+
+    def test_engine_state_returns_without_deadlock(self) -> None:
+        """engine_state() must complete within 5 s when the engine uses a real
+        non-reentrant Lock.
+
+        RED on unfixed branch: the thread blocks forever (is_paused property
+        tries to acquire a lock already held by engine_state).
+        GREEN after fix: engine_state reads _is_paused directly under the
+        existing lock instead of calling the locking property.
+        """
+        import threading
+
+        engine = self._make_real_lock_engine(is_paused=True)
+        bridge = _make_bridge(engine)
+
+        result_box: list[Any] = []
+
+        def _call() -> None:
+            result_box.append(bridge.engine_state())
+
+        t = threading.Thread(target=_call, daemon=True)
+        t.start()
+        t.join(timeout=5)
+
+        assert not t.is_alive(), (
+            "engine_state() deadlocked: thread still blocked after 5 s. "
+            "The is_paused property must not be called while holding engine.lock."
+        )
+        assert len(result_box) == 1, "engine_state() did not return a result"
+        assert result_box[0].get("is_paused") is True, (
+            "engine_state() must correctly report is_paused=True"
+        )
