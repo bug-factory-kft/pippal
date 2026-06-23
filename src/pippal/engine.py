@@ -518,6 +518,10 @@ class TTSEngine:
         self._remember(text)
         with self.lock:
             self.is_speaking = True
+        # ISSUE 2 — selection CAPTURED (#265 window closed): post-capture
+        # ``loading`` shows the overlay instantly while synth runs.
+        if ov is not None:
+            ov.set_state("loading")
         playback.synthesize_and_play(self, text, my_token)
 
     def _queue_selection_impl(self) -> None:
@@ -539,7 +543,8 @@ class TTSEngine:
             if ov is not None:
                 ov.show_message(f"Queued — {qlen} pending")
             return
-        # Idle → behave like Read.
+        # Idle → behave like Read. Selection already CAPTURED above, so
+        # use the visible post-capture ``loading`` state (ISSUE 2).
         self._remember(text)
         with self.lock:
             self.token += 1
@@ -547,7 +552,7 @@ class TTSEngine:
             self.is_speaking = True
         ov = self._overlay()
         if ov is not None:
-            ov.set_state("thinking")
+            ov.set_state("loading")
         playback.synthesize_and_play(self, text, my_token)
 
     def _read_text_impl(self, text: str) -> None:
@@ -567,7 +572,9 @@ class TTSEngine:
             pass
         ov = self._overlay()
         if ov is not None:
-            ov.set_state("thinking")
+            # ISSUE 2 — text in hand (no capture, no #265 risk): instant
+            # overlay via post-capture ``loading``.
+            ov.set_state("loading")
         self._remember(text)
         playback.synthesize_and_play(self, text, my_token)
 
@@ -588,5 +595,6 @@ class TTSEngine:
             pass
         ov = self._overlay()
         if ov is not None:
-            ov.set_state("thinking")
+            # ISSUE 2 — replay text in hand: instant ``loading``.
+            ov.set_state("loading")
         playback.synthesize_and_play(self, text, my_token)
