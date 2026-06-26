@@ -133,6 +133,10 @@ class WebOverlay:
                 self._words = []
                 self._chunk_text = ""
             if state == "done":
+                # Completion edge — drop any loader flag left over from an
+                # early loading-first ``begin_synth`` (event-driven hide,
+                # no timer; spec H5).
+                self._is_synthesizing = False
                 # Mirror Tk Overlay._set_state("done"): schedule a real
                 # auto-hide after max(OVERLAY_HIDE_MIN_MS, auto_hide_ms).
                 delay_ms = max(
@@ -151,6 +155,11 @@ class WebOverlay:
             self.state = "done"
             self._words = []
             self._chunk_text = ""
+            # A one-shot message is a completion edge (e.g. "No text
+            # selected" after a failed capture, or a success/error banner):
+            # clear the loader flag so an early ``begin_synth`` from the
+            # loading-first chokepoint does not linger over the banner.
+            self._is_synthesizing = False
             # Mirror Tk Overlay._show_message: one-shot messages self
             # dismiss after OVERLAY_MESSAGE_MS regardless of auto_hide_ms.
             self._arm_hide_locked(OVERLAY_MESSAGE_MS)
