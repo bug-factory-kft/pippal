@@ -32,6 +32,7 @@ from .timing import (
     PLAYBACK_POLL_S,
     PREFETCH_DRAIN_S,
 )
+from . import plugins
 from .wav_utils import safe_unlink, wav_duration
 
 if TYPE_CHECKING:  # pragma: no cover
@@ -159,10 +160,9 @@ def play_one(
 ) -> None:
     """Drive the per-text playback loop. Returns when the text has
     finished playing, the user cancelled, or synthesis failed."""
-    chunks = split_sentences(text)
+    chunks = split_sentences(plugins.apply_text_transforms(text))
     if not chunks:
         return
-
     # Pin a single backend for the whole text. Without this, a mid-text
     # mood change (apply_mood -> reset_backend) would cause the next
     # chunk to use a fresh backend with a new voice, swapping the
@@ -170,7 +170,6 @@ def play_one(
     # backend, so respect that.
     if backend is None:
         backend = engine._get_backend()
-
     session = PlaybackSession(
         chunks=chunks,
         chunk_paths=_chunk_paths(my_token, len(chunks)),
