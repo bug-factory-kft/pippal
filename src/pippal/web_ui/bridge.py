@@ -233,19 +233,37 @@ class PipPalBridge:
         return {"ok": True, "installed": filename}
 
     def remove_voice(self, voice_id: str) -> dict[str, Any]:
+        import time
+
         v = self._voice_by_id(voice_id)
-        for f in (
-            VOICES_DIR / f"{v['id']}.onnx",
-            VOICES_DIR / f"{v['id']}.onnx.json",
-        ):
-            try:
-                f.unlink(missing_ok=True)
-            except Exception:
-                pass
+        # Release the engine's hold on the voice files FIRST so piper.exe
+        # drops its file handle before we try to delete on Windows.
         try:
             self.engine.reset_backend()
         except Exception:
             pass
+        targets = (
+            VOICES_DIR / f"{v['id']}.onnx",
+            VOICES_DIR / f"{v['id']}.onnx.json",
+        )
+        _RETRIES = 5
+        _RETRY_SLEEP = 0.15  # seconds — total budget ~0.75 s
+        for f in targets:
+            for attempt in range(_RETRIES):
+                try:
+                    f.unlink(missing_ok=True)
+                    break  # success (including not-present)
+                except Exception:
+                    if attempt < _RETRIES - 1:
+                        time.sleep(_RETRY_SLEEP)
+        # Verify: if either file still exists the handle was not released.
+        still_present = [str(f) for f in targets if f.exists()]
+        if still_present:
+            return {
+                "ok": False,
+                "error": f"file(s) still locked after {_RETRIES} attempts: "
+                         + ", ".join(still_present),
+            }
         return {"ok": True}
 
     def install_default_voice(self) -> dict[str, Any]:
