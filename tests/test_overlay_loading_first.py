@@ -1,15 +1,25 @@
-"""Core ordering oracle for the loading-first overlay chokepoint.
+"""Core ordering oracle for the capture-before-overlay chokepoint.
 
-The "overlay appears with a delay" bug is an ORDERING bug: every entry
-point used to set the (invisible) ``thinking`` state and then run the
-blocking ``capture_for_action`` / synth, only reaching a VISIBLE state
-afterwards. These tests assert the inverse property — the overlay is in a
-visible ``loading`` state (with the in-body loader armed) the MOMENT
-``capture_for_action`` is entered, even when capture is artificially slow.
+The "No text selected" intermittent bug (fixed in commit 44f419c, backported
+to release/0.3.0) was an ORDERING bug: ``begin_action_overlay`` was called
+BEFORE ``capture_for_action``, and even the no-activate loading window stole
+foreground focus from the user's app, so the synthetic Ctrl+C landed on the
+wrong window and returned empty.
+
+Fix: capture selection FIRST (user's app keeps focus), then call
+``begin_action_overlay`` ONLY after non-empty text is confirmed.
+
+``TestCaptureBeforeOverlay`` (below) locks in the NEW correct ordering:
+the overlay is still in its initial ``idle`` state at the moment
+``capture_for_action`` is entered — begin_action_overlay has NOT run yet.
+
+``TestLoadingBeforeSynth`` verifies that ``_read_text_impl`` /
+``_replay_text_impl`` (which receive text as a parameter, no capture)
+still show the overlay BEFORE ``synthesize_and_play`` — no regression there.
 
 They drive the REAL ``WebOverlay`` so ``state`` and ``is_synthesizing``
-are genuine, and use a slow-capture stub that records the overlay snapshot
-at the instant it is entered.
+are genuine, and use a stub that records the overlay snapshot at the
+instant ``capture_for_action`` is entered.
 
 This is the core analogue of the Pro catching test
 ``test_overlay_show_before_textprep.py``; the helper
@@ -37,9 +47,10 @@ def _install_capture_probe(
     """Stub capture_for_action so it records the overlay snapshot AT ENTRY.
 
     The recorded ``state`` / ``is_synthesizing`` are the load-bearing oracle:
-    they describe the overlay at the exact moment the (would-be slow) capture
-    begins. If the loading-first chokepoint ran first, they must already be
-    the visible ``loading`` state.
+    they describe the overlay at the exact moment capture begins.  With the
+    capture-before-overlay fix (commit 44f419c / backport), begin_action_overlay
+    has NOT been called yet — so the overlay must still be in its initial
+    ``idle`` / non-synthesizing state at this point.
     """
     seen: dict[str, Any] = {}
 
@@ -70,33 +81,57 @@ def _quiet(monkeypatch: pytest.MonkeyPatch) -> None:
     )
 
 
-class TestLoadingBeforeCapture:
-    def test_speak_shows_loading_before_capture(
+class TestCaptureBeforeOverlay:
+    """Inverted ordering oracle — locks in the capture-before-overlay fix.
+
+    With the OLD (buggy) ordering, begin_action_overlay ran first so the
+    overlay was already in ``loading`` state when capture_for_action entered.
+    With the FIX the overlay must still be in its initial ``idle`` state
+    (begin_action_overlay not yet called) when capture_for_action is entered.
+    """
+
+    def test_speak_overlay_not_loading_during_capture(
         self, overlay: WebOverlay, monkeypatch: pytest.MonkeyPatch,
     ) -> None:
+        """Capture happens BEFORE begin_action_overlay in _speak_selection_impl.
+
+        At the moment capture_for_action is entered, the overlay is still
+        ``idle`` — begin_action_overlay has not been called yet.
+        """
         engine = _make_engine(overlay)
         monkeypatch.setattr(engine, "_maybe_play_onboarding", lambda: False)
         seen = _install_capture_probe(monkeypatch, overlay, "hello")
 
         engine._speak_selection_impl()
 
-        assert seen["state"] == "loading", (
-            "overlay did not become visible before text-prep — the first "
-            "pop-up waits for capture"
+        assert seen["state"] != "loading", (
+            "begin_action_overlay ran BEFORE capture_for_action — this "
+            "is the focus-stealing bug that causes 'No text selected'."
         )
-        assert seen["is_synthesizing"] is True
+        assert seen["is_synthesizing"] is False, (
+            "overlay should not be in synthesizing state at capture entry "
+            "(begin_action_overlay must not have run yet)"
+        )
 
-    def test_queue_idle_shows_loading_before_capture(
+    def test_queue_idle_overlay_not_loading_during_capture(
         self, overlay: WebOverlay, monkeypatch: pytest.MonkeyPatch,
     ) -> None:
+        """Capture happens BEFORE begin_action_overlay in _queue_selection_impl.
+
+        At the moment capture_for_action is entered, the overlay is still
+        ``idle`` — begin_action_overlay has not been called yet.
+        """
         engine = _make_engine(overlay)
         monkeypatch.setattr(engine, "_maybe_play_onboarding", lambda: False)
         seen = _install_capture_probe(monkeypatch, overlay, "hello")
 
         engine._queue_selection_impl()  # idle → behaves like Read
 
-        assert seen["state"] == "loading"
-        assert seen["is_synthesizing"] is True
+        assert seen["state"] != "loading", (
+            "begin_action_overlay ran BEFORE capture_for_action in "
+            "_queue_selection_impl — focus-stealing bug not fixed."
+        )
+        assert seen["is_synthesizing"] is False
 
 
 class TestLoadingBeforeSynth:
