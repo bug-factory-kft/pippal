@@ -38,7 +38,10 @@ class WebOverlay:
     def __init__(self, config: dict[str, Any]) -> None:
         self.config = config
         self._lock = threading.Lock()
-        self.state: str = "idle"          # idle | thinking | reading | done
+        # idle | thinking | loading | reading | done
+        #   thinking = PRE-capture (window stays hidden — #265 focus-steal guard)
+        #   loading  = POST-capture, pre-synth (window shows instantly, ISSUE 2)
+        self.state: str = "idle"
         self.message: str = ""
         self.action_label: str | None = None
         self.paused: bool = False

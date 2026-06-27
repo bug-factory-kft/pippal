@@ -233,49 +233,87 @@ def _seed_profile(profile: Path, seed: str) -> None:
     raise ValueError(f"unknown profile seed: {seed!r}")
 
 
+def _piper_repro_dir() -> "Path | None":
+    """Return the piper-repro root directory, or None if not available.
+
+    Resolution order:
+
+    1. ``PIPPAL_PIPER_REPRO_DIR`` environment variable — set this to
+       the root of a local piper-repro directory to run journeys that
+       need a real piper engine or voice.
+    2. ``~/piper-repro`` — conventional default location.
+
+    Returns ``None`` when neither location exists so callers can skip
+    gracefully instead of failing with a hardcoded path.
+    """
+    env_val = os.environ.get("PIPPAL_PIPER_REPRO_DIR")
+    if env_val:
+        return Path(env_val)
+    default = Path.home() / "piper-repro"
+    if default.exists():
+        return default
+    return None
+
+
 def _install_cached_piper(profile: Path) -> Path:
     """Make the launched real app find a REAL piper engine.
 
-    The launched app resolves ``PIPER_EXE`` as
-    ``INSTALL_ROOT/piper/piper.exe`` where ``INSTALL_ROOT`` is the
-    source checkout root (it is a source layout). It has no env
-    override, so to give a journey a real engine without modifying
-    production code we copy the locally-cached real piper runtime into
-    THIS checkout's ``piper/`` directory once. The bytes are the
-    genuine Rhasspy piper.exe + its DLLs / espeak data — a real
-    out-of-process synth, not a stub.
+    Set ``PIPPAL_PIPER_REPRO_DIR`` to the root of a local piper-repro
+    directory (must contain ``piper/piper.exe``) to enable this step.
+    Falls back to ``~/piper-repro`` if unset; skips the test when
+    neither location exists.
     """
-    src = Path(r"C:\Users\tigyi\piper-repro\piper")
     dst = CHECKOUT / "piper"
-    if not (dst / "piper.exe").exists():
-        if not (src / "piper.exe").exists():
-            raise RuntimeError(
-                f"cached piper runtime not found at {src}; J2/J3 "
-                "read-aloud journeys need a real engine"
-            )
-        shutil.copytree(src, dst, dirs_exist_ok=True)
+    if (dst / "piper.exe").exists():
+        return dst / "piper.exe"
+    repro = _piper_repro_dir()
+    if repro is None:
+        pytest.skip(
+            "real piper engine not available: set PIPPAL_PIPER_REPRO_DIR "
+            "to the piper-repro root (must contain piper/piper.exe) "
+            "to run this test"
+        )
+    src = repro / "piper"
+    if not (src / "piper.exe").exists():
+        pytest.skip(
+            f"piper runtime not found at {src}; set PIPPAL_PIPER_REPRO_DIR "
+            "to a directory containing piper/piper.exe to run this test"
+        )
+    shutil.copytree(src, dst, dirs_exist_ok=True)
     return dst / "piper.exe"
 
 
 def _install_cached_voice(profile: Path) -> str:
-    """Copy the locally-cached real ``en_US-ryan-high`` voice into the
-    fresh profile's voices dir so a read-aloud journey synthesises with
-    a REAL voice without paying a ~120 MB download every run (J1 still
-    does ONE genuine real download of the smallest catalogue voice to
-    prove the install path)."""
+    """Copy the locally-cached real ``en_US-ryan-high`` voice.
+
+    Set ``PIPPAL_PIPER_REPRO_DIR`` to the root of a local piper-repro
+    directory (must contain ``voices/``) to enable this step.
+    Falls back to ``~/piper-repro`` if unset; skips the test when
+    neither location exists.
+    """
     from pippal.paths import VOICES_DIR
 
-    src_dir = Path(r"C:\Users\tigyi\piper-repro\voices")
+    repro = _piper_repro_dir()
+    if repro is None:
+        pytest.skip(
+            "real voice not available: set PIPPAL_PIPER_REPRO_DIR "
+            "to the piper-repro root (must contain voices/) "
+            "to run this test"
+        )
+    src_dir = repro / "voices"
     VOICES_DIR.mkdir(parents=True, exist_ok=True)
     name = "en_US-ryan-high.onnx"
     for fn in (name, f"{name}.json"):
         s = src_dir / fn
         if not s.exists():
-            raise RuntimeError(f"cached voice file missing: {s}")
-        shutil.copy2(s, VOICES_DIR / fn)
+            pytest.skip(
+                f"cached voice file missing: {s}; set "
+                "PIPPAL_PIPER_REPRO_DIR to a directory containing "
+                "voices/en_US-ryan-high.onnx to run this test"
+            )
+    for fn in (name, f"{name}.json"):
+        shutil.copy2(src_dir / fn, VOICES_DIR / fn)
     return name
-
-
 @dataclass
 class RealApp:
     """Handle to the running real PipPal desktop app + its driven page."""
@@ -684,3 +722,4 @@ def real_app(request: pytest.FixtureRequest) -> Iterator[RealApp]:
         except Exception:
             pass
         shutil.rmtree(profile, ignore_errors=True)
+
