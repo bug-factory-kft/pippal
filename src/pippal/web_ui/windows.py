@@ -44,6 +44,16 @@ class WebWindowManager:
         self._windows: dict[str, Any] = {}
         self._lock = threading.Lock()
         self._started = False
+        self._overlay_controller: Any = None
+
+    def set_overlay_controller(self, controller: Any) -> None:
+        """Store the OverlayWindowController wired by app_web.main.
+
+        Called once after the window manager is configured.  The controller
+        is available for future callers (e.g. raise_window) that need to
+        check overlay visibility state.
+        """
+        self._overlay_controller = controller
 
     def configure(self, base_url: str, bridge: Any) -> None:
         self._base_url = base_url.rstrip("/")
@@ -103,6 +113,48 @@ class WebWindowManager:
         win = self._make_window(surface)
         with self._lock:
             self._windows[surface] = win
+
+    def hide(self, surface: str) -> None:
+        """Hide a surface's window without destroying it. Thread-safe.
+
+        Used by the overlay auto-hide path: the reader window is hidden
+        (not destroyed) on idle so the next read can re-show it instantly
+        and the live page (and its CDP target) survives. Falls back to
+        destroy if the platform window can't hide.
+
+        BUG2 -- the OVERLAY is the EXCEPTION to that fall-through.  The
+        overlay window is frequently the foreground / last live pywebview
+        window; destroying it (the historical fall-through when
+        ``win.hide()`` raised) takes the GUI loop's last window with it and
+        the WHOLE app disappears.  So for the overlay we NEVER destroy on a
+        failed hide: we keep the window object in the live set (the GUI loop
+        keeps a window) and swallow the hide error.  Other surfaces keep the
+        original destroy fall-through (a transient settings/sample window is
+        safe to tear down).  This guarantees at least one window always
+        keeps the GUI loop alive across a reading->thinking->reading
+        document switch.
+        """
+        with self._lock:
+            win = self._windows.get(surface)
+        if win is None:
+            return
+        try:
+            win.hide()
+        except Exception:
+            if surface == "overlay":
+                # NEVER destroy the overlay: it is (typically) the
+                # foreground / last live window and destroying it kills the
+                # pywebview GUI loop -> the app vanishes (BUG2 / #302).
+                # Keep it in the live-window set and swallow the hide
+                # failure; the next read re-shows it and the GUI loop stays
+                # alive.
+                return
+            try:
+                win.destroy()
+            except Exception:
+                pass
+            with self._lock:
+                self._windows.pop(surface, None)
 
     def close_active(self) -> None:
         """Close whichever window currently has focus (the JS 'X' / Cancel
