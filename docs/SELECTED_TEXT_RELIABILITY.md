@@ -70,7 +70,7 @@ Expected semantics and blocker handling for the release matrix:
 
 ## Automated Validation Run
 
-Commands run from `C:\Users\tigyi\pippal-public` on branch
+Commands run from `<repo-root>` on branch
 `release/0.2.4`:
 
 | Check | Result | Notes |
@@ -91,7 +91,7 @@ Environment:
 - Notepad: `C:\WINDOWS\System32\notepad.exe`,
   product version `10.0.26100.8457`, file version
   `10.0.26100.8457 (WinBuild.160101.0800)`.
-- Source Python used for the repro: `C:\Python314\python.exe`.
+- Source Python used for the repro: `python` (system Python on the test machine).
 - A live installed `PipPal` process was present at
   `C:\Program Files\WindowsApps\BugFactory.pippal-pro_0.2.2.0_x64__km6tvv8cv49he\PipPal.exe`.
   The release-branch hotkey was therefore not tested through the installed
@@ -144,7 +144,7 @@ Manual/UI smoke shape:
 3. Select all text with `[System.Windows.Forms.SendKeys]::SendWait('^a')`.
 4. Set the previous clipboard to `ISSUE58_PATCHED_PREVIOUS_CLIPBOARD`.
 5. Run source `pippal.clipboard_capture.capture_selection(...)` with
-   `PYTHONPATH=C:\Users\tigyi\pippal-public\src` and hotkey combo
+   `PYTHONPATH=<repo-root>\src` and hotkey combo
    `windows+shift+r`.
 
 Result:
@@ -173,7 +173,7 @@ Environment:
 - Temporary fixture:
   `C:\WINDOWS\TEMP\pippal_issue43_edge_20260514_220108\edge-selected-text-smoke.html`.
 - Source helper path:
-  `PYTHONPATH=C:\Users\tigyi\pippal-public\src`.
+  `PYTHONPATH=<repo-root>\src`.
 
 Test text:
 
@@ -224,9 +224,9 @@ not prove selected-text capture works in those apps.
 | Acrobat Reader / Acrobat | Yes | `26.1.21529.0` | `C:\Program Files\Adobe\Acrobat DC\Acrobat\Acrobat.exe` |
 | Word | Yes | `16.0.19929.20136` | `C:\Program Files\Microsoft Office\root\Office16\WINWORD.EXE` |
 | Outlook | Yes | `16.0.19929.20136` | `C:\Program Files\Microsoft Office\root\Office16\OUTLOOK.EXE` |
-| VS Code | Yes | `1.119.0` | `C:\Users\tigyi\AppData\Local\Programs\Microsoft VS Code\Code.exe` |
-| Windows Terminal | Yes | version unavailable | `C:\Users\tigyi\AppData\Local\Microsoft\WindowsApps\wt.exe` |
-| Teams | Yes | version unavailable | `C:\Users\tigyi\AppData\Local\Microsoft\WindowsApps\ms-teams.exe` |
+| VS Code | Yes | `1.119.0` | `%LOCALAPPDATA%\Programs\Microsoft VS Code\Code.exe` |
+| Windows Terminal | Yes | version unavailable | `%LOCALAPPDATA%\Microsoft\WindowsApps\wt.exe` |
+| Teams | Yes | version unavailable | `%LOCALAPPDATA%\Microsoft\WindowsApps\ms-teams.exe` |
 | Slack | No | n/a | n/a |
 | Discord | No | n/a | n/a |
 
