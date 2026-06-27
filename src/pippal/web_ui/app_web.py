@@ -25,7 +25,6 @@ from ..onboarding import should_show_activation_panel
 from ..paths import PIPER_EXE, ensure_dirs
 from ..tray import make_tray_icon
 from .bridge import PipPalBridge
-from .overlay_state import WebOverlay
 from .overlay_window import OverlayWindowController
 from .server import start_web_ui_server
 from .startup_toast import show_startup_toast
