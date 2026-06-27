@@ -199,10 +199,7 @@ class DiagSettingsBridgeMixin:
 
         Privacy (H2): prompt is only shown when diagnostics are opted in.
         """
-        level: str = self.config.get("diag_log_level", "off")  # type: ignore[attr-defined]
-        if level == "off":
-            return {"prompt": False}
-        return {"prompt": False}  # Core has no crash sentinel yet.
+        return {"prompt": False}
 
     def dismiss_crash_prompt(self) -> dict[str, Any]:
         """Dismiss the crash prompt for this session. Core stub — always ok."""

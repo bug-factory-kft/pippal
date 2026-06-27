@@ -38,10 +38,10 @@ from datetime import date
 from pathlib import Path
 from typing import Any
 
-from .paths import DATA_ROOT
 from .diag_async import AsyncDiagTransport, DailyFileHandler, JSONLFormatter
 from .diag_async import log_path_for as _log_path_for
 from .diag_core_bridge import core_record_payload
+from .paths import DATA_ROOT
 
 # ---------------------------------------------------------------------------
 # Paths

@@ -36,8 +36,8 @@ from ..onboarding import (
 )
 from ..paths import VOICES_DIR
 from ..voices import installed_voices, locale_name, voice_filename
-from .overlay_state import WebOverlay
 from .bridge_diag_settings import DiagSettingsBridgeMixin
+from .overlay_state import WebOverlay
 
 
 class PipPalBridge(DiagSettingsBridgeMixin):
