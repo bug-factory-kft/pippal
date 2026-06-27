@@ -1,36 +1,10 @@
 """Overlay reader-window auto-open/-hide for the PipPal web UI.
 
-The Tk->web migration kept the overlay *state* half (the core
-:class:`pippal.web_ui.overlay_state.WebOverlay` the engine drives, and
-``app.js`` ``renderOverlay`` / 120 ms ``tick`` polling that snapshot)
-but dropped the *window* half: nothing ever called
-``windows.open("overlay")`` when a read started, so the karaoke panel
-window never appeared. The Tk app showed the overlay Toplevel as a side
-effect of the engine flipping the Tk ``Overlay`` visible; the headless
-``WebOverlay`` has no window, so the window must be opened explicitly.
-
-:class:`OverlayWindowController` is the missing window half. It taps the
-SAME engine->overlay state path the JS polls (it *is* the ``WebOverlay``
-the engine drives, subclassed) and fires a host ``show``/``hide``
-callback whenever the resolved overlay visibility crosses
-idle<->visible. ``app_web.main`` wires those callbacks to
-``windows.open("overlay")`` / ``windows.hide("overlay")`` exactly like
-the other ``on_open_*`` surfaces, so:
-
-* the overlay WINDOW opens on the read's ``idle -> thinking``/``reading``
-  transition (the same transition that makes the JS show the panel), and
-* it hides on the return to ``idle`` (engine ``stop`` /
-  ``set_state("done")`` -> the ``WebOverlay`` auto-hide timer -> ``idle``,
-  or an explicit ``hide``).
-
-The transitions arrive on engine / playback / auto-hide-timer threads --
-the same off-GUI-thread context the existing tray / bridge
-``windows.open`` callbacks already run in -- and the callbacks are
-deduplicated so a window is opened once per reading session, not once
-per chunk. All overlay STATE behaviour (the snapshot the JS polls) is
-inherited verbatim from the core ``WebOverlay`` -- this only adds the
-window-lifecycle side effect, nothing in the karaoke math or auto-hide
-timing changes.
+``OverlayWindowController`` is the window-lifecycle half dropped in the
+Tk-to-web migration. It subclasses ``WebOverlay`` and fires ``on_show``/
+``on_hide`` callbacks on idle<->visible transitions. ``app_web.main``
+wires those to ``windows.open``/``windows.hide``. Overlay state (JS
+polling snapshot) is inherited unchanged from ``WebOverlay``.
 """
 
 from __future__ import annotations
@@ -43,15 +17,11 @@ from pippal.web_ui.overlay_state import WebOverlay
 
 
 class OverlayWindowController(WebOverlay):
-    """A ``WebOverlay`` that ALSO opens / hides the overlay window.
+    """``WebOverlay`` subclass that also opens/hides the overlay window.
 
-    Subclasses the core overlay-state mirror so the engine drives it
-    exactly as before (same ``set_state`` / ``start_chunk`` /
-    ``show_message`` / ``hide`` protocol, same snapshot). After every
-    state mutation it re-derives whether the panel should be VISIBLE
-    (anything other than ``idle``) and, on a transition, invokes the
-    host ``on_show`` / ``on_hide`` callbacks -- which the app wires to
-    open / hide the real pywebview overlay window.
+    Same engine protocol (set_state/start_chunk/show_message/hide). On each
+    state mutation, fires ``on_show``/``on_hide`` on visibility transitions;
+    deduplicated so the window opens once per reading session.
     """
 
     def __init__(self, config: dict[str, Any]) -> None:
@@ -66,70 +36,32 @@ class OverlayWindowController(WebOverlay):
         on_show: Callable[[], None],
         on_hide: Callable[[], None],
     ) -> None:
-        """Wire the host window open/hide callbacks (called once by
-        ``app_web.main`` after the window manager exists)."""
+        """Wire show/hide callbacks; called once from app_web.main."""
         self._on_show = on_show
         self._on_hide = on_hide
 
     def overlay_window_visible(self) -> bool:
-        """Return True iff the overlay window is currently engine-visible.
+        """True iff the overlay window is currently engine-visible.
 
-        Used by WebWindowManager.raise_window (EDIT 1) to decide whether to
-        re-hide the pre-warmed overlay after a non-overlay foreground raise.
-        Thread-safe: reads _win_visible under _win_lock."""
+        Thread-safe. Used by ``WebWindowManager.raise_window`` to decide
+        whether to re-hide the pre-warmed overlay on foreground raise.
+        """
         with self._win_lock:
             return self._win_visible
 
     # ----- visibility reconciliation ----------------------------------
 
     def _should_be_visible(self) -> bool:
-        # #265 -- DECOUPLE the overlay WINDOW from the selection-capture
-        # phase.  The engine drives ``set_state("thinking")`` *before* it
-        # captures the selection (``engine._speak_selection_impl`` /
-        # ``ai_runner.run_ai_action`` both set "thinking" and only THEN
-        # call ``capture_for_action`` -> a synthetic Ctrl+C against the
-        # foreground app).  If the on-top overlay window opens on that
-        # pre-capture "thinking" transition it STEALS foreground focus, so
-        # the Ctrl+C lands on the overlay window (which has no selection)
-        # and the clipboard probe comes back empty -> "No text selected"
-        # even though the user really had text selected.  This is the
-        # #265 regression that surfaced after toggling the panel modes
-        # (which desync the dedup flag and leave the window foreground).
+        # #265 focus-steal guard: "thinking" precedes selection capture
+        # (synthetic Ctrl+C). Opening the window during "thinking" steals
+        # foreground, so the Ctrl+C lands on the overlay and the clipboard
+        # comes back empty. Window becomes visible only on "reading",
+        # "loading" (post-capture, distinct from "thinking" — #265 safe),
+        # or "done"+message.
         #
-        # Fix: the window must NOT be considered visible while the engine
-        # is merely "thinking" (the pre-capture phase).  It becomes
-        # visible only once a read has produced REAL post-capture content
-        # or feedback -- i.e. the "reading" state (set in ``playback`` right
-        # before ``start_chunk``, after capture + synthesis) or a
-        # done-with-message banner (``show_message``, e.g. the read error,
-        # which is itself emitted after the capture attempt).  Selection
-        # capture therefore never competes with the overlay window for the
-        # foreground, regardless of panel-mode toggling.
-        #
-        # BUG2 -- multi-document NEXT must NOT make the window vanish.  The
-        # multi-doc next path is ``read_document_now`` / ``queue_read_now``
-        # -> ``engine.replay_text`` -> ``set_state("thinking")`` for the
-        # next document's pre-roll, immediately followed by ``reading``.
-        # That transient "thinking" leg arrives while the overlay window is
-        # ALREADY VISIBLE (a reading session continuing into the next
-        # document).  Treating it as not-visible would fire ``on_hide`` ->
-        # ``windows.hide("overlay")`` mid-read and (when ``win.hide()``
-        # raised) DESTROY the overlay -- killing the GUI loop / vanishing the
-        # app.  So a "thinking" state is considered visible IFF the window
-        # is ALREADY visible: a CONTINUATION keeps the window, while a COLD
-        # selection read (window not yet visible) still stays hidden during
-        # its pre-capture "thinking" -- preserving the #265 focus-steal
-        # guard.  This is the documented "distinguish already-visible
-        # continuation from cold selection read" split (Constraint 4).
-        # ISSUE 2 -- instant overlay. The engine emits a distinct POST-capture
-        # ``loading`` state (after ``capture_for_action`` succeeds, before
-        # ``synthesize_and_play``). At that point the #265 focus-steal window
-        # is CLOSED (the selection is already captured), so it is safe to show
-        # the overlay immediately -- the window pops with the in-body loader
-        # while the (slow Kokoro) synth runs, instead of waiting for
-        # ``reading`` post-synth. This must NOT make the PRE-capture
-        # ``thinking`` visible (that stays guarded below) -- #265 is preserved
-        # because ``thinking`` and ``loading`` are DISTINCT states.
+        # Exception (#302 / BUG2): if already visible, a "thinking" state is
+        # a mid-read pre-roll (next document), not a cold selection — keep
+        # the window open to avoid a spurious hide mid-session.
         with self._lock:
             if self.state == "reading":
                 return True
@@ -144,13 +76,11 @@ class OverlayWindowController(WebOverlay):
             return False
 
     def _reconcile_window(self) -> None:
-        """Open or hide the window iff the desired visibility changed.
+        """Fire show/hide callback iff desired visibility changed.
 
-        Deduplicated under ``_win_lock`` so a multi-chunk read (many
-        ``start_chunk`` / ``set_state("reading")`` calls) opens the
-        window once, and the host callbacks are invoked OUTSIDE the
-        overlay ``_lock`` (so ``windows.open`` can't deadlock against a
-        snapshot poll)."""
+        Deduplicated under ``_win_lock``; callbacks invoked outside overlay
+        ``_lock`` to avoid deadlock against snapshot polls.
+        """
         desired = self._should_be_visible()
         cb: Callable[[], None] | None = None
         with self._win_lock:

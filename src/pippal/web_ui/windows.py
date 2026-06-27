@@ -47,12 +47,7 @@ class WebWindowManager:
         self._overlay_controller: Any = None
 
     def set_overlay_controller(self, controller: Any) -> None:
-        """Store the OverlayWindowController wired by app_web.main.
-
-        Called once after the window manager is configured.  The controller
-        is available for future callers (e.g. raise_window) that need to
-        check overlay visibility state.
-        """
+        """Store the OverlayWindowController; called once from app_web.main."""
         self._overlay_controller = controller
 
     def configure(self, base_url: str, bridge: Any) -> None:
@@ -122,17 +117,10 @@ class WebWindowManager:
         and the live page (and its CDP target) survives. Falls back to
         destroy if the platform window can't hide.
 
-        BUG2 -- the OVERLAY is the EXCEPTION to that fall-through.  The
-        overlay window is frequently the foreground / last live pywebview
-        window; destroying it (the historical fall-through when
-        ``win.hide()`` raised) takes the GUI loop's last window with it and
-        the WHOLE app disappears.  So for the overlay we NEVER destroy on a
-        failed hide: we keep the window object in the live set (the GUI loop
-        keeps a window) and swallow the hide error.  Other surfaces keep the
-        original destroy fall-through (a transient settings/sample window is
-        safe to tear down).  This guarantees at least one window always
-        keeps the GUI loop alive across a reading->thinking->reading
-        document switch.
+        #302: overlay is exempt from the destroy fall-through — it may be
+        the last live window; destroying it kills the GUI loop. Swallow the
+        hide error and keep it in the live set. Other surfaces keep the
+        original destroy fall-through.
         """
         with self._lock:
             win = self._windows.get(surface)
@@ -142,12 +130,8 @@ class WebWindowManager:
             win.hide()
         except Exception:
             if surface == "overlay":
-                # NEVER destroy the overlay: it is (typically) the
-                # foreground / last live window and destroying it kills the
-                # pywebview GUI loop -> the app vanishes (BUG2 / #302).
-                # Keep it in the live-window set and swallow the hide
-                # failure; the next read re-shows it and the GUI loop stays
-                # alive.
+                # #302: never destroy on hide failure — may be the last live
+                # window; destroying it kills the GUI loop.
                 return
             try:
                 win.destroy()
