@@ -44,6 +44,11 @@ class WebWindowManager:
         self._windows: dict[str, Any] = {}
         self._lock = threading.Lock()
         self._started = False
+        self._overlay_controller: Any = None
+
+    def set_overlay_controller(self, controller: Any) -> None:
+        """Store the OverlayWindowController; called once from app_web.main."""
+        self._overlay_controller = controller
 
     def configure(self, base_url: str, bridge: Any) -> None:
         self._base_url = base_url.rstrip("/")
@@ -103,6 +108,37 @@ class WebWindowManager:
         win = self._make_window(surface)
         with self._lock:
             self._windows[surface] = win
+
+    def hide(self, surface: str) -> None:
+        """Hide a surface's window without destroying it. Thread-safe.
+
+        Used by the overlay auto-hide path: the reader window is hidden
+        (not destroyed) on idle so the next read can re-show it instantly
+        and the live page (and its CDP target) survives. Falls back to
+        destroy if the platform window can't hide.
+
+        #302: overlay is exempt from the destroy fall-through — it may be
+        the last live window; destroying it kills the GUI loop. Swallow the
+        hide error and keep it in the live set. Other surfaces keep the
+        original destroy fall-through.
+        """
+        with self._lock:
+            win = self._windows.get(surface)
+        if win is None:
+            return
+        try:
+            win.hide()
+        except Exception:
+            if surface == "overlay":
+                # #302: never destroy on hide failure — may be the last live
+                # window; destroying it kills the GUI loop.
+                return
+            try:
+                win.destroy()
+            except Exception:
+                pass
+            with self._lock:
+                self._windows.pop(surface, None)
 
     def close_active(self) -> None:
         """Close whichever window currently has focus (the JS 'X' / Cancel

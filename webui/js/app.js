@@ -579,6 +579,33 @@
     });
   }
 
+  // Playful loading messages (#6) -- whimsical, fake-technical lines
+  // ported from Pro's overlay.js. They rotate while the overlay is in
+  // the loading/thinking state.
+  var LOADING_MESSAGES = [
+    "Warming up the vocal cords…",
+    "Reticulating syllables…",
+    "Teaching the narrator to breathe…",
+    "Summoning the perfect voice…",
+    "Untangling the sentences…",
+    "Polishing the consonants…",
+    "Brewing a fresh batch of phonemes…",
+    "Tuning the inner monologue…",
+    "Coaxing vowels into formation…",
+    "Rehearsing the dramatic pauses…",
+    "Buffering a little eloquence…",
+    "Smoothing out the syllables…",
+    "Calibrating the storyteller…",
+    "Gathering the right intonation…",
+  ];
+  var LOADING_ROTATE_MS = 1800;
+  var loadingMsgBase = Math.floor(Math.random() * LOADING_MESSAGES.length);
+  function currentLoadingMessage() {
+    var step = Math.floor(Date.now() / LOADING_ROTATE_MS);
+    var idx = (loadingMsgBase + step) % LOADING_MESSAGES.length;
+    return LOADING_MESSAGES[idx];
+  }
+
   // ------------------------------------------------------------------
   // READER OVERLAY panel (overlay.py / overlay_paint.py parity).
   // ------------------------------------------------------------------
@@ -737,7 +764,7 @@
           counter.textContent = s.chunk_total > 1
             ? (s.chunk_idx + 1) + "/" + s.chunk_total : "";
         } else if (st === "thinking") {
-          bodyEl.textContent = s.action_label || "preparing…";
+          bodyEl.textContent = s.action_label || currentLoadingMessage();
           barFill.style.width = "0%";
         } else if (st === "done" && s.overlay_message) {
           bodyEl.textContent = s.overlay_message;

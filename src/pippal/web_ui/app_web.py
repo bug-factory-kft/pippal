@@ -25,7 +25,7 @@ from ..onboarding import should_show_activation_panel
 from ..paths import PIPER_EXE, ensure_dirs
 from ..tray import make_tray_icon
 from .bridge import PipPalBridge
-from .overlay_state import WebOverlay
+from .overlay_window import OverlayWindowController
 from .server import start_web_ui_server
 from .startup_toast import show_startup_toast
 from .windows import WebWindowManager
@@ -120,7 +120,7 @@ def main() -> None:
         )
 
     # ----- Backend -----
-    overlay = WebOverlay(config)
+    overlay = OverlayWindowController(config)
     engine = TTSEngine(config=config, root=_NullRoot(), overlay_ref=lambda: overlay)
     engine.attach_history(load_history(), save_history)
 
@@ -188,6 +188,16 @@ def main() -> None:
     _server, port = start_web_ui_server(bridge)
     base_url = f"http://127.0.0.1:{port}"
     windows.configure(base_url, bridge)
+
+    # Wire the overlay window controller so state transitions open/hide the
+    # overlay window (mirrors Pro's app_web wiring). The callbacks run on
+    # engine / playback / auto-hide-timer threads -- same context as the
+    # other on_open_* callbacks -- and are deduplicated by the controller.
+    overlay.set_window_callbacks(
+        on_show=lambda: windows.open("overlay"),
+        on_hide=lambda: windows.hide("overlay"),
+    )
+    windows.set_overlay_controller(overlay)
 
     # ----- Local IPC / single-instance gate -----
     command_callbacks = {
