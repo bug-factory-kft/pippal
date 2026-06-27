@@ -1,30 +1,10 @@
-"""PipPal — Diagnostics / Logging backend.
+"""PipPal — Diagnostics / Logging backend (core, no upload).
 
-Privacy-safe structured logging for the free core.  No network upload code.
-
-PRIVACY GUARANTEE (H1):
-  The actual read text / document content can NEVER appear in any log file.
-  Enforced by two independent layers:
-    1. Whitelist-only structured API (event / error_event):
-       only whitelisted scalar metadata keys are accepted; all other keys
-       and all free-form string values for non-enum keys are dropped.
-    2. RedactingFilter on the root handler: any legacy/3rd-party
-       logging.getLogger(...).info(msg) record has its message body
-       dropped entirely — only logger name + level + file:line:func is
-       preserved.
-
-NON-BLOCKING TRANSPORT:
-  The real file handler (diag_async.DailyFileHandler) does blocking
-  filesystem I/O.  It is owned by a background QueueListener thread.
-
-Log files on disk: ``pippal-YYYY-MM-DD.log`` under DIAG_DIR.
-No network upload.  The upload pipeline is Pro-only.
-
-Usage::
-
-    from pippal import diagnostics as diag
-    diag.configure_diagnostics("trace")
-    diag.event(diag.EVT_SYNTH_START, engine="kokoro", char_count=12)
+Privacy-safe structured logging. Text content NEVER appears in logs.
+Two privacy layers: whitelist-only API (metadata keys only) and a
+RedactingFilter that drops message bodies for non-diag records.
+File I/O is off the hot path via a background QueueListener thread.
+Log files: ``pippal-YYYY-MM-DD.log`` under DIAG_DIR.
 """
 
 from __future__ import annotations
@@ -160,11 +140,7 @@ def log_path_for(day: date) -> Path:
 
 
 class RedactingFilter(logging.Filter):
-    """Gate filter: passes ALL records through without mutation.
-
-    Privacy enforcement is done in DailyFileHandler.emit() on a COPY of
-    the record, so the shared LogRecord object is NEVER mutated.
-    """
+    """Passes all records through; redaction happens in DailyFileHandler.emit() on a copy."""
 
     def filter(self, record: logging.LogRecord) -> bool:
         return True
@@ -173,8 +149,8 @@ class RedactingFilter(logging.Filter):
 def _make_redacted_copy(record: logging.LogRecord) -> logging.LogRecord:
     """Return a shallow copy of *record* with message body scrubbed.
 
-    Called inside DailyFileHandler.emit() so the ORIGINAL shared LogRecord
-    is never modified and other handlers still see the real message.
+    Called in DailyFileHandler.emit() so the original LogRecord is never
+    modified and other handlers still see the real message.
     """
     import copy
 
@@ -248,12 +224,8 @@ def flush() -> None:
 def configure_diagnostics(level: str) -> None:
     """Install or remove the core diagnostics file handler.
 
-    Idempotent: tears down any previously installed transport, then (if
-    level != "off") installs a fresh QueueHandler + background listener.
-    Safe to call multiple times; never creates duplicate handlers.
-
-    Args:
-        level: one of "off", "error", "trace".
+    Idempotent: tears down existing transport then installs a fresh one
+    if level != "off". Never creates duplicate handlers.
     """
     global _current_level
 
@@ -374,11 +346,7 @@ def event(name: str, **fields: Any) -> None:
 
 
 def emit_session_start() -> None:
-    """Emit app.start with OS/Python/dep version metadata (never user text).
-
-    No-op at level="off".  Guarantees a visible log file the instant
-    diagnostics become active.
-    """
+    """Emit app.start with OS/Python/version metadata. No-op when level="off"."""
     if _current_level == "off":
         return
     import platform as _platform
@@ -411,13 +379,11 @@ def error_event(
     exc: BaseException | None = None,
     **fields: Any,
 ) -> None:
-    """Log a metadata-only error event.
+    """Log a metadata-only error event at ERROR level.
 
-    Like event() but logs at ERROR level and adds safe traceback frames
-    (file:lineno:func only — the exception *message* is replaced with
-    "<redacted>" to prevent content leaks via exception strings).
-
-    No-op when diagnostics level is "off".
+    Like event() but adds safe traceback frames (file:lineno:func only);
+    exception message replaced with "<redacted>" to prevent content leaks.
+    No-op when level is "off".
     """
     if _current_level == "off":
         return

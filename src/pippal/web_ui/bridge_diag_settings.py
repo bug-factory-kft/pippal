@@ -1,29 +1,11 @@
-"""PipPal core — diagnostics SETTINGS bridge mixin.
+"""PipPal core — diagnostics settings bridge mixin.
 
-Extracted from pippal-pro's bridge_diag.py: the SETTINGS half only.
-The UPLOAD half (send_diag_logs, get_diag_upload_status, _run_diag_upload,
-set_diag_upload_config) STAYS in Pro — NOT in this module.
+Settings half only (level, open folder, clear logs, crash-prompt stubs).
+Upload pipeline stays in Pro. Pro's bridge inherits this and overrides
+``get_diag_state`` to merge upload state.
 
-``DiagSettingsBridgeMixin`` contains:
-  - diag_js         — JS-side breadcrumb receiver (log GENERATION -> core)
-  - get_diag_state  — returns settings-relevant fields (level, counts, folder)
-                      cooperative: Pro calls super().get_diag_state() and merges
-                      upload status / config on top.
-  - set_diag_level  — persist + configure the diag level
-  - open_diag_folder — open the log folder in the OS explorer
-  - delete_diag_logs — delete all log files
-  - get_crash_prompt / dismiss_crash_prompt — stub implementations
-                      (core returns False; Pro can override with crash_sentinel)
-
-Compose this mixin into ``PipPalBridge`` (core bridge) so the free core can
-set level / open folder / clear logs.  Pro's bridge inherits from it too and
-overrides ``get_diag_state`` to merge upload state.
-
-Notes:
-  - ``self.config`` must be a mutable dict with a ``diag_log_level`` key.
-  - ``_active_webview_window`` is provided as a no-op stub here; the real
-    pywebview host overrides it.  Needs real-app check: ``open_diag_folder``
-    returns ``{"handled": False}`` in headless/test mode.
+Requires ``self.config`` (dict with ``diag_log_level``). ``_active_webview_window``
+is a no-op stub; real host must override it.
 """
 
 from __future__ import annotations
@@ -87,20 +69,10 @@ class DiagSettingsBridgeMixin:
     # ------------------------------------------------------------------
 
     def get_diag_state(self) -> dict[str, Any]:
-        """Return current diagnostics state for the Settings UI card.
+        """Return diagnostics state for the Settings UI (level, counts, folder).
 
         Cooperative: Pro subclasses call ``super().get_diag_state()`` and
-        add upload status / config fields on top.
-
-        Response shape (core fields only)::
-
-            {
-                "level":       str,        # current diag_log_level
-                "levels":      list[str],  # all valid options
-                "log_count":   int,        # number of log files on disk
-                "total_bytes": int,        # combined size of log files
-                "folder":      str,        # path to DIAG_DIR
-            }
+        merge upload fields on top.
         """
         from ..diagnostics import DIAG_DIR, DIAG_LEVELS, list_log_files
 
@@ -119,11 +91,8 @@ class DiagSettingsBridgeMixin:
     def set_diag_level(self, level: str) -> dict[str, Any]:
         """Persist diag_log_level to config and (re)configure the handler.
 
-        Configure-first ordering: configure_diagnostics() is called BEFORE
-        save_config() so the live-process level is always updated even when
-        persistence fails.
-
-        Returns ``{"ok": True}`` on success or ``{"ok": False, "error": str}``.
+        configure_diagnostics() runs before save_config() so the live level
+        is always updated even if persistence fails.
         """
         from pippal.config import save_config
 
@@ -148,8 +117,7 @@ class DiagSettingsBridgeMixin:
     def open_diag_folder(self) -> dict[str, Any]:
         """Open the diagnostics log folder in the OS file explorer.
 
-        Headless-safe: returns ``{"handled": False}`` when there is no
-        pywebview host (no ``_active_webview_window``).
+        Headless-safe: returns ``{"handled": False}`` when no pywebview host.
         """
         from ..diagnostics import DIAG_DIR
 
@@ -192,12 +160,10 @@ class DiagSettingsBridgeMixin:
     # ------------------------------------------------------------------
 
     def get_crash_prompt(self) -> dict[str, Any]:
-        """Return crash-prompt state.
+        """Return crash-prompt state. Core stub: always ``{"prompt": False}``.
 
-        Core stub: always returns ``{"prompt": False}``.
-        Pro overrides this by importing crash_sentinel.
-
-        Privacy (H2): prompt is only shown when diagnostics are opted in.
+        Privacy (H2): prompt only shown when diagnostics are opted in.
+        Pro overrides with real crash_sentinel logic.
         """
         return {"prompt": False}
 
@@ -212,11 +178,7 @@ class DiagSettingsBridgeMixin:
     def _active_webview_window(self) -> Any:
         """Return the active pywebview window, or None in headless/test mode.
 
-        Real desktop host overrides this; the stub always returns None so
-        open_diag_folder safely returns ``{"handled": False}`` in tests.
-
-        NEEDS REAL-APP CHECK: pywebview-based hosts must override this method
-        on PipPalBridge (or inject via the constructor) for open_diag_folder
-        to actually open the Explorer window.
+        NEEDS REAL-APP CHECK: hosts must override this on PipPalBridge for
+        ``open_diag_folder`` to actually open the Explorer window.
         """
         return None

@@ -1,16 +1,9 @@
 """PipPal — bridge-call + lifecycle trace instrumentation.
 
-Provides comprehensive bridge-method instrumentation that, when diagnostics
-Trace is on, logs EVERY JS-callable bridge method invocation as a
-``bridge.call`` event (START / END / ERROR with duration) — metadata-only
-(method NAME + duration_ms + ok / error category; NEVER arguments' content).
-
-PRIVACY: only the method NAME, phase, duration_ms, ok flag and error TYPE NAME
-are emitted — all validated by the diagnostics whitelist.  Arguments and return
-values are NEVER touched.
-
-``instrument_bridge_methods`` is a GENERIC class decorator applicable to ANY
-bridge class (core's bridge AND Pro's bridge) — not bound to a specific class.
+When diagnostics trace is on, wraps every JS-callable bridge method to emit
+``bridge.call`` START/END/ERROR events (method name, duration_ms, ok/error
+type only — args/return values never touched). ``instrument_bridge_methods``
+is a generic class decorator usable on any bridge class (core or Pro).
 """
 
 from __future__ import annotations
@@ -38,10 +31,10 @@ _NO_WRAP_NAMES: frozenset[str] = frozenset(
 
 
 def event_async(name: str, **fields: Any) -> None:
-    """Emit a metadata-only structured event WITHOUT a flush barrier.
+    """Emit a metadata-only structured event without a flush barrier.
 
-    Same privacy guarantees as diagnostics.event but never blocks: it only
-    enqueues the record on the background transport.  No-op when off.
+    Like diagnostics.event but non-blocking: only enqueues on the background
+    transport. No-op when off.
     """
     if _diag.current_level() == "off":
         return
@@ -119,14 +112,10 @@ def _make_traced(name: str, func: Callable[..., Any]) -> Callable[..., Any]:
 
 
 def instrument_bridge_methods(cls: type) -> type:
-    """Class decorator: wrap every public method of *cls* with bridge-call trace.
+    """Class decorator: wrap every public method with bridge-call trace events.
 
-    GENERIC: applicable to ANY bridge class (core's PipPalBridge AND Pro's
-    PipPalProBridge) — not hard-bound to a specific class.
-
-    Walks the FULL MRO so methods defined on every mixin are covered with ONE
-    decorator.  Idempotent: a method already carrying ``_pippal_traced`` is
-    not re-wrapped.
+    Walks the full MRO (covers every mixin). Idempotent: skips already-traced
+    methods. Applicable to any bridge class (core or Pro).
     """
     seen: set[str] = set()
     for klass in cls.__mro__:

@@ -1,14 +1,10 @@
 """PipPal — core structured-record bridge (CORE-NO-PRO-LEAK seam).
 
-The public core (``pippal``) can emit plain stdlib ``logging`` records on
-a DEDICATED logger name (``pippal.playback``) carrying a ``diag_evt`` marker
-plus metadata-only ``extra`` fields (NEVER user text).
-
-This module recognises such a record — but ONLY when its logger name is in
-``CORE_DIAG_LOGGER_ALLOWLIST`` — and hands the event name + candidate fields
-back to ``diagnostics``' own ``_build_diag_payload`` privacy guard.  A
-third-party logger that happens to set ``diag_evt`` is NOT honoured (its name
-is not in the allowlist) and falls through to the redacted ``legacy`` path.
+Recognises stdlib logging records on allowlisted core loggers
+(``pippal.playback``) carrying a ``diag_evt`` marker and routes them
+through the diagnostics privacy guard. Third-party loggers setting
+``diag_evt`` are not honoured (not in allowlist) and fall through to
+the redacted legacy path.
 """
 
 from __future__ import annotations
@@ -32,13 +28,11 @@ def core_record_payload(
     event_name_re: re.Pattern[str],
     build_payload: Callable[[str, dict[str, Any]], dict[str, Any]],
 ) -> dict[str, Any] | None:
-    """Return a whitelisted payload for a recognised core record, else None.
+    """Return a whitelisted payload for a recognised core record, or None.
 
-    Recognised iff ``record.name`` is in ``CORE_DIAG_LOGGER_ALLOWLIST`` AND it
-    carries a valid ``diag_evt`` event name.  Candidate metadata fields are
-    read from the record attributes named in ``allowed_keys`` and re-validated
-    by ``build_payload`` (the diagnostics privacy guard).  The record message
-    body is never read.
+    Recognised iff ``record.name`` is in ``CORE_DIAG_LOGGER_ALLOWLIST`` and
+    carries a valid ``diag_evt`` name. Validates fields via ``build_payload``.
+    Never reads the record message body.
     """
     if record.name not in CORE_DIAG_LOGGER_ALLOWLIST:
         return None

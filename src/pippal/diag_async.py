@@ -1,14 +1,8 @@
 """PipPal — non-blocking diagnostics transport (queue handler/listener).
 
-Pure stdlib — no network imports.
-
-THE HOT-PATH FIX:
-  Attach a QueueHandler to the root logger; a background QueueListener owns
-  the real DailyFileHandler and performs ALL file I/O off the hot path.
-
-NOISE REDUCTION:
-  A _PipPalOnlyFilter passes only records from pippal / pippal_pro trees,
-  keeping unrelated third-party DEBUG records out of the queue.
+Pure stdlib. QueueHandler on root logger; background QueueListener owns
+the DailyFileHandler and does all file I/O off the hot path.
+_PipPalOnlyFilter passes only pippal/pippal_pro records into the queue.
 """
 
 from __future__ import annotations
@@ -95,11 +89,7 @@ def log_path_for(diag_dir: Path, day: date) -> Path:
 
 
 class DailyFileHandler(logging.Handler):
-    """Custom per-day bucketed handler doing the blocking file I/O.
-
-    Lives inside the QueueListener worker thread — all blocking I/O is
-    OFF the emitting (playback/command) hot path.
-    """
+    """Per-day file handler; runs on the QueueListener thread (all I/O off the hot path)."""
 
     def __init__(
         self,
