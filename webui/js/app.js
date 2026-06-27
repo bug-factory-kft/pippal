@@ -619,10 +619,16 @@
     var dot = U.el("span", { class: "overlay-dot", testid: "overlay-dot" });
     var label = U.el("span", { class: "ohlabel", testid: "overlay-label",
       text: "PipPal" });
+    // overlay-drag-region + pywebview-drag-region: native WebView2 drag on
+    // the brand area. Transport/close buttons are siblings so clicks reach
+    // them without starting a drag (D3).
+    var dragRegion = U.el("span",
+      { class: "overlay-drag-region pywebview-drag-region" },
+      [U.el("img", { src: "assets/pippal_icon.png" }), dot, label]);
     var closeBtn = U.el("button", { class: "overlay-close",
       testid: "overlay-close", html: "&#x2715;" });
     var head = U.el("div", { class: "overlay-head" }, [
-      U.el("img", { src: "assets/pippal_icon.png" }), dot, label, closeBtn,
+      dragRegion, closeBtn,
     ]);
     var pausedChip = U.el("div", { class: "overlay-paused hidden",
       testid: "overlay-paused", text: "paused" });
@@ -652,34 +658,8 @@
     ]);
     view.appendChild(panel);
 
-    // ---- Drag-to-reposition (parity with Tk overlay's right-drag) ----
-    // Tk binds <ButtonPress-3>/<B3-Motion> to move the frameless panel.
-    // The web panel is a centred block; mirror that with a right-button
-    // drag that offsets it via a transform. (The desktop pywebview frame
-    // additionally has CSS `app-region: drag`; this covers served mode.)
-    var drag = { active: false, sx: 0, sy: 0, ox: 0, oy: 0 };
-    panel.addEventListener("contextmenu", function (e) { e.preventDefault(); });
-    panel.addEventListener("mousedown", function (e) {
-      if (e.button !== 2) return;            // right button only (Tk Button-3)
-      drag.active = true;
-      drag.sx = e.clientX; drag.sy = e.clientY;
-      panel.setAttribute("data-dragging", "1");
-      e.preventDefault();
-    });
-    window.addEventListener("mousemove", function (e) {
-      if (!drag.active) return;
-      var nx = drag.ox + (e.clientX - drag.sx);
-      var ny = drag.oy + (e.clientY - drag.sy);
-      panel.style.transform = "translate(" + nx + "px," + ny + "px)";
-      panel.setAttribute("data-offset", nx + "," + ny);
-    });
-    window.addEventListener("mouseup", function (e) {
-      if (!drag.active || e.button !== 2) return;
-      drag.active = false;
-      drag.ox += (e.clientX - drag.sx);
-      drag.oy += (e.clientY - drag.sy);
-      panel.removeAttribute("data-dragging");
-    });
+    // Native window drag is handled by the .pywebview-drag-region on the
+    // overlay-drag-region span above (D3).
 
     // Karaoke colour stops + fade — a faithful port of overlay_paint.py's
     // _word_appearance (PAST/FUTURE/PEAK RGB, smoothstep lerp, FADE_SECS).

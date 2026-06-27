@@ -7,13 +7,19 @@
         content="default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self';" />
   <title>PipPal</title>
   <link rel="stylesheet" href="css/theme.css" />
+  <link rel="stylesheet" href="css/overlay.css" />
 </head>
 <body>
   <div id="root">
     <!-- Custom chromeless title bar -->
     <div class="titlebar" id="titlebar">
-      <img src="assets/pippal_icon.png" alt="" />
-      <span class="brand" id="brand-name">PipPal</span>
+      <!-- titlebar-drag wraps icon+brand; pywebview-drag-region enables
+           native WebView2 drag on this element (CSS app-region alone is
+           not honoured by WebView2 without the class). -->
+      <span class="titlebar-drag pywebview-drag-region">
+        <img src="assets/pippal_icon.png" alt="" />
+        <span class="brand" id="brand-name">PipPal</span>
+      </span>
       <button class="winbtn close" id="btn-window-close" data-testid="window-close"
               title="Close" aria-label="Close">&#x2715;</button>
     </div>

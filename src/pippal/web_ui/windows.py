@@ -7,7 +7,7 @@ talks back through the injected ``js_api`` bridge (and the same HTTP
 
 Native chrome stays minimal: Settings / Voice Manager / Onboarding /
 Notices keep a frameless dark window (the UI draws its own title bar).
-The reader overlay is a frameless, on-top, transparent panel.
+The reader overlay is a frameless, on-top, opaque dark mini-player (#248).
 
 WebView2 (Chromium) is the runtime on Windows; pywebview picks it
 automatically.
@@ -22,6 +22,9 @@ from typing import Any
 # actually create / run windows so that importing this module — and
 # therefore ``import pippal`` — does not require the GUI runtime to be
 # installed (e.g. on a headless CI host that only runs the unit suite).
+#
+# ``window_native`` and ``window_geometry`` are also imported lazily
+# (call-time) for the same reason (H3).
 
 # Per-surface window geometry.
 _SURFACES: dict[str, dict[str, Any]] = {
@@ -30,9 +33,19 @@ _SURFACES: dict[str, dict[str, Any]] = {
     "onboarding": {"title": "PipPal", "width": 540, "height": 560},
     "notices": {"title": "PipPal - Open-source licences",
                 "width": 760, "height": 620},
-    "overlay": {"title": "PipPal", "width": 800, "height": 220,
-                "on_top": True, "transparent": True, "frameless": True},
+    "overlay": {"title": "PipPal", "width": 560, "height": 200,
+                "on_top": True, "frameless": True, "easy_drag": False},
 }
+
+
+def should_activate(surface: str) -> bool:
+    """True if this surface should grab foreground on open.
+
+    Only the reader overlay shows no-activate (#265): it must never steal
+    foreground during selection capture (synthetic Ctrl+C).  Every other
+    surface is a user-initiated open and should raise to the foreground.
+    """
+    return surface != "overlay"
 
 
 class WebWindowManager:
@@ -73,8 +86,6 @@ class WebWindowManager:
         }
         if spec.get("on_top"):
             kwargs["on_top"] = True
-        if spec.get("transparent"):
-            kwargs["transparent"] = True
         win = webview.create_window(**kwargs)
 
         def _closed(s: str = surface) -> None:
@@ -82,6 +93,16 @@ class WebWindowManager:
                 self._windows.pop(s, None)
 
         win.events.closed += _closed
+
+        # Apply DWM rounded corners on frameless windows once shown (H4).
+        def _on_shown() -> None:
+            try:
+                from pippal.web_ui import window_native as _wn
+                _wn.apply_dwm_round_corners(win)
+            except Exception:
+                pass
+
+        win.events.shown += _on_shown
         return win
 
     def open(self, surface: str) -> None:
@@ -91,8 +112,23 @@ class WebWindowManager:
             existing = self._windows.get(surface)
             if existing is not None:
                 try:
-                    existing.show()
-                    existing.restore()
+                    if should_activate(surface):
+                        existing.show()
+                        existing.restore()
+                        try:
+                            from pippal.web_ui import window_native as _wn
+                            _wn.bring_to_foreground(existing)
+                        except Exception:
+                            pass
+                    else:
+                        # overlay: re-anchor then show no-activate (#265)
+                        self._anchor_overlay(existing)
+                        try:
+                            from pippal.web_ui import window_native as _wn
+                            if not _wn.show_no_activate(existing):
+                                existing.show()
+                        except Exception:
+                            existing.show()
                     return
                 except Exception:
                     self._windows.pop(surface, None)
@@ -106,8 +142,24 @@ class WebWindowManager:
             return
 
         win = self._make_window(surface)
+        if surface == "overlay":
+            self._anchor_overlay(win)
         with self._lock:
             self._windows[surface] = win
+
+    def _anchor_overlay(self, win: Any) -> None:
+        """Move the overlay window to its bottom-centre anchor (#280).
+
+        Best-effort: any exception is silently swallowed (H4).
+        """
+        try:
+            from pippal.web_ui import window_geometry as _wg
+            spec = _SURFACES["overlay"]
+            pos = _wg.overlay_position(spec)
+            if pos is not None:
+                win.move(pos["x"], pos["y"])
+        except Exception:
+            pass
 
     def hide(self, surface: str) -> None:
         """Hide a surface's window without destroying it. Thread-safe.

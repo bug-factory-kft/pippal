@@ -60,13 +60,23 @@ body { display: flex; flex-direction: column; }
   gap: 9px;
   padding: 10px 14px;
   background: var(--bg);
-  -webkit-app-region: drag;
-  app-region: drag;
   flex: 0 0 auto;
   border-bottom: 1px solid var(--border);
 }
+/* titlebar-drag is the draggable region; pywebview-drag-region is the
+   literal class name WebView2 requires for native drag (CSS app-region
+   alone is NOT honoured by WebView2 without this class). */
+.titlebar-drag {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  flex: 1;
+  min-width: 0;
+  -webkit-app-region: drag;
+  app-region: drag;
+}
 .titlebar img { width: 18px; height: 18px; }
-.titlebar .brand { font-size: 12px; color: var(--text-dim); flex: 1; }
+.titlebar .brand { font-size: 12px; color: var(--text-dim); }
 .titlebar .winbtn {
   -webkit-app-region: no-drag;
   app-region: no-drag;
@@ -313,80 +323,16 @@ a, .link {
 .toast.err { border-color: var(--danger); }
 
 /* ---- Reader overlay panel ---- */
-body.overlay-mode { background: transparent; overflow: hidden; }
-body.overlay-mode #root { border: none; background: transparent; }
-.overlay-panel {
-  width: max-content;
-  max-width: fit-content;
-  position: fixed;
-  left: 50%;
-  bottom: 10px;
-  transform: translateX(-50%);
-  background: rgba(13, 17, 24, 0.72);
-  background: linear-gradient(180deg, color-mix(in srgb, green 22%, transparent), rgba(15, 18, 29, 0.72)), rgba(13, 17, 24, 0.72);
+/* overlay-mode: opaque dark mini-player (transparent removed in #248 port) */
+body.overlay-mode { background: var(--bg); overflow: hidden; }
+body.overlay-mode #root {
   border: 1px solid var(--border);
+  background: var(--bg);
   border-radius: var(--radius);
-  padding: 10px 18px 14px;
-  -webkit-app-region: drag;
-  app-region: drag;
-}
-.overlay-head {
   display: flex;
-  align-items: center;
-  gap: 10px;
-  height: 24px;
+  flex-direction: column;
 }
-.overlay-head img { width: 18px; height: 18px; }
-.overlay-dot { width: 8px; height: 8px; border-radius: 50%; background: #5a5e74; }
-.overlay-dot.reading { background: var(--accent); }
-.overlay-dot.thinking { background: #5b8def; }
-.overlay-head .ohlabel { color: #7d8398; font-size: 11px; flex: 1; }
-.overlay-close {
-  -webkit-app-region: no-drag;
-  app-region: no-drag;
-  width: 20px; height: 20px; border-radius: 50%;
-  color: #7d8398;
-  display: flex; align-items: center; justify-content: center;
-  cursor: pointer; border: 0; font-size: 12px;
-}
-.overlay-close:hover { background: rgba(28, 31, 44, 0.78); color: var(--text); }
-.overlay-close:focus { background: rgba(28, 31, 44, 0.78); color: var(--text); }
-.overlay-body {
-  margin-top: 8px;
-  font-size: 14px;
-  line-height: 30px;
-  min-height: 30px;
-  color: #c8cde0;
-}
-.overlay-body .w { color: #60657a; transition: color 0.12s linear; }
-.overlay-body .w.cur { color: #fff; font-family: var(--font-semibold); font-weight: 700; }
-.overlay-body .w.future { color: #c8cde0; }
-.overlay-progress {
-  -webkit-app-region: no-drag;
-  app-region: no-drag;
-  display: flex; align-items: center; gap: 4px;
-  margin-top: 10px;
-}
-.overlay-progress .obtn {
-  width: 22px; height: 22px;
-  display: flex; align-items: center; justify-content: center;
-  color: #9aa0b8; cursor: pointer; background: transparent; border: 0;
-  font-size: 12px;
-}
-.overlay-progress .obtn:hover { color: var(--text); }
-.overlay-bar { flex: 1; height: 4px; background: #1f2230; border-radius: 2px; margin: 0 6px; overflow: hidden; }
-.overlay-bar > div { height: 100%; background: var(--accent); width: 0%; }
-.overlay-counter { color: #7d8398; font-size: 11px; min-width: 34px; text-align: right; }
-.overlay-paused {
-  display: inline-block;
-  background: #3a2f1f; color: #e8c787;
-  border: 1px solid #a07a3a;
-  border-radius: 8px;
-  font-family: var(--font-semibold); font-weight: 600;
-  font-size: 11px;
-  padding: 2px 10px;
-  margin: 4px auto;
-}
+/* Overlay panel, head, body, and progress rules live in overlay.css */
 
 .hidden { display: none !important; }
 .notices-text {

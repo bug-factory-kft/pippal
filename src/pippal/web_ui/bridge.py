@@ -115,6 +115,11 @@ class PipPalBridge(DiagSettingsBridgeMixin):
                     "text": "Terms",
                     "url": "https://github.com/bug-factory-kft/pippal/blob/main/docs/TERMS.md",
                 },
+                {
+                    "key": "reddit",
+                    "text": "Community (Reddit)",
+                    "url": "https://www.reddit.com/r/PipPalApp/",
+                },
             ],
         }
 
