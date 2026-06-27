@@ -36,10 +36,11 @@ from ..onboarding import (
 )
 from ..paths import VOICES_DIR
 from ..voices import installed_voices, locale_name, voice_filename
+from .bridge_diag_settings import DiagSettingsBridgeMixin
 from .overlay_state import WebOverlay
 
 
-class PipPalBridge:
+class PipPalBridge(DiagSettingsBridgeMixin):
     """Backend facade the web frontend talks to.
 
     ``engine`` is the real :class:`pippal.engine.TTSEngine`. ``overlay``
