@@ -264,10 +264,10 @@ def main() -> None:
     tray["icon"] = icon
     icon.run_detached()
 
-    # Show a brief "running in background" toast once at startup.
+    # Show a brief "running in background" tray balloon once at startup.
     # Fires ~200 ms after the tray icon is ready; silently skipped in CI
     # (PIPPAL_NO_STARTUP_NOTIFICATION=1) and on any display error.
-    show_startup_toast()
+    show_startup_toast(icon)
 
     if _selected_piper_missing(config) or should_show_activation_panel():
         windows.open("onboarding")
