@@ -265,7 +265,14 @@
         } else {
           toast(close ? "Saved." : "Applied.");
         }
-        if (!close) return renderSettings();
+        if (close) {
+          return API.call("close_window").catch(function () {
+            // Fallback: if close_window fails (e.g. headless/served mode),
+            // re-render settings so the UI stays consistent.
+            return renderSettings();
+          });
+        }
+        return renderSettings();
       })
       .catch(fail);
   }
@@ -523,6 +530,17 @@
       text: v.installed ? "Remove" : "Install",
       class: v.installed ? "danger" : "",
     });
+    // Bug 2: progress bar elements (hidden until an async install starts).
+    var progressFill = U.el("div", { style: "height:100%;background:var(--accent,#5b6cff);width:0%;transition:width 0.3s" });
+    var progressWrap = U.el("div", {
+      testid: "vm-progress-" + v.id,
+      style: "display:none;height:4px;background:var(--bg-input,#1e2030);border-radius:2px;overflow:hidden;flex:1;margin:0 8px"
+    }, [progressFill]);
+
+    function _stopInstallUI() {
+      progressWrap.style.display = "none";
+      progressFill.style.width = "0%";
+    }
     function doRemove() {
       btn.disabled = true;
       statusEl.textContent = "removing…";
@@ -530,13 +548,63 @@
         onChanged();
       }).catch(function (e) { btn.disabled = false; fail(e); });
     }
+    function _finishInstall() {
+      _stopInstallUI();
+      // Bug 3 fix: re-fetch catalogue after install so installed voice is
+      // immediately selectable (stale vmState.all caused it to stay greyed-out).
+      return API.call("get_voice_catalogue").then(function (cat) {
+        vmState.all = cat.voices;
+        onChanged();
+      });
+    }
     function doInstall() {
       btn.disabled = true;
-      statusEl.textContent = "downloading…";
+      statusEl.textContent = "";
       statusEl.className = "vstatus";
-      API.call("install_voice", v.id).then(function () {
-        onChanged();
+      progressWrap.style.display = "";
+      progressFill.style.width = "0%";
+      // Bug 2: try async install first; fall back to sync if no task_id.
+      API.call("install_voice_async", v.id).then(function (r) {
+        if (!r || !r.task_id) {
+          // Back-compat: old bridge without async support.
+          return API.call("install_voice", v.id).then(function () {
+            return _finishInstall();
+          });
+        }
+        var taskId = r.task_id;
+        var pollTimer = null;
+        function poll() {
+          API.call("voice_install_status", taskId).then(function (s) {
+            if (s.pct != null) progressFill.style.width = Math.round(s.pct) + "%";
+            if (s.status) statusEl.textContent = s.status;
+            if (s.done) {
+              clearTimeout(pollTimer);
+              if (s.error && !s.cancelled) {
+                _stopInstallUI();
+                statusEl.textContent = "failed";
+                statusEl.className = "vstatus err";
+                btn.disabled = false;
+                fail(s.error);
+              } else if (s.cancelled) {
+                _stopInstallUI();
+                statusEl.textContent = "cancelled";
+                btn.disabled = false;
+              } else {
+                _finishInstall();
+              }
+            } else {
+              pollTimer = setTimeout(poll, 300);
+            }
+          }).catch(function (e) {
+            clearTimeout(pollTimer);
+            _stopInstallUI();
+            btn.disabled = false;
+            fail(e);
+          });
+        }
+        poll();
       }).catch(function (e) {
+        _stopInstallUI();
         statusEl.textContent = "failed";
         statusEl.className = "vstatus err";
         btn.disabled = false;
@@ -560,7 +628,7 @@
           U.el("div", { class: "vname", text: v.label }),
           U.el("div", { class: "vsub", text: "id: " + v.id + "   ·   " + v.quality }),
         ]),
-        statusEl, btn,
+        progressWrap, statusEl, btn,
       ]),
     ]);
   }

@@ -178,7 +178,20 @@ class DiagSettingsBridgeMixin:
     def _active_webview_window(self) -> Any:
         """Return the active pywebview window, or None in headless/test mode.
 
-        NEEDS REAL-APP CHECK: hosts must override this on PipPalBridge for
-        ``open_diag_folder`` to actually open the Explorer window.
+        Uses ``webview.active_window()`` when pywebview is available (real
+        desktop app). Falls back to None in headless / served / CI mode
+        where pywebview is not installed.  Pro overrides this method with
+        the same logic (MRO-safe: calling ``super()._active_webview_window()``
+        from Pro's override is a no-op).
         """
+        try:
+            import webview  # type: ignore[import-untyped]
+        except Exception:
+            return None
+        try:
+            win = webview.active_window()
+            if win is not None:
+                return win
+        except Exception:
+            pass
         return None

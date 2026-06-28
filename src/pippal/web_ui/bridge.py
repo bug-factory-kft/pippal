@@ -71,6 +71,9 @@ class PipPalBridge(DiagSettingsBridgeMixin):
         self._on_hotkey_change = on_hotkey_change
         self._on_engine_change = on_engine_change
         self._install_lock = threading.Lock()
+        # Bug 2: async voice install task registry (progress + cancel).
+        self._voice_task_lock = threading.Lock()
+        self._voice_tasks: dict[str, Any] = {}
 
     # ------------------------------------------------------------------
     # Config (pippal.config — unchanged)
@@ -237,6 +240,176 @@ class PipPalBridge(DiagSettingsBridgeMixin):
         except Exception:
             pass
         return {"ok": True, "installed": filename}
+
+    # ------------------------------------------------------------------
+    # Bug 2: async voice install with progress reporting.
+    # The sync install_voice above is preserved for back-compat.
+    # ------------------------------------------------------------------
+
+    def _stream_voice_with_progress(
+        self,
+        voice: Any,
+        is_cancelled: Any,
+        set_progress: Any,
+    ) -> str:
+        """Download a Piper voice pair (.onnx + .onnx.json) in chunks.
+
+        Reports download progress via ``set_progress(pct=..., status=...)``
+        and checks ``is_cancelled()`` on every chunk so the user can abort
+        mid-download.  Raises ``InterruptedError`` on cancel; re-raises any
+        network error unchanged.  Uses atomic ``.part`` rename so a partial
+        download never leaves broken voice files in place.
+        """
+        import os as _os
+        import urllib.request as _urlreq
+
+        from ..timing import DOWNLOAD_TIMEOUT_S
+        from ..voice_install import _encode_download_url
+        from ..voices import voice_filename, voice_url_base
+
+        filename = voice_filename(voice)
+        base = voice_url_base(voice)
+        label = voice.get("label", filename) if isinstance(voice, dict) else filename
+        onnx_dest = VOICES_DIR / filename
+        json_dest = VOICES_DIR / f"{filename}.json"
+        onnx_part = VOICES_DIR / f"{filename}.part"
+        json_part = VOICES_DIR / f"{filename}.json.part"
+        VOICES_DIR.mkdir(parents=True, exist_ok=True)
+
+        _CHUNK = 1 << 16  # 64 KB
+
+        def _cleanup() -> None:
+            for p in (onnx_part, json_part):
+                try:
+                    p.unlink(missing_ok=True)
+                except Exception:
+                    pass
+
+        def _download_one(url: str, dest: Any, base_pct: float, span: float, dlabel: str) -> None:
+            url = _encode_download_url(url)
+            set_progress(status=f"Downloading {dlabel}…")
+            with _urlreq.urlopen(url, timeout=DOWNLOAD_TIMEOUT_S) as resp, \
+                    open(str(dest), "wb") as f:
+                total = int(resp.headers.get("Content-Length") or 0)
+                downloaded = 0
+                while True:
+                    if is_cancelled():
+                        raise InterruptedError("cancelled")
+                    buf = resp.read(_CHUNK)
+                    if not buf:
+                        break
+                    f.write(buf)
+                    downloaded += len(buf)
+                    if total > 0:
+                        set_progress(pct=base_pct + span * downloaded / total)
+            if _os.path.getsize(str(dest)) == 0:
+                raise RuntimeError(f"empty response for {dlabel}")
+
+        try:
+            _download_one(base + filename, onnx_part, 0.0, 80.0, label)
+            if is_cancelled():
+                _cleanup()
+                raise InterruptedError("cancelled")
+            _download_one(base + f"{filename}.json", json_part, 80.0, 18.0, "metadata")
+            if is_cancelled():
+                _cleanup()
+                raise InterruptedError("cancelled")
+        except Exception:
+            _cleanup()
+            raise
+
+        _os.replace(str(onnx_part), str(onnx_dest))
+        _os.replace(str(json_part), str(json_dest))
+        return filename
+
+    def install_voice_async(self, voice_id: str) -> dict[str, Any]:
+        """Start a named Piper voice install on a background thread.
+
+        Returns ``{"ok": True, "task_id": str}`` immediately.  Poll progress
+        via :meth:`voice_install_status`; cancel via
+        :meth:`cancel_voice_install`.  Back-compat: if the caller doesn't
+        find a ``task_id`` in the response it should fall back to the sync
+        :meth:`install_voice`.
+        """
+        import uuid
+
+        task_id = uuid.uuid4().hex
+        with self._voice_task_lock:
+            self._voice_tasks[task_id] = {
+                "running": True,
+                "pct": 0.0,
+                "status": "Starting…",
+                "error": "",
+                "done": False,
+                "cancelled": False,
+                "installed": None,
+            }
+
+        def _is_cancelled() -> bool:
+            with self._voice_task_lock:
+                return bool(self._voice_tasks.get(task_id, {}).get("cancelled"))
+
+        def _set(pct: float | None = None, status: str | None = None) -> None:
+            with self._voice_task_lock:
+                t = self._voice_tasks.get(task_id)
+                if t is None:
+                    return
+                if pct is not None:
+                    t["pct"] = max(0.0, min(100.0, float(pct)))
+                if status is not None:
+                    t["status"] = status
+
+        def _run() -> None:
+            try:
+                voice = self._voice_by_id(voice_id)
+                filename = self._stream_voice_with_progress(voice, _is_cancelled, _set)
+                self.config["voice"] = filename
+                try:
+                    self.engine.reset_backend()
+                except Exception:
+                    pass
+                _set(pct=100.0, status="✓ Done.")
+                with self._voice_task_lock:
+                    t = self._voice_tasks.get(task_id, {})
+                    t["installed"] = filename
+                    t["done"] = True
+                    t["running"] = False
+            except Exception as exc:
+                cancelled = _is_cancelled()
+                with self._voice_task_lock:
+                    t = self._voice_tasks.get(task_id, {})
+                    if t is not None:
+                        t["error"] = str(exc)
+                        t["status"] = "Cancelled." if cancelled else f"Failed: {str(exc)[:200]}"
+                        t["cancelled"] = cancelled
+                        t["done"] = True
+                        t["running"] = False
+
+        threading.Thread(target=_run, daemon=True).start()
+        return {"ok": True, "task_id": task_id}
+
+    def voice_install_status(self, task_id: str) -> dict[str, Any]:
+        """Return current state of a background voice install task.
+
+        Returns a copy of the task dict, or ``{"done": True, "error":
+        "task not found"}`` if the id is unknown.
+        """
+        with self._voice_task_lock:
+            t = self._voice_tasks.get(task_id)
+            if t is None:
+                return {"done": True, "error": "task not found", "running": False}
+            return dict(t)
+
+    def cancel_voice_install(self, task_id: str) -> dict[str, Any]:
+        """Signal a background voice install to cancel (sets flag; async)."""
+        with self._voice_task_lock:
+            t = self._voice_tasks.get(task_id)
+            if t is None:
+                return {"ok": False, "error": "task not found"}
+            if not t["running"]:
+                return {"ok": True, "was_running": False}
+            t["cancelled"] = True
+        return {"ok": True, "was_running": True}
 
     def remove_voice(self, voice_id: str) -> dict[str, Any]:
         v = self._voice_by_id(voice_id)

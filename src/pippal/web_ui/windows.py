@@ -69,7 +69,7 @@ class WebWindowManager:
 
     # ------------------------------------------------------------------
 
-    def _make_window(self, surface: str) -> Any:
+    def _make_window(self, surface: str, *, hidden: bool = False) -> Any:
         import webview
 
         spec = _SURFACES.get(surface, _SURFACES["settings"])
@@ -84,7 +84,15 @@ class WebWindowManager:
             "frameless": spec.get("frameless", True),
             "easy_drag": False,
         }
-        if spec.get("on_top"):
+        if hidden:
+            kwargs["hidden"] = True
+        # Bug 1 fix: only set on_top on NON-hidden windows.  A pre-warmed
+        # hidden overlay with on_top=True becomes TOPMOST immediately; the
+        # z-order shuffle in bring_to_foreground (tray Settings-reopen) then
+        # surfaces the hidden overlay, causing an empty overlay pop.  Defer
+        # on_top to the visible-show path (open() → show_no_activate →
+        # SetWindowPos(HWND_TOPMOST, SWP_NOACTIVATE)).
+        if spec.get("on_top") and not hidden:
             kwargs["on_top"] = True
         win = webview.create_window(**kwargs)
 
@@ -103,6 +111,27 @@ class WebWindowManager:
                 pass
 
         win.events.shown += _on_shown
+
+        # Bug 1 fix (belt-and-braces): on a COLD create of the overlay
+        # (not the pre-warm path), re-assert no-activate once the native
+        # HWND is realised so the first-ever read does not steal foreground
+        # during selection capture (#265).  Intentionally skipped when
+        # hidden=True: pywebview fires ``shown`` even for a hidden window,
+        # so attaching this handler on the pre-warm would pop an empty
+        # overlay at startup before any action is triggered.
+        if surface == "overlay" and not hidden:
+            def _overlay_no_activate() -> None:
+                try:
+                    from pippal.web_ui import window_native as _wn
+                    _wn.show_no_activate(win)
+                except Exception:
+                    pass
+
+            try:
+                win.events.shown += _overlay_no_activate
+            except Exception:
+                pass
+
         return win
 
     def open(self, surface: str) -> None:
@@ -235,6 +264,27 @@ class WebWindowManager:
         if not self._windows:
             # Nothing queued — open Settings so the app has a face.
             self.open("settings")
+
+        # Bug 1 fix: pre-warm the overlay HIDDEN before the GUI loop starts
+        # so the first read shows it warm (~1-2 s WebView2 init avoided) and
+        # the hide→show cycle is properly initialised.  Without pre-warming,
+        # the overlay is cold-created when reading starts: pywebview's GUI
+        # thread creates+shows it AFTER the engine may have already finished
+        # (short text), causing the "flashes open then disappears" symptom.
+        # Created hidden=True → NOT on_top (see _make_window comment) so the
+        # pre-warmed HWND does not surface during tray/Settings foreground
+        # operations.  Best-effort: a failure must never block startup.
+        with self._lock:
+            overlay_already = "overlay" in self._windows
+        if not overlay_already:
+            try:
+                overlay_win = self._make_window("overlay", hidden=True)
+            except Exception:
+                overlay_win = None
+            if overlay_win is not None:
+                with self._lock:
+                    self._windows["overlay"] = overlay_win
+
         self._started = True
         webview.start()
 
