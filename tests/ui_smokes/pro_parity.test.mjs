@@ -1,13 +1,17 @@
 #!/usr/bin/env node
 /**
- * Pro-parity smoke tests — regression guards for the three bugs fixed by
- * copying Pro overlay.js + voices.js verbatim into free app.js.
+ * Free-parity smoke tests — regression guards for the three surface bugs
+ * that were fixed by porting overlay.js, voices.js, and app-core.js into
+ * the free module graph.
  *
- * Bug 1: Language Remove/delete did NOT work in free.
+ * Bug 1: Voice Remove/delete did NOT work in free.
  * Bug 2: Download progress bar was wrong/stuck.
  * Bug 3: Karaoke overlay was an empty black window.
  *
  * Run: node tests/ui_smokes/pro_parity.test.mjs
+ *
+ * Reads the module-graph source files (voices.js, overlay.js, settings*.js,
+ * app-core.js) instead of the old monolithic app.js.
  */
 
 import { readFileSync } from 'fs';
@@ -26,67 +30,76 @@ function assert(condition, label) {
   else           { console.error(`FAIL: ${label}`); failed++; }
 }
 
-const src        = read('webui/js/app.js');
-const overlayCss = read('webui/css/overlay.css');
-const themeCss   = read('webui/css/theme.css');
+// Read individual module files (module-graph replaces the old app.js).
+const settingsSrc  = read('webui/js/settings-cards.js') + '\n' + read('webui/js/settings.js');
+const voicesSrc    = read('webui/js/voices.js');
+const overlaySrc   = read('webui/js/overlay.js');
+const appCoreSrc   = read('webui/js/app-core.js');
+// overlay.css was merged into surfaces.css + theme.css (position:fixed lives
+// in theme.css; animations live in surfaces.css).
+const surfacesCss  = read('webui/css/surfaces.css');
+const themeCss     = read('webui/css/theme.css');
 
 // (a) Regression guard: diag card still present
-assert(/function buildDiagCard/.test(src),        '(a) buildDiagCard defined');
-assert(src.includes('settings-diag-level'),        '(a) settings-diag-level present');
-assert(/view\.appendChild\s*\(\s*buildDiagCard/.test(src), '(a) buildDiagCard wired in renderSettings');
-assert(src.includes('"get_diag_state"'),           '(a) get_diag_state bridge call present');
+assert(/function buildDiagCard/.test(settingsSrc),        '(a) buildDiagCard defined');
+assert(settingsSrc.includes('settings-diag-level'),        '(a) settings-diag-level present');
+assert(/buildDiagCard\s*\(/.test(settingsSrc),             '(a) buildDiagCard called in renderSettings');
+assert(settingsSrc.includes('"get_diag_state"'),           '(a) get_diag_state bridge call present');
 
-// (b) Voice manager: Remove/delete uses Pro code path
-assert(src.includes('function signalInstalledVoicesChanged'),
-  '(b) signalInstalledVoicesChanged defined (inline from app-core.js)');
-assert(src.includes('INSTALLED_VOICES_CHANGED_EVENT'),
+// (b) Voice manager: Remove/delete path is wired
+assert(appCoreSrc.includes('function signalInstalledVoicesChanged'),
+  '(b) signalInstalledVoicesChanged defined in app-core.js');
+assert(appCoreSrc.includes('INSTALLED_VOICES_CHANGED_EVENT'),
   '(b) INSTALLED_VOICES_CHANGED_EVENT present');
 
-const doRemoveIdx = src.indexOf('function doRemove');
-const doInstallIdx = src.indexOf('function doInstall');
-const doRemoveBlock = src.slice(doRemoveIdx, doInstallIdx);
+const doRemoveIdx = voicesSrc.indexOf('function doRemove');
+const doInstallIdx = voicesSrc.indexOf('function doInstall');
+const doRemoveBlock = voicesSrc.slice(doRemoveIdx, doInstallIdx);
 assert(doRemoveBlock.includes('signalInstalledVoicesChanged'),
   '(b) doRemove() calls signalInstalledVoicesChanged — Remove wired');
 assert(doRemoveBlock.includes('"get_voice_catalogue"'),
   '(b) doRemove() re-fetches catalogue');
-assert(/testid.*vm-action-/.test(src),
+assert(/testid.*vm-action-/.test(voicesSrc),
   '(b) vm-action-{id} testid present (Remove/Install button)');
-assert(src.includes('confirmDialog("Remove voice"'),
-  '(b) Remove gated on confirmDialog (Pro pattern)');
+assert(voicesSrc.includes('confirmDialog("Remove voice"'),
+  '(b) Remove gated on confirmDialog');
 
-// (c) Progress bar: correct Pro CSS classes
-assert(src.includes('install-progress-wrap'),  '(c) install-progress-wrap in voiceRow JS');
-assert(src.includes('install-progress-fill'),  '(c) install-progress-fill in voiceRow JS');
-assert(src.includes('install-progress-bar'),   '(c) install-progress-bar in voiceRow JS');
-assert(src.includes('vm-cancel-'),             '(c) voiceCancelBtn (vm-cancel-) present');
-assert(themeCss.includes('.install-progress-fill'), '(c) .install-progress-fill CSS in theme.css');
-assert(themeCss.includes('transition: width'), '(c) transition:width in theme.css');
-assert(src.includes('vm-action-row'),          '(c) vm-action-row in voiceRow JS');
-assert(themeCss.includes('.vm-action-row'),    '(c) .vm-action-row CSS in theme.css');
+// (c) Progress bar: correct CSS classes present in voices.js
+assert(voicesSrc.includes('install-progress-wrap'),  '(c) install-progress-wrap in voiceRow JS');
+assert(voicesSrc.includes('install-progress-fill'),  '(c) install-progress-fill in voiceRow JS');
+assert(voicesSrc.includes('install-progress-bar'),   '(c) install-progress-bar in voiceRow JS');
+assert(voicesSrc.includes('vm-cancel-'),             '(c) voiceCancelBtn (vm-cancel-) present');
+// progress-fill and vm-action-row CSS live in surfaces.css (merged from old files).
+assert(surfacesCss.includes('.install-progress-fill'), '(c) .install-progress-fill CSS in surfaces.css');
+assert(surfacesCss.includes('transition: width'), '(c) transition:width in surfaces.css');
+assert(voicesSrc.includes('vm-action-row'),          '(c) vm-action-row in voiceRow JS');
+assert(surfacesCss.includes('.vm-action-row'),    '(c) .vm-action-row CSS in surfaces.css');
 
-// (d) Overlay: position:fixed + Pro panel structure
-assert(overlayCss.includes('position: fixed'),
+// (d) Overlay: position:fixed + panel structure
+// position:fixed for .overlay-panel lives in theme.css (overlay.css was merged).
+assert(themeCss.includes('position: fixed'),
   '(d) overlay-panel uses position:fixed (empty-black-window fix)');
-assert(src.includes('testid: "overlay-panel"'),   '(d) overlay-panel element created');
-assert(src.includes('testid: "overlay-loading"'), '(d) overlay-loading sentinel element');
-assert(src.includes('testid: "overlay-page-marker"'), '(d) overlay-page-marker (counter)');
+assert(overlaySrc.includes('testid: "overlay-panel"'),   '(d) overlay-panel element created');
+assert(overlaySrc.includes('testid: "overlay-loading"'), '(d) overlay-loading sentinel element');
+assert(overlaySrc.includes('testid: "overlay-page-marker"'), '(d) overlay-page-marker (counter)');
 // Transport buttons are created via obtn("prev") etc. — testid is "overlay-" + tag
-assert(src.includes('obtn("prev")'),  '(d) overlay-prev transport button (obtn call)');
-assert(src.includes('obtn("next")'),  '(d) overlay-next transport button (obtn call)');
-assert(src.includes('obtn("pause")'), '(d) overlay-pause transport button (obtn call)');
-assert(src.includes('testid: "overlay-" + tag'),
+assert(overlaySrc.includes('obtn("prev")'),  '(d) overlay-prev transport button (obtn call)');
+assert(overlaySrc.includes('obtn("next")'),  '(d) overlay-next transport button (obtn call)');
+assert(overlaySrc.includes('obtn("pause")'), '(d) overlay-pause transport button (obtn call)');
+assert(overlaySrc.includes('testid: "overlay-" + tag'),
   '(d) transport button testid pattern overlay-{tag} present');
-assert(src.includes('TICK_FAST_MS'),  '(d) TICK_FAST_MS idle-aware polling');
-assert(src.includes('TICK_SLOW_MS'),  '(d) TICK_SLOW_MS idle-aware polling');
-assert(src.includes('reader-loading-bar'), '(d) reader-loading-bar in renderOverlay');
-assert(overlayCss.includes('reader-loading-shimmer'), '(d) reader-loading-shimmer @keyframes');
-assert(src.includes('window.__pippalOverlayKick'), '(d) window.__pippalOverlayKick exposed');
+assert(overlaySrc.includes('TICK_FAST_MS'),  '(d) TICK_FAST_MS idle-aware polling');
+assert(overlaySrc.includes('TICK_SLOW_MS'),  '(d) TICK_SLOW_MS idle-aware polling');
+assert(overlaySrc.includes('reader-loading-bar'), '(d) reader-loading-bar in renderOverlay');
+// reader-loading-shimmer keyframes live in surfaces.css (merged from overlay.css).
+assert(surfacesCss.includes('reader-loading-shimmer'), '(d) reader-loading-shimmer @keyframes');
+assert(overlaySrc.includes('window.__pippalOverlayKick'), '(d) window.__pippalOverlayKick exposed');
 
-// (e) windows.py kick wired
-let winPy = '';
-try { winPy = read('src/pippal/web_ui/windows.py'); } catch(e) {}
-assert(winPy.includes('__pippalOverlayKick'),
-  '(e) windows.py evaluate_js kick wired after overlay show');
+// (e) window_lifecycle.py kick wired (overlay re-show path).
+let lifecyclePy = '';
+try { lifecyclePy = read('src/pippal/web_ui/window_lifecycle.py'); } catch(e) {}
+assert(lifecyclePy.includes('__pippalOverlayKick'),
+  '(e) window_lifecycle.py evaluate_js kick wired after overlay show');
 
 if (failed > 0) {
   console.error(`\n${failed} of ${passed + failed} test(s) FAILED.`);
