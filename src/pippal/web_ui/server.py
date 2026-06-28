@@ -19,6 +19,7 @@ can't reach arbitrary attributes.
 from __future__ import annotations
 
 import json
+import sys
 import threading
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -26,7 +27,25 @@ from typing import Any
 
 from .bridge import PipPalBridge
 
-WEBUI_DIR = Path(__file__).resolve().parents[3] / "webui"
+
+def _resolve_webui_dir() -> Path:
+    """Locate the static ``webui/`` directory.
+
+    In a source/editable checkout this is the repo root's ``webui/``
+    (``pippal/web_ui/server.py`` -> ``parents[3]``). In a frozen
+    PyInstaller onedir bundle the tree is shipped at
+    ``<sys._MEIPASS>/webui`` (see ``packaging/pippal.spec`` datas),
+    so prefer that location when frozen.
+    """
+    meipass = getattr(sys, "_MEIPASS", None)
+    if meipass:
+        frozen = Path(meipass) / "webui"
+        if (frozen / "index.html").exists():
+            return frozen
+    return Path(__file__).resolve().parents[3] / "webui"
+
+
+WEBUI_DIR = _resolve_webui_dir()
 
 
 def _public_methods(bridge: PipPalBridge) -> set[str]:
