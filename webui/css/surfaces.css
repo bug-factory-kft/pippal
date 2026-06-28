@@ -1,8 +1,8 @@
 /* surfaces.css — PipPal (free) web UI surface-specific styling.
  *
- * Derived from Pro's pro.css with the paid import surface
+ * Styles for the free web UI; the paid import surface
  * (.import-surface / .import-body / .import-footer / .import-preview-text)
- * block removed — that surface does not exist in the free edition.
+ * is not included — that surface does not exist in the free edition.
  *
  * Keep additive — never re-declare a core token or core component here. */
 

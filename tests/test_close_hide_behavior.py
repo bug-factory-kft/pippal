@@ -1,7 +1,7 @@
 """Regression tests for Behavior B: closing hide-to-tray surfaces hides
 the window instead of destroying it, keeping the app alive.
 
-Updated to match Pro's window_lifecycle.close() behavior (verbatim port):
+Updated to match the window_lifecycle.close() behavior:
 - settings, onboarding, voices, moods, import, queue, release, recent: HIDE
 - notices, overlay, and all other surfaces: DESTROY
   (overlay is always re-created on demand; notices is not frequently opened)
@@ -95,11 +95,10 @@ class TestCloseHidesSettingsSurface:
         fake_win.destroy.assert_not_called()
 
     def test_close_notices_calls_destroy_not_hide(self, monkeypatch):
-        """Pro behavior: close('notices') destroys the window (not a hide-surface).
+        """close('notices') destroys the window (not a hide-surface).
 
-        Updated from old free behavior (hide) to match Pro's window_lifecycle.close()
-        verbatim port — notices is not in the hide list; it is destroyed and
-        recreated on demand.
+        Updated from old behavior (hide) — notices is not in the hide list;
+        it is destroyed and recreated on demand.
         """
         mgr = _make_manager(monkeypatch)
         fake_win = mock.MagicMock()
@@ -111,13 +110,13 @@ class TestCloseHidesSettingsSurface:
         fake_win.hide.assert_not_called()
 
     def test_close_overlay_calls_destroy_not_hide(self, monkeypatch):
-        """Pro behavior: close('overlay') destroys the window (not a hide-surface).
+        """close('overlay') destroys the window (not a hide-surface).
 
-        Updated from old free behavior (hide) to match Pro's window_lifecycle.close()
-        verbatim port — overlay is not in the hide list for close().  The app
-        always keeps a hidden settings window alive (via run()), so destroying
-        the overlay does not kill the GUI loop.  The overlay is recreated (or
-        the pre-warmed hidden one is re-shown) on the next open() call.
+        Updated from old behavior (hide) — overlay is not in the hide list
+        for close().  The app always keeps a hidden settings window alive
+        (via run()), so destroying the overlay does not kill the GUI loop.
+        The overlay is recreated (or the pre-warmed hidden one is re-shown)
+        on the next open() call.
         """
         mgr = _make_manager(monkeypatch)
         fake_win = mock.MagicMock()
@@ -187,7 +186,7 @@ class TestSurfaceForWindow:
 
 
 # ---------------------------------------------------------------------------
-# 4. events.closing wired for settings in _make_window (Pro: settings only)
+# 4. events.closing wired for settings in _make_window (settings only)
 # ---------------------------------------------------------------------------
 
 

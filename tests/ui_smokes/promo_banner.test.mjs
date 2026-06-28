@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
- * Promo banner smoke test — structural guard for the "Unlock PipPal Pro"
- * promotional banner added to the top of the Settings view in settings.js.
+ * Promo banner smoke test — structural guard for the Settings promotional
+ * banner added to the top of the Settings view in settings.js.
  *
  * Run: node tests/ui_smokes/promo_banner.test.mjs
  *

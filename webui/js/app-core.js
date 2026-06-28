@@ -1,5 +1,5 @@
 /* app-core.js — shared singletons + helpers for PipPal's web-UI
- * module graph. Extracted VERBATIM from the original app.js IIFE header
+ * module graph. Refactored from the original app.js IIFE header
  * (the cross-cluster bootstrap + shared helpers). Behavior-preserving:
  * every feature module imports the SAME singleton instances these
  * exports provide, exactly as the monolith's closure shared them.
@@ -82,7 +82,7 @@ export function signalInstalledVoicesChanged() {
 }
 
 // Real modal confirm gate — the web analogue of Tk's
-// messagebox.askyesno (parity with the core frontend).
+// messagebox.askyesno (matching the core frontend behavior).
 var confirmModal = document.getElementById("confirm-modal");
 var confirmTitle = document.getElementById("confirm-title");
 var confirmBody = document.getElementById("confirm-body");

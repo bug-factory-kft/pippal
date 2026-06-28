@@ -1,5 +1,4 @@
-"""Regression tests for the 5 free-Pro parity fixes on branch
-feat/free-pro-parity-basics.
+"""Regression tests for the 5 basic behavior fixes.
 
 Each test targets one specific bug and verifies the fix in isolation
 without requiring pywebview, a real network, or the GUI loop.
@@ -456,15 +455,16 @@ class TestInstallDefaultVoiceAsync:
 
 
 # ---------------------------------------------------------------------------
-# Window lifecycle port: Pro's window_lifecycle.py ported verbatim to free
+# Window lifecycle: window_lifecycle.py
 # ---------------------------------------------------------------------------
 
 
 class TestWindowLifecyclePort:
-    """Verify Pro's window layer has been ported to free (window_lifecycle.py).
+    """Verify the window lifecycle layer is present (window_lifecycle.py).
 
-    These tests FAIL until the port lands.  They serve as the failing-test
-    oracle required by the test-first policy before the implementation.
+    These tests FAIL until the implementation lands.  They serve as the
+    failing-test oracle required by the test-first policy before the
+    implementation.
     """
 
     def test_window_lifecycle_module_exists(self) -> None:
@@ -473,25 +473,25 @@ class TestWindowLifecyclePort:
 
         mod = importlib.import_module("pippal.web_ui.window_lifecycle")
         assert mod is not None, (
-            "pippal.web_ui.window_lifecycle not importable -- Pro port not complete"
+            "pippal.web_ui.window_lifecycle not importable -- module not present"
         )
 
     def test_manager_has_raise_window(self) -> None:
-        """WebWindowManager must have raise_window() (Pro-only method)."""
+        """WebWindowManager must have raise_window()."""
         from pippal.web_ui.windows import WebWindowManager
 
         mgr = WebWindowManager()
         assert hasattr(mgr, "raise_window"), (
-            "WebWindowManager.raise_window not found -- Pro windows.py not ported"
+            "WebWindowManager.raise_window not found -- method not present"
         )
 
     def test_manager_has_explicit_close_flag(self) -> None:
-        """WebWindowManager must have _explicit_close (Pro shutdown-safety flag)."""
+        """WebWindowManager must have _explicit_close (shutdown-safety flag)."""
         from pippal.web_ui.windows import WebWindowManager
 
         mgr = WebWindowManager()
         assert hasattr(mgr, "_explicit_close"), (
-            "WebWindowManager._explicit_close not found -- Pro windows.py not ported"
+            "WebWindowManager._explicit_close not found -- attribute not present"
         )
 
     def test_window_lifecycle_has_surfaces_dict(self) -> None:
@@ -524,7 +524,7 @@ class TestRelaunchForeground:
         import pippal.web_ui.app_web as aw
 
         assert hasattr(aw, "_signal_running_instance_to_show"), (
-            "_signal_running_instance_to_show missing from app_web — Pro port not done"
+            "_signal_running_instance_to_show missing from app_web"
         )
 
     def test_foreground_running_window_win32_exists(self) -> None:
@@ -532,7 +532,7 @@ class TestRelaunchForeground:
         import pippal.web_ui.app_web as aw
 
         assert hasattr(aw, "_foreground_running_window_win32"), (
-            "_foreground_running_window_win32 missing from app_web — Pro port not done"
+            "_foreground_running_window_win32 missing from app_web"
         )
 
     def test_no_messagebox_in_already_running_branch(self) -> None:

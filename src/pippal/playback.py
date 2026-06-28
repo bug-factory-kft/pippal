@@ -49,18 +49,18 @@ if TYPE_CHECKING:  # pragma: no cover
 # goes through) emitted ZERO events.  So a real read under Trace produced no
 # genuine playback/synth event for any non-Kokoro engine.
 #
-# LEAK-SAFE BY CONSTRUCTION: core must NOT import or know about Pro's
-# diagnostics module (CORE-NO-PRO-LEAK).  Instead this emits a plain stdlib
-# ``logging`` record on a DEDICATED logger name with METADATA-ONLY structured
-# fields carried in ``extra`` — never the read text.  The log message body is
-# the empty string, so even Pro's redaction layer (which blanks legacy record
-# messages) has nothing to scrub.  Pro's diagnostics handler (when installed
-# on the root logger at trace/error) recognises this dedicated logger + the
-# ``diag_evt`` marker and surfaces it as a structured, non-``legacy`` event,
-# re-whitelisting every field through its own privacy guard.  When no Pro
-# handler is attached (the public core app, or diagnostics off) this is a
-# cheap no-op: the record propagates to a root logger with no diag handler and
-# is dropped.
+# LEAK-SAFE BY CONSTRUCTION: core must NOT import or depend on an optional
+# external diagnostics module.  Instead this emits a plain stdlib ``logging``
+# record on a DEDICATED logger name with METADATA-ONLY structured fields
+# carried in ``extra`` — never the read text.  The log message body is the
+# empty string, so even an optional redaction layer (which blanks legacy
+# record messages) has nothing to scrub.  An optional diagnostics handler
+# (when installed on the root logger at trace/error) recognises this dedicated
+# logger + the ``diag_evt`` marker and surfaces it as a structured,
+# non-``legacy`` event, re-whitelisting every field through its own privacy
+# guard.  When no optional handler is attached (the public core app, or
+# diagnostics off) this is a cheap no-op: the record propagates to a root
+# logger with no diag handler and is dropped.
 #
 # The fields are strictly metadata: chunk character COUNT (an int, never the
 # text), chunk index/total, and the engine NAME (an enum-like id such as

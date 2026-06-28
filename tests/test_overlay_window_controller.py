@@ -287,7 +287,7 @@ class TestWebWindowManagerHideGuard:
 
 
 class TestAppJsLoadingMessages:
-    """overlay.js must contain the rotating loading messages from Pro's overlay.js.
+    """overlay.js must contain the rotating loading messages.
     After ES6-module port (step 5), renderOverlay lives in overlay.js; app.js deleted."""
 
     @pytest.fixture
@@ -300,7 +300,7 @@ class TestAppJsLoadingMessages:
     def test_loading_messages_array_present(self, app_js: str) -> None:
         assert "LOADING_MESSAGES" in app_js, (
             "LOADING_MESSAGES array not found in webui/js/overlay.js -- "
-            "port it from Pro's overlay.js."
+            "port it into overlay.js."
         )
 
     def test_current_loading_message_function_present(self, app_js: str) -> None:

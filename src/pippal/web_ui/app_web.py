@@ -141,7 +141,7 @@ def build_tray_menu(
 ) -> tuple[pystray.Menu, dict[str, Any]]:
     """Compose the native pystray menu the web app runs in the tray.
 
-    Extracted verbatim from :func:`main` so the *exact same* menu and
+    Factored out of :func:`main` so the *exact same* menu and
     callables can be exercised head-less by the integration suite (a
     ``pystray.MenuItem`` is callable — ``item(icon)`` is precisely the
     dispatch a real tray click performs, minus the OS pixel rendering).
@@ -288,7 +288,7 @@ def main() -> None:
     windows.configure(base_url, bridge)
 
     # Wire the overlay window controller so state transitions open/hide the
-    # overlay window (mirrors Pro's app_web wiring). The callbacks run on
+    # overlay window so state transitions open/hide it. The callbacks run on
     # engine / playback / auto-hide-timer threads -- same context as the
     # other on_open_* callbacks -- and are deduplicated by the controller.
     overlay.set_window_callbacks(
@@ -385,7 +385,7 @@ class _NullRoot:
     *delayed* callback — running it inline would fire it immediately
     (this is exactly the ``auto_hide_ms`` regression). So a timed call
     schedules a real ``threading.Timer`` and exposes ``after_cancel``
-    for parity with Tk's cancellable ``after`` ids.
+    matching Tk's cancellable ``after`` ids.
     """
 
     def __init__(self) -> None:

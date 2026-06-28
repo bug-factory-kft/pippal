@@ -1,7 +1,7 @@
-/* notices.js — the open-source NOTICES viewer (notices_card.py parity).
+/* notices.js — the open-source NOTICES viewer (notices_card.py).
  *
- * Extracted from Pro's release.js (renderNotices + _mdToHtml helpers only).
- * renderRelease (uses Pro-only get_release_history) is NOT included here.
+ * Contains renderNotices + _mdToHtml helpers.
+ * renderRelease (which relies on a separate release-history layer) is NOT included here.
  * Shared singletons come from app-core.js. */
 "use strict";
 
@@ -156,7 +156,7 @@ function _mdToHtml(md) {
 }
 
 // ------------------------------------------------------------------
-// NOTICES viewer (notices_card.py _NoticesViewer parity).
+// NOTICES viewer (notices_card.py _NoticesViewer).
 // ------------------------------------------------------------------
 export function renderNotices() {
   return API.call("get_notices").then(function (text) {

@@ -1,7 +1,7 @@
 """Core diagnostics trace regression tests.
 
 Adapted from pippal-pro/tests/test_diagnostics_trace.py.
-Tests that use the Pro bridge are repointed to core's PipPalBridge + DiagSettingsBridgeMixin.
+Tests are wired to core's PipPalBridge + DiagSettingsBridgeMixin.
 """
 
 from __future__ import annotations

@@ -1,5 +1,5 @@
-/* voices.js — the VOICE MANAGER surface (voice_manager.py parity).
- * Extracted VERBATIM from app.js/main.js (vmState, renderVoiceManager,
+/* voices.js — the VOICE MANAGER surface (voice_manager.py).
+ * Refactored from app.js/main.js (vmState, renderVoiceManager,
  * voiceRow); behavior-preserving — same DOM, same data-testid values,
  * same bridge calls, same async install-progress UX.
  * Shared singletons/helpers come from app-core.js. */
@@ -17,7 +17,7 @@ import {
 } from "./app-core.js";
 
 // ------------------------------------------------------------------
-// VOICE MANAGER (voice_manager.py parity — extended Pro catalogue).
+// VOICE MANAGER (voice_manager.py).
 // ------------------------------------------------------------------
 var vmState = {
   all: [],

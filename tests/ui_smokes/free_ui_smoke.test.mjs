@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Free-parity smoke tests — regression guards for the three surface bugs
+ * Free-edition smoke tests — regression guards for the three surface bugs
  * that were fixed by porting overlay.js, voices.js, and app-core.js into
  * the free module graph.
  *
@@ -8,7 +8,7 @@
  * Bug 2: Download progress bar was wrong/stuck.
  * Bug 3: Karaoke overlay was an empty black window.
  *
- * Run: node tests/ui_smokes/pro_parity.test.mjs
+ * Run: node tests/ui_smokes/free_ui_smoke.test.mjs
  *
  * Reads the module-graph source files (voices.js, overlay.js, settings*.js,
  * app-core.js) instead of the old monolithic app.js.

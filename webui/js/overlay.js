@@ -1,6 +1,6 @@
 /* overlay.js — the reader OVERLAY karaoke panel (overlay.py /
- * overlay_paint.py parity) plus the shared closeWin() helper.
- * Extracted VERBATIM from app.js/main.js (renderOverlay, closeWin);
+ * overlay_paint.py) plus the shared closeWin() helper.
+ * Refactored from app.js/main.js (renderOverlay, closeWin);
  * behavior-preserving — same DOM, same data-testid values, same
  * setInterval(tick, 120) cadence, same .reader-loading "thinking"
  * block. Isolated as its own module so the event-driven loading-state
@@ -57,7 +57,7 @@ function escapeLoadingText(s) {
 }
 
 // ------------------------------------------------------------------
-// READER OVERLAY panel (overlay.py / overlay_paint.py parity — the
+// READER OVERLAY panel (overlay.py / overlay_paint.py — the
 // karaoke port is the shared core WebOverlay + this paint code,
 // identical to the public frontend so visuals can't drift).
 //

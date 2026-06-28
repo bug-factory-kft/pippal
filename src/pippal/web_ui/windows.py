@@ -1,6 +1,6 @@
 """pywebview window lifecycle for the PipPal web UI.
 
-Mirrors :mod:`pippal_pro.web_ui.windows` — one frameless dark pywebview
+Provides one frameless dark pywebview
 window per surface loading ``<base_url>/index.html?view=<surface>`` —
 and adds the reader overlay surface.  The reader overlay is a normal
 opaque frameless window, built the same way as the Settings window

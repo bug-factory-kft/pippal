@@ -1,10 +1,11 @@
-"""Tests for Pro's overlay open/hide lifecycle behavior (post window-lifecycle port).
+"""Tests for the overlay open/hide lifecycle behavior.
 
-The old test file tested free's custom race-guard mechanism
+The old test file tested a custom race-guard mechanism
 (_overlay_show_pending / _overlay_hide_deferred / _make_overlay_shown_guard).
-That mechanism was FREE's patch around a race; Pro's code does NOT have it.
+That mechanism was a custom patch around a race; the current code does NOT
+have it.
 
-After the verbatim port of Pro's window_lifecycle.py, the behavior is:
+The window_lifecycle behavior is:
 - hide("overlay") calls win.hide() IMMEDIATELY — no deferred mechanism.
 - open("overlay") calls existing.show() + existing.restore() +
   mgr._show_no_activate(existing) + evaluate_js(__pippalOverlayKick).
@@ -12,8 +13,8 @@ After the verbatim port of Pro's window_lifecycle.py, the behavior is:
   preserved in window_lifecycle.hide).
 - The manager has NO _overlay_show_pending or _overlay_hide_deferred attrs.
 
-These tests replace the old race-guard tests to document and guard Pro's
-actual behavior.
+These tests replace the old race-guard tests to document and guard the
+actual overlay lifecycle behavior.
 
 Run with: python -m pytest tests/test_karaoke_overlay_race.py -v
 """
@@ -38,19 +39,19 @@ def _make_manager() -> any:
 
 
 # ---------------------------------------------------------------------------
-# Pro's overlay lifecycle behavior
+# Overlay lifecycle behavior
 # ---------------------------------------------------------------------------
 
 
-class TestProOverlayLifecycle:
-    """Pro's window_lifecycle has no race-guard; hide is always immediate."""
+class TestOverlayLifecycle:
+    """The window_lifecycle has no race-guard; hide is always immediate."""
 
     def test_manager_has_no_race_guard_attrs(self) -> None:
-        """Pro's WebWindowManager must NOT have old free-patch race attrs.
+        """WebWindowManager must NOT have the old custom race-guard attrs.
 
-        _overlay_show_pending and _overlay_hide_deferred were free's custom
-        patch, not in Pro's code.  Verify they are absent so we know the
-        port is clean.
+        _overlay_show_pending and _overlay_hide_deferred were part of a custom
+        patch.  Verify they are absent so we know the current implementation
+        is clean.
         """
         mgr = _make_manager()
         assert not hasattr(mgr, "_overlay_show_pending"), (
@@ -66,7 +67,7 @@ class TestProOverlayLifecycle:
     def test_hide_overlay_calls_win_hide_immediately(self) -> None:
         """hide('overlay') must call win.hide() immediately (no deferred path).
 
-        Pro's hide() is a direct call — no pending-flag check, no deferral.
+        hide() is a direct call — no pending-flag check, no deferral.
         """
         mgr = _make_manager()
         fake_win = MagicMock()
@@ -79,7 +80,7 @@ class TestProOverlayLifecycle:
     def test_hide_overlay_never_destroys_on_failed_hide(self) -> None:
         """BUG2 / #302 guard: failed overlay hide must NEVER destroy the window.
 
-        This guard is preserved in Pro's window_lifecycle.hide.  The overlay
+        This guard is preserved in window_lifecycle.hide.  The overlay
         is (often) the last live window; destroying it kills the GUI loop.
         """
         mgr = _make_manager()
@@ -124,7 +125,7 @@ class TestProOverlayLifecycle:
     def test_open_existing_overlay_calls_show_and_restore(self) -> None:
         """open('overlay') on an existing window calls show() + restore().
 
-        Pro's open() re-shows the existing window in-place: show() to make it
+        open() re-shows the existing window in-place: show() to make it
         visible, restore() to un-minimise, then _show_no_activate() via Win32
         so the overlay stays no-activate (no foreground steal).
         """
@@ -180,5 +181,5 @@ class TestProOverlayLifecycle:
 
 
 # Alias for backwards-compatibility with any external CI that references this
-# class name. The tests now verify Pro's behavior instead of the old race guard.
-TestKaraokeOverlayRace = TestProOverlayLifecycle
+# class name. The tests now verify the current behavior instead of the old race guard.
+TestKaraokeOverlayRace = TestOverlayLifecycle

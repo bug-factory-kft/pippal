@@ -1,5 +1,5 @@
-/* onboarding.js — the ONBOARDING / first-run surface (activation_panel.py
- * parity). Extracted VERBATIM from app.js/main.js (renderOnboarding);
+/* onboarding.js — the ONBOARDING / first-run surface (activation_panel.py).
+ * Refactored from app.js/main.js (renderOnboarding);
  * behavior-preserving — same DOM, same data-testid values, same bridge
  * calls, same async install-progress path. Isolated as its own
  * module so the onboarding follow-up touches only this file. Shared
@@ -12,7 +12,7 @@ import { U, API, view, footer, fail } from "./app-core.js";
 import { closeWin } from "./overlay.js";
 
 // ------------------------------------------------------------------
-// ONBOARDING / first-run (activation_panel.py parity).
+// ONBOARDING / first-run (activation_panel.py).
 // ------------------------------------------------------------------
 export function renderOnboarding() {
   return Promise.all([
