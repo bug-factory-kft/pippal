@@ -181,7 +181,9 @@ def main() -> None:
         on_open_settings=lambda: windows.open("settings"),
         on_open_voice_manager=lambda: windows.open("voices"),
         on_open_notices=lambda: windows.open("notices"),
-        on_close_window=windows.close_active,
+        on_close_window=lambda: windows.close(
+            windows.surface_for_window(bridge._active_webview_window()) or "settings"
+        ),
         on_hotkey_change=bind_hotkeys,
         on_engine_change=engine.reset_backend,
     )

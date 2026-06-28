@@ -164,7 +164,15 @@
     ]);
   }
 
+  // Voice-refresh teardown: previous renderSettings listener cleanup.
+  // Ported from Pro settings.js (~line 39) to prevent duplicate listeners.
+  var teardownSettingsVoiceRefresh = null;
+
   function renderSettings() {
+    if (teardownSettingsVoiceRefresh) {
+      teardownSettingsVoiceRefresh();
+      teardownSettingsVoiceRefresh = null;
+    }
     return Promise.all([
       API.call("get_config"),
       API.call("get_defaults"),
@@ -218,6 +226,42 @@
         ]),
         engineHint,
       ]);
+
+      // Live-refresh the voice list when voices are installed in the Voices
+      // window. Ported from Pro settings.js ~lines 296-327.
+      var piperVoiceRefreshToken = 0;
+      function refreshPiperVoices() {
+        var token = ++piperVoiceRefreshToken;
+        return API.call("get_installed_voices")
+          .then(function (freshVoices) {
+            if (token !== piperVoiceRefreshToken) return;
+            voices = Array.isArray(freshVoices) ? freshVoices : [];
+            manageBtn.textContent = voices.length ? "Manage…" : "Install voices…";
+            var newOpts = voices.length
+              ? voices.map(function (v) { return { value: v, label: v }; })
+              : [{ value: "", label: "(no voice installed)" }];
+            var currentVal = voiceSel.value;
+            while (voiceSel.firstChild) voiceSel.removeChild(voiceSel.firstChild);
+            newOpts.forEach(function (opt) {
+              var o = document.createElement("option");
+              o.value = opt.value; o.textContent = opt.label;
+              if (opt.value === currentVal) o.selected = true;
+              voiceSel.appendChild(o);
+            });
+            voiceSel.disabled = !voices.length;
+          })
+          .catch(function () {});
+      }
+      function _onInstalledVoicesChanged() { refreshPiperVoices(); }
+      function _onInstalledVoicesStorage(e) {
+        if (e.key === INSTALLED_VOICES_CHANGED_KEY) refreshPiperVoices();
+      }
+      window.addEventListener(INSTALLED_VOICES_CHANGED_EVENT, _onInstalledVoicesChanged);
+      window.addEventListener("storage", _onInstalledVoicesStorage);
+      teardownSettingsVoiceRefresh = function () {
+        window.removeEventListener(INSTALLED_VOICES_CHANGED_EVENT, _onInstalledVoicesChanged);
+        window.removeEventListener("storage", _onInstalledVoicesStorage);
+      };
 
       // ---- Speech card ----
       var speed = U.sliderRow("Speed", "settings-speed", 0.6, 1.7, 0.01,
