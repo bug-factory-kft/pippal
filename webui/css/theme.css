@@ -382,3 +382,51 @@ body.overlay-mode #root {
   justify-content: flex-end;
   gap: 8px;
 }
+
+/* ---- Voice download progress bar (Pro pro.css 211-278 verbatim) ----
+ * Ported into free's theme.css so no pro.css link is needed.
+ * Colours use CSS variables from above so no hex values here. */
+
+.install-progress-wrap {
+  margin-top: 0;
+  margin-bottom: 8px;
+  padding: 10px 12px;
+  border-radius: var(--radius-card, 10px);
+  background: var(--bg-card, #1a1d28);
+  border: 1px solid var(--border-lt, #2f3447);
+}
+.install-progress-bar {
+  height: 10px;
+  border-radius: 5px;
+  background: var(--bg-input, #1f2230);
+  overflow: hidden;
+}
+.install-progress-fill {
+  height: 100%;
+  width: 0%;
+  background: var(--accent, #6dd9b8);
+  border-radius: 5px;
+  transition: width 0.25s linear;
+}
+.install-progress-label {
+  margin-top: 6px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text, #e8ebfa);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ---- Voice manager action row (#252 UX placement) ---- */
+.vm-action-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+}
+.vm-action-row button {
+  font-size: 13px;
+  flex-shrink: 0;
+  white-space: nowrap;
+}

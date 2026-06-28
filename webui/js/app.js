@@ -536,9 +536,43 @@
   }
 
   // ------------------------------------------------------------------
-  // VOICE MANAGER (voice_manager.py parity).
+  // VOICE MANAGER (voice_manager.py parity — extended Pro catalogue).
   // ------------------------------------------------------------------
-  var vmState = { all: [], lang: "__all__", quality: "Any", status: "Any", q: "" };
+  // Inline helper — signals other windows (e.g. Settings) that the
+  // installed voice list has changed.  Ported verbatim from Pro's
+  // app-core.js signalInstalledVoicesChanged (lines 64–84).
+  var INSTALLED_VOICES_CHANGED_EVENT = "pippal-installed-voices-changed";
+  var INSTALLED_VOICES_CHANGED_KEY = "pippal:installed-voices-changed";
+  function signalInstalledVoicesChanged() {
+    var stamp = String(Date.now());
+    try {
+      localStorage.setItem(INSTALLED_VOICES_CHANGED_KEY, stamp);
+    } catch (e) {
+      if (window.console && console.warn) {
+        console.warn("Could not notify other windows about voice changes.", e);
+      }
+    }
+    try {
+      window.dispatchEvent(
+        new CustomEvent(INSTALLED_VOICES_CHANGED_EVENT, {
+          detail: { stamp: stamp },
+        }),
+      );
+    } catch (e) {
+      if (window.console && console.warn) {
+        console.warn("Could not notify this window about voice changes.", e);
+      }
+    }
+  }
+
+  // Pro voices.js 22–339 verbatim (IIFE-adapted: no import/export lines).
+  var vmState = {
+    all: [],
+    lang: "__all__",
+    quality: "Any",
+    status: "Any",
+    q: "",
+  };
 
   function renderVoiceManager() {
     return API.call("get_voice_catalogue").then(function (cat) {
@@ -548,28 +582,43 @@
       footer.classList.add("hidden");
 
       var langOpts = [{ value: "__all__", label: "All languages" }].concat(
-        cat.languages.map(function (l) { return { value: l.code, label: l.name }; }));
+        cat.languages.map(function (l) {
+          return { value: l.code, label: l.name };
+        }),
+      );
       var langSel = U.select("vm-language", langOpts, vmState.lang);
-      var qualSel = U.select("vm-quality",
+      var qualSel = U.select(
+        "vm-quality",
         ["Any", "high", "medium", "low", "x_low"].map(function (q) {
           return { value: q, label: q };
-        }), vmState.quality);
-      var statSel = U.select("vm-status",
+        }),
+        vmState.quality,
+      );
+      var statSel = U.select(
+        "vm-status",
         ["Any", "Installed", "Not installed"].map(function (s) {
           return { value: s, label: s };
-        }), vmState.status);
-      var searchInp = U.el("input", { type: "text", testid: "vm-search",
-        placeholder: "" });
+        }),
+        vmState.status,
+      );
+      var searchInp = U.el("input", {
+        type: "text",
+        testid: "vm-search",
+        placeholder: "",
+      });
       searchInp.classList.add("grow");
 
       langSel.addEventListener("change", function () {
-        vmState.lang = langSel.value; refreshRows();
+        vmState.lang = langSel.value;
+        refreshRows();
       });
       qualSel.addEventListener("change", function () {
-        vmState.quality = qualSel.value; refreshRows();
+        vmState.quality = qualSel.value;
+        refreshRows();
       });
       statSel.addEventListener("change", function () {
-        vmState.status = statSel.value; refreshRows();
+        vmState.status = statSel.value;
+        refreshRows();
       });
       var debounce;
       searchInp.addEventListener("input", function () {
@@ -582,16 +631,32 @@
 
       var filterBar = U.el("div", { class: "card" }, [
         U.el("div", { class: "row" }, [
-          U.el("label", { class: "field-label", text: "Language",
-            style: "flex:0 0 80px;width:80px" }), langSel,
-          U.el("label", { class: "field-label", text: "Quality",
-            style: "flex:0 0 64px;width:64px" }), qualSel,
-          U.el("label", { class: "field-label", text: "Status",
-            style: "flex:0 0 56px;width:56px" }), statSel,
+          U.el("label", {
+            class: "field-label",
+            text: "Language",
+            style: "flex:0 0 80px;width:80px",
+          }),
+          langSel,
+          U.el("label", {
+            class: "field-label",
+            text: "Quality",
+            style: "flex:0 0 64px;width:64px",
+          }),
+          qualSel,
+          U.el("label", {
+            class: "field-label",
+            text: "Status",
+            style: "flex:0 0 56px;width:56px",
+          }),
+          statSel,
         ]),
         U.el("div", { class: "row" }, [
-          U.el("label", { class: "field-label", text: "Search",
-            style: "flex:0 0 80px;width:80px" }), searchInp,
+          U.el("label", {
+            class: "field-label",
+            text: "Search",
+            style: "flex:0 0 80px;width:80px",
+          }),
+          searchInp,
         ]),
       ]);
       view.appendChild(filterBar);
@@ -603,7 +668,8 @@
         var shown = 0;
         vmState.all.forEach(function (v) {
           if (vmState.lang !== "__all__" && v.lang !== vmState.lang) return;
-          if (vmState.quality !== "Any" && v.quality !== vmState.quality) return;
+          if (vmState.quality !== "Any" && v.quality !== vmState.quality)
+            return;
           if (vmState.status === "Installed" && !v.installed) return;
           if (vmState.status === "Not installed" && v.installed) return;
           if (vmState.q) {
@@ -614,8 +680,13 @@
           shown++;
         });
         if (shown === 0) {
-          rowsWrap.appendChild(U.el("div", { class: "empty", testid: "vm-empty",
-            text: "No voices match. Clear the filter to see everything." }));
+          rowsWrap.appendChild(
+            U.el("div", {
+              class: "empty",
+              testid: "vm-empty",
+              text: "No voices match. Clear the filter to see everything.",
+            }),
+          );
         }
       }
       refreshRows();
@@ -623,114 +694,194 @@
   }
 
   function voiceRow(v, onChanged) {
-    var statusEl = U.el("span", { class: "vstatus" + (v.installed ? " ok" : ""),
+    var statusEl = U.el("span", {
+      class: "vstatus" + (v.installed ? " ok" : ""),
       testid: "vm-status-" + v.id,
-      text: v.installed ? "✓ installed" : "" });
+      text: v.installed ? "✓ installed" : "",
+    });
     var btn = U.el("button", {
       testid: "vm-action-" + v.id,
       text: v.installed ? "Remove" : "Install",
       class: v.installed ? "danger" : "",
     });
-    // Bug 2: progress bar elements (hidden until an async install starts).
-    var progressFill = U.el("div", { style: "height:100%;background:var(--accent,#5b6cff);width:0%;transition:width 0.3s" });
-    var progressWrap = U.el("div", {
+    // Progress bar + cancel button for install (issue #252)
+    var voiceCancelBtn = U.el("button", {
+      testid: "vm-cancel-" + v.id,
+      text: "Cancel",
+      class: "btn-secondary",
+    });
+    voiceCancelBtn.style.display = "none";
+    var voiceProgressWrap = U.el("div", {
+      class: "install-progress-wrap",
       testid: "vm-progress-" + v.id,
-      style: "display:none;height:4px;background:var(--bg-input,#1e2030);border-radius:2px;overflow:hidden;flex:1;margin:0 8px"
-    }, [progressFill]);
+    });
+    voiceProgressWrap.style.display = "none";
+    var voiceProgressFill = U.el("div", {
+      class: "install-progress-fill",
+      testid: "vm-progress-fill-" + v.id,
+    });
+    var voiceProgressBar = U.el("div", { class: "install-progress-bar" });
+    voiceProgressBar.appendChild(voiceProgressFill);
+    var voiceProgressLabel = U.el("div", {
+      class: "install-progress-label",
+      testid: "vm-progress-label-" + v.id,
+      text: "",
+    });
+    voiceProgressWrap.appendChild(voiceProgressBar);
+    voiceProgressWrap.appendChild(voiceProgressLabel);
 
-    function _stopInstallUI() {
-      progressWrap.style.display = "none";
-      progressFill.style.width = "0%";
+    var _installTaskId = null;
+
+    function _stopInstallUI(clearStatus) {
+      voiceCancelBtn.style.display = "none";
+      voiceCancelBtn.disabled = false;
+      voiceProgressWrap.style.display = "none";
+      btn.disabled = false;
+      if (clearStatus) {
+        statusEl.textContent = "";
+        statusEl.className = "vstatus";
+      }
+      _installTaskId = null;
     }
+
+    function _pollVoiceInstall(taskId) {
+      API.call("voice_install_status", taskId)
+        .then(function (s) {
+          var pct = s.pct || 0;
+          voiceProgressFill.style.width = Math.min(100, pct) + "%";
+          var lbl = s.status || "";
+          if (pct > 0 && pct < 100 && lbl.indexOf("%") < 0) {
+            lbl += "  (" + Math.round(pct) + "%)";
+          }
+          voiceProgressLabel.textContent = lbl;
+          // statusEl (.vstatus span) is intentionally NOT updated here to prevent
+          // the duplicate-indicator layout break (#252); it is cleared in doInstall
+          // and only restored on completion/failure via _stopInstallUI.
+          if (s.done) {
+            if (s.cancelled || s.error) {
+              _stopInstallUI(true);
+              if (s.cancelled) toast("Voice install cancelled.");
+              else { statusEl.textContent = "failed"; statusEl.className = "vstatus err"; toast("Voice install failed: " + (s.error || "unknown error"), true); }
+              return;
+            }
+            _stopInstallUI(false);
+            // Re-fetch catalogue to sync vmState.all, then update THIS row
+            // in-place.  Do NOT call onChanged()/refreshRows() here — that
+            // wipes rowsWrap.innerHTML and destroys any other in-progress
+            // voice row (including its poll loop and progress DOM), which is
+            // the concurrent-download bug (fix/voice-download-per-row).
+            return API.call("get_voice_catalogue").then(function (cat) {
+              vmState.all = cat.voices;
+              // Sync local voice object so btn click-handler sees installed=true.
+              var updated = cat.voices.find(function (cv) { return cv.id === v.id; });
+              if (updated) { Object.assign(v, updated); } else { v.installed = true; }
+              // Update only this row's UI elements in-place.
+              statusEl.textContent = "✓ installed";
+              statusEl.className = "vstatus ok";
+              btn.textContent = "Remove";
+              btn.className = "danger";
+              signalInstalledVoicesChanged();
+              toast("Voice installed — open Settings to make it your active voice.");
+            });
+          }
+          setTimeout(function () { _pollVoiceInstall(taskId); }, 350);
+        })
+        .catch(function () {
+          setTimeout(function () { _pollVoiceInstall(taskId); }, 800);
+        });
+    }
+
     function doRemove() {
       btn.disabled = true;
       statusEl.textContent = "removing…";
-      API.call("remove_voice", v.id).then(function () {
-        onChanged();
-      }).catch(function (e) { btn.disabled = false; fail(e); });
-    }
-    function _finishInstall() {
-      _stopInstallUI();
-      // Bug 3 fix: re-fetch catalogue after install so installed voice is
-      // immediately selectable (stale vmState.all caused it to stay greyed-out).
-      return API.call("get_voice_catalogue").then(function (cat) {
-        vmState.all = cat.voices;
-        onChanged();
-      });
+      API.call("remove_voice", v.id)
+        .then(function () {
+          // Re-fetch the catalogue so vmState.all reflects the removal
+          // before refreshRows() re-renders (mirrors the doInstall fix).
+          return API.call("get_voice_catalogue").then(function (cat) {
+            vmState.all = cat.voices;
+            signalInstalledVoicesChanged();
+            onChanged();
+          });
+        })
+        .catch(function (e) {
+          btn.disabled = false;
+          fail(e);
+        });
     }
     function doInstall() {
       btn.disabled = true;
+      // Clear legacy status text — progress-wrap is the single indicator (#252)
       statusEl.textContent = "";
       statusEl.className = "vstatus";
-      progressWrap.style.display = "";
-      progressFill.style.width = "0%";
-      // Bug 2: try async install first; fall back to sync if no task_id.
-      API.call("install_voice_async", v.id).then(function (r) {
-        if (!r || !r.task_id) {
-          // Back-compat: old bridge without async support.
-          return API.call("install_voice", v.id).then(function () {
-            return _finishInstall();
-          });
-        }
-        var taskId = r.task_id;
-        var pollTimer = null;
-        function poll() {
-          API.call("voice_install_status", taskId).then(function (s) {
-            if (s.pct != null) progressFill.style.width = Math.round(s.pct) + "%";
-            if (s.status) statusEl.textContent = s.status;
-            if (s.done) {
-              clearTimeout(pollTimer);
-              if (s.error && !s.cancelled) {
-                _stopInstallUI();
-                statusEl.textContent = "failed";
-                statusEl.className = "vstatus err";
-                btn.disabled = false;
-                fail(s.error);
-              } else if (s.cancelled) {
-                _stopInstallUI();
-                statusEl.textContent = "cancelled";
-                btn.disabled = false;
-              } else {
-                _finishInstall();
-              }
-            } else {
-              pollTimer = setTimeout(poll, 300);
-            }
-          }).catch(function (e) {
-            clearTimeout(pollTimer);
-            _stopInstallUI();
-            btn.disabled = false;
-            fail(e);
-          });
-        }
-        poll();
-      }).catch(function (e) {
-        _stopInstallUI();
-        statusEl.textContent = "failed";
-        statusEl.className = "vstatus err";
-        btn.disabled = false;
-        fail(e);
-      });
+      voiceCancelBtn.style.display = "";
+      voiceProgressWrap.style.display = "";
+      voiceProgressFill.style.width = "0%";
+      // Use install_voice_async if available, fall back to sync install_voice
+      API.call("install_voice_async", v.id)
+        .then(function (r) {
+          if (!r || !r.task_id) {
+            // Fallback: old sync path (no progress)
+            return API.call("install_voice", v.id).then(function (result) {
+              _stopInstallUI(false);
+              return API.call("get_voice_catalogue").then(function (cat) {
+                vmState.all = cat.voices;
+                signalInstalledVoicesChanged();
+                onChanged();
+                toast(
+                  "Voice installed" +
+                    (result && result.installed
+                      ? " — open Settings to make it your active voice."
+                      : "."),
+                );
+              });
+            });
+          }
+          _installTaskId = r.task_id;
+          _pollVoiceInstall(r.task_id);
+        })
+        .catch(function (e) {
+          _stopInstallUI(false);
+          statusEl.textContent = "failed";
+          statusEl.className = "vstatus err";
+          fail(e);
+        });
     }
+    voiceCancelBtn.addEventListener("click", function () {
+      if (!_installTaskId) return;
+      voiceCancelBtn.disabled = true;
+      voiceProgressLabel.textContent = "Cancelling…";
+      API.call("cancel_voice_install", _installTaskId).catch(function () {});
+    });
     btn.addEventListener("click", function () {
       if (v.installed) {
-        // Tk parity: messagebox.askyesno("Remove voice", "Remove
-        // {label}?") — the deletion must NOT run until the user accepts
-        // the modal. Cancel leaves the voice on disk untouched.
-        confirmDialog("Remove voice", "Remove " + v.label + "?")
-          .then(function (ok) { if (ok) doRemove(); });
+        confirmDialog("Remove voice", "Remove " + v.label + "?").then(
+          function (ok) {
+            if (ok) doRemove();
+          },
+        );
       } else {
         doInstall();
       }
     });
+    // Progress is placed immediately above the action button row so it is
+    // visually anchored to the buttons (#252 UX placement).
     return U.el("div", { class: "card" }, [
       U.el("div", { class: "vrow" }, [
         U.el("div", { class: "vmeta" }, [
           U.el("div", { class: "vname", text: v.label }),
-          U.el("div", { class: "vsub", text: "id: " + v.id + "   ·   " + v.quality }),
+          U.el("div", {
+            class: "vsub",
+            text: "id: " + v.id + "   ·   " + v.quality,
+          }),
         ]),
-        progressWrap, statusEl, btn,
+        statusEl,
       ]),
+      voiceProgressWrap,
+      U.el("div", {
+        class: "vm-action-row",
+        testid: "vm-row-actions-" + v.id,
+      }, [btn, voiceCancelBtn]),
     ]);
   }
 
@@ -748,9 +899,17 @@
     });
   }
 
-  // Playful loading messages (#6) -- whimsical, fake-technical lines
-  // ported from Pro's overlay.js. They rotate while the overlay is in
-  // the loading/thinking state.
+  // ------------------------------------------------------------------
+  // Pro overlay.js 27–545 verbatim (IIFE-adapted: no import/export lines;
+  // closeWin kept below as free's existing version).
+  // ------------------------------------------------------------------
+  // Playful loading messages (#6) — whimsical, fake-technical lines in
+  // the charming STYLE of classic life-sim loading screens, tailored to
+  // a text-to-speech READER. ORIGINAL strings (no trademarked phrases).
+  // The UI language is English (cf. "PipPal Pro", "Loading…"), so these
+  // are English. They rotate while the overlay is in the loading/thinking
+  // state; see the rotation logic in tick() below.
+  // ------------------------------------------------------------------
   var LOADING_MESSAGES = [
     "Warming up the vocal cords…",
     "Reticulating syllables…",
@@ -767,7 +926,9 @@
     "Calibrating the storyteller…",
     "Gathering the right intonation…",
   ];
+  // Each rotating message is shown for this long before advancing.
   var LOADING_ROTATE_MS = 1800;
+  // Random starting offset so different reads don't always begin the same.
   var loadingMsgBase = Math.floor(Math.random() * LOADING_MESSAGES.length);
   function currentLoadingMessage() {
     var step = Math.floor(Date.now() / LOADING_ROTATE_MS);
@@ -775,8 +936,47 @@
     return LOADING_MESSAGES[idx];
   }
 
+  // #6 — AI shortcuts (summary / explain / translate / define) set the
+  // backend ``action_label`` to a bare one-word action id (e.g. "summary",
+  // or "translate · en"). Showing that raw id as the loader text is ugly and
+  // breaks the playful rotating-message experience. Instead, for AI actions
+  // we lead with a friendly action-specific line and then keep ROTATING the
+  // whimsical loading set, so the loader stays varied and charming rather
+  // than freezing on the bare word. The action id is the part before any
+  // " · …" suffix (translate carries the target language after the dot).
+  // Pro-only AI path, inert in free (action_label is never a bare AI id here).
+  var AI_ACTION_LINES = {
+    summary: "Distilling the key points…",
+    explain: "Gathering an explanation…",
+    translate: "Switching languages…",
+    define: "Looking it up…",
+  };
+  function aiActionId(label) {
+    if (!label) return null;
+    var id = String(label).split("·")[0].trim().toLowerCase();
+    return Object.prototype.hasOwnProperty.call(AI_ACTION_LINES, id) ? id : null;
+  }
+  // Loader text for an AI action: alternate the friendly action line with the
+  // playful rotating set so the loader stays lively for the whole synth.
+  function aiLoadingMessage(actionId) {
+    var step = Math.floor(Date.now() / LOADING_ROTATE_MS);
+    // Even steps show the action-specific friendly line; odd steps show a
+    // rotating whimsical message — never the bare action id.
+    if (step % 2 === 0) return AI_ACTION_LINES[actionId];
+    return currentLoadingMessage();
+  }
+  function escapeLoadingText(s) {
+    return String(s).replace(/[<>&"]/g, function (c) {
+      return { "<": "&lt;", ">": "&gt;", "&": "&amp;", '"': "&quot;" }[c];
+    });
+  }
+
   // ------------------------------------------------------------------
   // READER OVERLAY panel (overlay.py / overlay_paint.py parity).
+  // Window architecture: NORMAL opaque frameless window. Drag uses the
+  // .pywebview-drag-region mechanism on the brand area. Transport buttons
+  // and close button are siblings (NOT descendants) so clicks never
+  // trigger a window drag.
   // ------------------------------------------------------------------
   function renderOverlay() {
     document.body.classList.add("overlay-mode");
@@ -786,64 +986,127 @@
     view.innerHTML = "";
 
     var dot = U.el("span", { class: "overlay-dot", testid: "overlay-dot" });
-    var label = U.el("span", { class: "ohlabel", testid: "overlay-label",
-      text: "PipPal" });
-    // overlay-drag-region + pywebview-drag-region: native WebView2 drag on
-    // the brand area. Transport/close buttons are siblings so clicks reach
-    // them without starting a drag (D3).
-    var dragRegion = U.el("span",
-      { class: "overlay-drag-region pywebview-drag-region" },
-      [U.el("img", { src: "assets/pippal_icon.png" }), dot, label]);
-    var closeBtn = U.el("button", { class: "overlay-close",
-      testid: "overlay-close", html: "&#x2715;" });
-    var head = U.el("div", { class: "overlay-head" }, [
-      dragRegion, closeBtn,
-    ]);
-    var pausedChip = U.el("div", { class: "overlay-paused hidden",
-      testid: "overlay-paused", text: "paused" });
+    var label = U.el("span", {
+      class: "ohlabel",
+      testid: "overlay-label",
+      text: "PipPal Pro",
+    });
+    // Brand area: icon + dot + label wrapped in a drag region.
+    var dragRegion = U.el(
+      "span",
+      { class: "overlay-drag-region pywebview-drag-region", testid: "overlay-drag-region" },
+      [U.el("img", { src: "assets/pippal_icon.png" }), dot, label],
+    );
+    var closeBtn = U.el("button", {
+      class: "overlay-close",
+      testid: "overlay-close",
+    });
     var bodyEl = U.el("div", { class: "overlay-body", testid: "overlay-text" });
+    // #281.6 loading indicator: shown while synthesis is in progress,
+    // hidden during reading/idle/done.
+    var loadingEl = U.el("div", {
+      class: "overlay-loading hidden",
+      testid: "overlay-loading",
+    });
     var barFill = U.el("div");
-    var counter = U.el("span", { class: "overlay-counter",
-      testid: "overlay-counter", text: "" });
-    function obtn(tag, glyph) {
-      var b = U.el("button", { class: "obtn", testid: "overlay-" + tag,
-        html: glyph });
+    var counter = U.el("span", {
+      class: "overlay-counter",
+      testid: "overlay-page-marker",
+      text: "",
+    });
+    var legacyCounterMarker = U.el("span", {
+      testid: "overlay-counter",
+      "aria-hidden": "true",
+      style: "display:none",
+      text: "",
+    });
+    // SVG icon helpers — all icons share the same 16×16 viewBox.
+    function svgIcon(pathD, extraAttrs) {
+      var ns = "http://www.w3.org/2000/svg";
+      var svg = document.createElementNS(ns, "svg");
+      svg.setAttribute("viewBox", "0 0 16 16");
+      svg.setAttribute("width", "14");
+      svg.setAttribute("height", "14");
+      svg.setAttribute("aria-hidden", "true");
+      svg.setAttribute("fill", "currentColor");
+      if (extraAttrs) {
+        Object.keys(extraAttrs).forEach(function (k) {
+          svg.setAttribute(k, extraAttrs[k]);
+        });
+      }
+      var path = document.createElementNS(ns, "path");
+      path.setAttribute("d", pathD);
+      svg.appendChild(path);
+      return svg;
+    }
+    var ICONS = {
+      prev:   "M2 3h1.5v10H2V3zm10.5 1.06L6.06 8l6.44 3.94V4.06z",
+      replay: "M8 2.5a5.5 5.5 0 1 0 5.5 5.5h-1.5A4 4 0 1 1 8 4v1.5l3-2.25L8 1V2.5z",
+      pause:  "M4 3h2.5v10H4V3zm5.5 0H12v10H9.5V3z",
+      play:   "M4 3.06v9.88L13 8 4 3.06z",
+      next:   "M12.5 3H14v10h-1.5V3zM3.5 4.06v7.88L9.94 8 3.5 4.06z",
+      close:  "M3.22 3.22a.75.75 0 0 1 1.06 0L8 6.94l3.72-3.72a.75.75 0 1 1 1.06 1.06L9.06 8l3.72 3.72a.75.75 0 1 1-1.06 1.06L8 9.06l-3.72 3.72a.75.75 0 0 1-1.06-1.06L6.94 8 3.22 4.28a.75.75 0 0 1 0-1.06z",
+    };
+    closeBtn.appendChild(svgIcon(ICONS.close));
+    function obtn(tag) {
+      var b = U.el("button", { class: "obtn", testid: "overlay-" + tag });
+      b.appendChild(svgIcon(ICONS[tag]));
       b.addEventListener("click", function () {
         API.call("overlay_action", tag).catch(fail);
       });
       return b;
     }
+    var prevBtn   = obtn("prev");
+    var replayBtn = obtn("replay");
+    var pauseBtn  = obtn("pause");
+    var nextBtn   = obtn("next");
+    var head = U.el("div", { class: "overlay-head" }, [
+      dragRegion, prevBtn, replayBtn, pauseBtn, nextBtn, closeBtn,
+    ]);
     var progress = U.el("div", { class: "overlay-progress" }, [
-      obtn("prev", "&#x23ee;"), obtn("replay", "&#x27f2;"),
-      obtn("next", "&#x23ed;"),
       U.el("div", { class: "overlay-bar" }, [barFill]),
       counter,
+      legacyCounterMarker,
     ]);
+    // Track whether an AI action is in flight so close/X + Escape can
+    // fire cancel_ai_action() before dismissing. Pro-only AI path, inert
+    // in free (action_label is never a bare AI id here).
+    var _aiActionInFlight = false;
+
     closeBtn.addEventListener("click", function () {
+      if (_aiActionInFlight) { API.call("cancel_ai_action").catch(fail); }
       API.call("overlay_action", "close").catch(fail);
     });
-    var panel = U.el("div", { class: "overlay-panel", testid: "overlay-panel" }, [
-      head, pausedChip, bodyEl, progress,
-    ]);
+
+    if (typeof document.addEventListener === "function") {
+      document.addEventListener("keydown", function (e) {
+        if (e.key === "Escape" && !panel.classList.contains("hidden")) {
+          if (_aiActionInFlight) { API.call("cancel_ai_action").catch(fail); }
+          API.call("overlay_action", "close").catch(fail);
+        }
+      }, true);
+    }
+    var panel = U.el(
+      "div",
+      { class: "overlay-panel", testid: "overlay-panel" },
+      [head, loadingEl, bodyEl, progress],
+    );
     view.appendChild(panel);
 
-    // Native window drag is handled by the .pywebview-drag-region on the
-    // overlay-drag-region span above (D3).
-
-    // Karaoke colour stops + fade — a faithful port of overlay_paint.py's
+    // Karaoke colour stops + fade — faithful port of overlay_paint.py
     // _word_appearance (PAST/FUTURE/PEAK RGB, smoothstep lerp, FADE_SECS).
     var PAST = [0x60, 0x65, 0x7a], FUTURE = [0xc8, 0xcd, 0xe0],
-        PEAK = [0xff, 0xff, 0xff], FADE_SECS = 0.50;
-    function smoothstep(t) { t = t < 0 ? 0 : (t > 1 ? 1 : t); return t * t * (3 - 2 * t); }
+        PEAK = [0xff, 0xff, 0xff], FADE_SECS = 0.5;
+    function smoothstep(t) {
+      t = t < 0 ? 0 : t > 1 ? 1 : t;
+      return t * t * (3 - 2 * t);
+    }
     function lerpRGB(a, b, t) {
       t = smoothstep(t);
-      return "rgb(" + Math.round(a[0] + (b[0] - a[0]) * t) + ","
-                    + Math.round(a[1] + (b[1] - a[1]) * t) + ","
-                    + Math.round(a[2] + (b[2] - a[2]) * t) + ")";
+      return "rgb(" + Math.round(a[0]+(b[0]-a[0])*t) + ","
+                    + Math.round(a[1]+(b[1]-a[1])*t) + ","
+                    + Math.round(a[2]+(b[2]-a[2])*t) + ")";
     }
-    // Mirrors overlay_paint._word_appearance: the cursor word is pure
-    // PEAK + bold; words before bleed PAST->PEAK over FADE_SECS after
-    // their te; words ahead bleed FUTURE->PEAK over FADE_SECS before ts.
     function wordAppearance(i, cur, elapsed, w) {
       if (i === cur) return { color: "rgb(255,255,255)", cur: true };
       if (elapsed >= w.te) {
@@ -854,78 +1117,137 @@
       return { color: lerpRGB(FUTURE, PEAK, k2), cur: false };
     }
 
-    // Poll the engine snapshot and re-render the karaoke line; this is
-    // the web analogue of overlay.py's tk.after animation loop. The
-    // panel is hidden when the engine state is `idle` (the web analogue
-    // of the Tk overlay's win.withdraw()) — so the backend's real
-    // auto-hide timer (WebOverlay._on_hide_timeout) visibly hides it.
     var lastText = null;
-    function setVisible(vis) {
-      panel.classList.toggle("hidden", !vis);
+    // Idle-aware polling: fast (~120ms) while active, slow (~2s) while idle.
+    var _tickInterval = null;
+    var _tickFast = null;
+    var TICK_FAST_MS = 120;
+    var TICK_SLOW_MS = 2000;
+
+    function _setTickRate(fast) {
+      if (_tickFast === fast) return;
+      if (_tickInterval !== null) { clearInterval(_tickInterval); }
+      _tickInterval = setInterval(tick, fast ? TICK_FAST_MS : TICK_SLOW_MS);
+      _tickFast = fast;
     }
+
+    function setVisible(vis) { panel.classList.toggle("hidden", !vis); }
     function tick() {
-      API.call("engine_state").then(function (s) {
-        var st = s.overlay_state || "idle";
-        // Expose state for E2E + so auto-hide is observable from the DOM.
-        document.body.setAttribute("data-overlay-state", st);
-        // Karaoke offset: positive = highlight waits, negative = leads
-        // (parity with the Tk karaoke_offset_ms config; the Tk overlay
-        // applies it as the chunk start offset_s, here we shift elapsed).
-        var koff = parseInt(s.karaoke_offset_ms != null
-          ? s.karaoke_offset_ms : 0, 10) / 1000.0;
-        if (st === "idle") {
-          // Auto-hidden (or never started): panel disappears like
-          // win.withdraw(). Nothing else to paint.
-          setVisible(false);
-          bodyEl.textContent = "";
-          barFill.style.width = "0%";
-          lastText = null;
-          return;
-        }
-        setVisible(true);
-        dot.className = "overlay-dot" + (st === "reading" ? " reading"
-          : st === "thinking" ? " thinking" : "");
-        label.textContent = (s.brand_name || "PipPal")
-          + (s.action_label ? "  ·  " + s.action_label : "");
-        pausedChip.classList.toggle("hidden", !(s.is_paused && st === "reading"));
-        if (st === "reading" && s.chunk_text) {
-          if (s.chunk_text !== lastText) {
-            lastText = s.chunk_text;
-            bodyEl.innerHTML = "";
-            s.words.forEach(function (w, i) {
-              bodyEl.appendChild(U.el("span", {
-                class: "w", "data-i": String(i), text: w.word + " ",
-              }));
-            });
+      API.call("engine_state")
+        .then(function (s) {
+          var st = s.overlay_state || "idle";
+          document.body.setAttribute("data-overlay-state", st);
+          var koff = parseInt(
+            s.karaoke_offset_ms != null ? s.karaoke_offset_ms : 0, 10,
+          ) / 1000.0;
+          if (st === "idle") {
+            setVisible(false);
+            loadingEl.classList.add("hidden");
+            bodyEl.textContent = "";
+            barFill.style.width = "0%";
+            lastText = null;
+            _aiActionInFlight = false;
+            _setTickRate(false);
+            return;
           }
-          var elapsed = (s.elapsed || 0) - koff, cur = -1;
-          s.words.forEach(function (w, i) { if (elapsed >= w.ts) cur = i; });
-          var spans = bodyEl.querySelectorAll(".w");
-          for (var i = 0; i < spans.length; i++) {
-            var ap = wordAppearance(i, cur, elapsed, s.words[i]);
-            var sp = spans[i];
-            sp.style.color = ap.color;
-            sp.className = "w" + (ap.cur ? " cur" : "");
+          _setTickRate(true);
+          setVisible(true);
+          dot.className = "overlay-dot" + (st === "reading" ? " reading"
+            : st === "thinking" || st === "loading" ? " thinking" : "");
+          label.textContent = (s.brand_name || "PipPal Pro")
+            + (s.action_label ? "  ·  " + s.action_label : "");
+          var isReading = st === "reading";
+          var isNavigable = isReading || st === "thinking" || st === "loading";
+          var prevDis = s.chunk_idx <= 0 || !isNavigable;
+          var nextDis = s.chunk_total <= 1
+            || s.chunk_idx >= s.chunk_total - 1 || !isNavigable;
+          var pauseDis = !isReading;
+          prevBtn.disabled = prevDis;
+          prevBtn.classList.toggle("disabled", prevDis);
+          nextBtn.disabled = nextDis;
+          nextBtn.classList.toggle("disabled", nextDis);
+          pauseBtn.disabled = pauseDis;
+          pauseBtn.classList.toggle("disabled", pauseDis);
+          replayBtn.disabled = !isReading;
+          replayBtn.classList.toggle("disabled", !isReading);
+          var pbSvgPath = pauseBtn.querySelector("svg path");
+          var pbIconKey = s.is_paused ? "play" : "pause";
+          if (pbSvgPath) pbSvgPath.setAttribute("d", ICONS[pbIconKey]);
+          pauseBtn.setAttribute("data-icon", pbIconKey);
+          if (st === "reading" && s.chunk_text) {
+            _aiActionInFlight = false;
+            loadingEl.classList.add("hidden");
+            bodyEl.classList.remove("dimmed");
+            if (s.chunk_text !== lastText) {
+              lastText = s.chunk_text;
+              bodyEl.innerHTML = "";
+              s.words.forEach(function (w, i) {
+                bodyEl.appendChild(U.el("span", {
+                  class: "w", "data-i": String(i), text: w.word + " ",
+                }));
+              });
+            }
+            var elapsed = (s.elapsed || 0) - koff, cur = -1;
+            s.words.forEach(function (w, i) { if (elapsed >= w.ts) cur = i; });
+            var spans = bodyEl.querySelectorAll(".w");
+            for (var i = 0; i < spans.length; i++) {
+              var ap = wordAppearance(i, cur, elapsed, s.words[i]);
+              var sp = spans[i];
+              sp.style.color = ap.color;
+              sp.className = "w" + (ap.cur ? " cur" : "");
+            }
+            var curSpan = bodyEl.querySelector(".cur");
+            if (curSpan) { curSpan.scrollIntoView({ block: "nearest", inline: "nearest" }); }
+            var prog = s.chunk_duration > 0
+              ? Math.max(0, Math.min(1, (s.elapsed || 0) / s.chunk_duration)) : 0;
+            barFill.style.width = (prog * 100).toFixed(1) + "%";
+            counter.textContent = s.chunk_total > 1
+              ? s.chunk_idx + 1 + "/" + s.chunk_total : "";
+            legacyCounterMarker.textContent = counter.textContent;
+          } else if (st === "thinking" || st === "loading") {
+            // Pro-only AI path, inert in free (action_label never an AI id).
+            var aiId = aiActionId(s.action_label);
+            _aiActionInFlight = !!aiId;
+            var explicit = !aiId && s.action_label && s.action_label !== "Loading…"
+              ? s.action_label : null;
+            var loadingLabel = aiId ? aiLoadingMessage(aiId)
+              : explicit || currentLoadingMessage();
+            lastText = null;
+            loadingEl.classList.add("hidden");
+            bodyEl.classList.remove("dimmed");
+            var labelSpan = bodyEl.querySelector(".reader-loading-label");
+            if (!labelSpan) {
+              bodyEl.innerHTML =
+                '<div class="reader-loading">' +
+                '<div class="reader-loading-bar"></div>' +
+                '<span class="reader-loading-label" aria-live="polite">' +
+                escapeLoadingText(loadingLabel) +
+                "</span>" +
+                "</div>";
+            } else if (labelSpan.textContent !== loadingLabel) {
+              labelSpan.textContent = loadingLabel;
+            }
+            barFill.style.width = "0%";
+          } else if (st === "done" && s.overlay_message) {
+            lastText = null;
+            loadingEl.classList.add("hidden");
+            bodyEl.textContent = s.overlay_message;
+          } else {
+            lastText = null;
+            loadingEl.classList.add("hidden");
+            bodyEl.textContent = "";
+            barFill.style.width = "0%";
           }
-          var prog = s.chunk_duration > 0
-            ? Math.max(0, Math.min(1, (s.elapsed || 0) / s.chunk_duration)) : 0;
-          barFill.style.width = (prog * 100).toFixed(1) + "%";
-          counter.textContent = s.chunk_total > 1
-            ? (s.chunk_idx + 1) + "/" + s.chunk_total : "";
-        } else if (st === "thinking") {
-          bodyEl.textContent = s.action_label || currentLoadingMessage();
-          barFill.style.width = "0%";
-        } else if (st === "done" && s.overlay_message) {
-          bodyEl.textContent = s.overlay_message;
-        } else {
-          bodyEl.textContent = "";
-          barFill.style.width = "0%";
-          lastText = null;
-        }
-      }).catch(function () {});
+        })
+        .catch(function () {});
     }
+    // A2 — overlay kick: expose a guarded global so windows.py can call
+    //   evaluate_js("window.__pippalOverlayKick && window.__pippalOverlayKick()")
+    // immediately after show(). Forces fast tick without waiting for 2 s idle.
+    window.__pippalOverlayKick = function () { _setTickRate(true); tick(); };
+
+    _setTickRate(false);
     tick();
-    setInterval(tick, 120);
     return Promise.resolve();
   }
 

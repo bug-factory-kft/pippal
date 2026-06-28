@@ -210,6 +210,16 @@ class WebWindowManager:
                                 existing.show()
                         except Exception:
                             existing.show()
+                        # A2 overlay kick: force immediate tick after show
+                        # (Pro window_lifecycle.py ~lines 358-361 parity).
+                        # Best-effort: evaluate_js no-ops if window not ready.
+                        try:
+                            existing.evaluate_js(
+                                "window.__pippalOverlayKick"
+                                " && window.__pippalOverlayKick()"
+                            )
+                        except Exception:
+                            pass
                     return
                 except Exception:
                     # Reset race guard if open() failed — no shown will fire.
