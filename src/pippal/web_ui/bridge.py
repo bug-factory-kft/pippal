@@ -580,6 +580,26 @@ class PipPalBridge(DiagSettingsBridgeMixin):
             self._on_close_window()
         return {"ok": True}
 
+    def _active_webview_window(self) -> Any:
+        """Return the active pywebview window, or ``None``.
+
+        Uses ``webview.active_window()`` to resolve which window the user
+        is actually interacting with.  Imported lazily so the bridge
+        stays importable in headless/CI environments.
+        Mirrors Pro bridge.py ~lines 174-204.
+        """
+        try:
+            import webview  # type: ignore[import-untyped]
+        except Exception:
+            return None
+        try:
+            win = webview.active_window()
+            if win is not None:
+                return win
+        except Exception:
+            pass
+        return None
+
     def open_url(self, url: str) -> dict[str, Any]:
         webbrowser.open(str(url))
         return {"ok": True}

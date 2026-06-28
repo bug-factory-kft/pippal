@@ -139,6 +139,25 @@ class WebWindowManager:
 
         win.events.closed += _closed
 
+        # Intercept the native window X button for hide-to-tray surfaces.
+        # Returning False from the ``closing`` handler cancels the native
+        # destroy so the window is merely hidden and the GUI loop stays alive.
+        # Mirrors Pro window_lifecycle.py make_window() lines 196-210.
+        # The overlay is excluded: it is frameless (no OS chrome / X button).
+        _HIDE_ON_CLOSE = ("settings", "onboarding", "voices", "notices")
+        if surface in _HIDE_ON_CLOSE:
+            def _closing(w: Any = win) -> bool:
+                try:
+                    w.hide()
+                except Exception:
+                    pass
+                return False  # cancel the native close / destroy
+
+            try:
+                win.events.closing += _closing
+            except Exception:
+                pass
+
         # Apply DWM rounded corners on frameless windows once shown (H4).
         def _on_shown() -> None:
             try:
@@ -356,6 +375,48 @@ class WebWindowManager:
                 target.destroy()
             except Exception:
                 pass
+
+    def close(self, surface: str) -> None:
+        """Close a specific surface window by name. Thread-safe.
+
+        For frequently-used surfaces (``settings``, ``onboarding``,
+        ``voices``, ``notices``, ``overlay``) this HIDES the window
+        instead of destroying it so the tray app keeps running and can
+        re-open the window on demand.  All other surfaces are destroyed.
+
+        This is the preferred target for ``on_close_window`` wiring — it
+        closes *that* surface's window, not the last-opened window as the
+        old ``close_active()`` heuristic did.  Mirrors Pro's
+        ``window_lifecycle.close()`` (~lines 449-491).
+        """
+        with self._lock:
+            win = self._windows.get(surface)
+        if win is None:
+            return
+        _HIDE_SURFACES = ("settings", "onboarding", "voices", "notices", "overlay")
+        if surface in _HIDE_SURFACES:
+            try:
+                win.hide()
+            except Exception:
+                pass
+        else:
+            try:
+                win.destroy()
+            except Exception:
+                pass
+
+    def surface_for_window(self, win: Any) -> str | None:
+        """Return the surface name for a given pywebview window object, or None.
+
+        Used by ``on_close_window`` wiring to identify which surface the
+        active window belongs to before calling ``close(surface)``.
+        Mirrors Pro's ``window_lifecycle.surface_for_window()``.
+        """
+        with self._lock:
+            for surface, w in self._windows.items():
+                if w is win:
+                    return surface
+        return None
 
     def shutdown(self) -> None:
         with self._lock:
