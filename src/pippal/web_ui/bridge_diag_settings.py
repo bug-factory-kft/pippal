@@ -1,8 +1,8 @@
 """PipPal core — diagnostics settings bridge mixin.
 
 Settings half only (level, open folder, clear logs, crash-prompt stubs).
-Upload pipeline stays in Pro. Pro's bridge inherits this and overrides
-``get_diag_state`` to merge upload state.
+Core owns log generation; upload is an optional extension that can
+override ``get_diag_state`` to merge additional state on top.
 
 Requires ``self.config`` (dict with ``diag_log_level``). ``_active_webview_window``
 is a no-op stub; real host must override it.
@@ -71,8 +71,8 @@ class DiagSettingsBridgeMixin:
     def get_diag_state(self) -> dict[str, Any]:
         """Return diagnostics state for the Settings UI (level, counts, folder).
 
-        Cooperative: Pro subclasses call ``super().get_diag_state()`` and
-        merge upload fields on top.
+        Cooperative: extensions can call ``super().get_diag_state()`` and
+        merge additional fields on top.
         """
         from ..diagnostics import DIAG_DIR, DIAG_LEVELS, list_log_files
 
@@ -180,9 +180,7 @@ class DiagSettingsBridgeMixin:
 
         Uses ``webview.active_window()`` when pywebview is available (real
         desktop app). Falls back to None in headless / served / CI mode
-        where pywebview is not installed.  Pro overrides this method with
-        the same logic (MRO-safe: calling ``super()._active_webview_window()``
-        from Pro's override is a no-op).
+        where pywebview is not installed.
         """
         try:
             import webview  # type: ignore[import-untyped]

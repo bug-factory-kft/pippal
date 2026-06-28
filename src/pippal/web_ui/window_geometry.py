@@ -5,8 +5,8 @@ as explicit arguments and touch no ``WebWindowManager`` instance state.
 ``windows.py`` imports this module LAZILY (at call-time, not at module
 top level) so that ``import pippal`` remains headless-safe (H3).
 
-Behaviour: #247 (screen-centre fallback), #280 (overlay bottom-centre
-anchor), B3 (off-screen clamp check).
+Behaviour: screen-centre fallback, overlay bottom-centre anchor,
+off-screen clamp check.
 """
 
 from __future__ import annotations
@@ -88,7 +88,7 @@ def overlay_position(spec: dict[str, Any]) -> dict[str, int] | None:
 
     Places the overlay horizontally centred, 40 px above the bottom of
     the primary screen.  Returns None when headless / no screen available
-    (e.g. CI).  (#280)
+    (e.g. CI).
     """
     try:
         screen = webview.screens[0]
