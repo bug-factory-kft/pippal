@@ -417,7 +417,7 @@ class TestInstallDefaultVoiceAsync:
                           return_value="x.onnx"):
             result = bridge.install_default_voice_async()
         assert result.get("ok") is True
-        assert "task_id" in result and result["task_id"]
+        assert result.get("task_id")
 
     def test_not_unknown_method(self):
         """install_default_voice_async must NOT return __error__: unknown method."""
