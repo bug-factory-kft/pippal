@@ -65,6 +65,105 @@
   function speedToLengthScale(speed) { return Math.round((1.0 / speed) * 1000) / 1000; }
   function lengthScaleToSpeed(ls) { return ls ? Math.round((1.0 / ls) * 100) / 100 : 1.0; }
 
+
+  // ------------------------------------------------------------------
+  // Diagnostics LOGGING card (settings_cards.py / Pro buildDiagCard parity,
+  // MINUS the Pro-only upload half). All controls are backed by the core
+  // diagnostics bridge merged in #113: get_diag_state / set_diag_level /
+  // open_diag_folder / delete_diag_logs. There is deliberately NO "Send to
+  // creator" upload control here -- that feature (send_diag_logs, the upload
+  // progress bar, the URL/token fields) lives only in Pro.
+  // ------------------------------------------------------------------
+  function buildDiagCard(state) {
+    state = state || {};
+
+    // 1. Log-level select: Off / Errors only / Full trace -> set_diag_level.
+    var levelSel = U.select("settings-diag-level", [
+      { value: "off", label: "Off" },
+      { value: "error", label: "Errors only" },
+      { value: "trace", label: "Full trace" },
+    ], state.level || "off");
+    levelSel.classList.add("grow");
+
+    // 2. Descriptive / privacy text -- no upload / "send to AI" / "send to
+    // creator" sentences (Pro-only).
+    var noticeEl = U.el("div", {
+      class: "card-hint",
+      testid: "settings-diag-notice",
+      html:
+        "Diagnostics logs help the creator fix bugs. "
+        + "<strong>Your reading text is never logged</strong> — only "
+        + "technical metadata (sizes, formats, timings, and error types). "
+        + "Logs stay on your computer. "
+        + "Off keeps logging disabled; Errors only records failures; "
+        + "Full trace records detailed step-by-step events for harder bugs.",
+    });
+
+    // 3. Status line: log count · KB · folder path -> get_diag_state.
+    function statusText(s) {
+      var kb = Math.round((s.total_bytes || 0) / 1024);
+      return (s.log_count || 0) + " log file" + (s.log_count === 1 ? "" : "s")
+        + "  ·  " + kb + " KB"
+        + "  ·  " + (s.folder || "local PipPal folder");
+    }
+    var statusEl = U.el("div", { class: "card-hint",
+      testid: "settings-diag-status", text: statusText(state) });
+
+    function refreshStatus() {
+      API.call("get_diag_state").then(function (s) {
+        statusEl.textContent = statusText(s);
+        levelSel.value = s.level || "off";
+      }).catch(function () {});
+    }
+
+    // 4. Buttons: Open log folder + Delete logs (danger).
+    var openBtn = U.el("button", { testid: "settings-diag-open",
+      text: "Open log folder" });
+    var deleteBtn = U.el("button", { class: "danger",
+      testid: "settings-diag-delete", text: "Delete logs" });
+
+    levelSel.addEventListener("change", function () {
+      var lvl = levelSel.value;
+      API.call("set_diag_level", lvl).then(function (r) {
+        if (r && r.ok) {
+          toast("Diagnostics level set to “" + lvl + "”.");
+          refreshStatus();
+        } else {
+          fail(new Error(r && r.error ? r.error : "Failed to set level."));
+        }
+      }).catch(fail);
+    });
+
+    openBtn.addEventListener("click", function () {
+      API.call("open_diag_folder").then(function (r) {
+        if (r && !r.handled && state.folder) toast("Log folder: " + state.folder);
+      }).catch(fail);
+    });
+
+    deleteBtn.addEventListener("click", function () {
+      confirmDialog("Delete diagnostics logs",
+        "Delete all diagnostics logs? This cannot be undone.").then(function (ok) {
+        if (!ok) return;
+        API.call("delete_diag_logs").then(function (r) {
+          if (r && r.ok) {
+            toast("Deleted " + (r.removed || 0) + " log file"
+              + (r.removed === 1 ? "" : "s") + ".");
+          } else {
+            fail(new Error(r && r.error ? r.error : "Delete failed."));
+          }
+          refreshStatus();
+        }).catch(fail);
+      });
+    });
+
+    return U.card("Diagnostics", [
+      U.fieldRow("Log level", levelSel),
+      noticeEl,
+      statusEl,
+      U.el("div", { class: "row", style: "margin-top:8px" }, [openBtn, deleteBtn]),
+    ]);
+  }
+
   function renderSettings() {
     return Promise.all([
       API.call("get_config"),
@@ -74,9 +173,10 @@
       API.call("get_hotkey_actions"),
       API.call("context_menu_status"),
       API.call("about_info"),
+      API.call("get_diag_state"),
     ]).then(function (res) {
       var cfg = res[0], defs = res[1], engines = res[2], voices = res[3];
-      var hotkeys = res[4], ctxStatus = res[5], about = res[6];
+      var hotkeys = res[4], ctxStatus = res[5], about = res[6], diag = res[7];
       settingsState.config = cfg;
       settingsState.defaults = defs;
       settingsState.controls = {};
@@ -227,6 +327,7 @@
       view.appendChild(hotkeysCard);
       view.appendChild(panelCard);
       view.appendChild(intCard);
+      view.appendChild(buildDiagCard(diag));
       view.appendChild(noticesCard);
       view.appendChild(aboutCard);
     });
