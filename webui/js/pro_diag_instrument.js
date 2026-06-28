@@ -1,4 +1,4 @@
-/* pro_diag_instrument.js — Pro-owned frontend diagnostics instrumentation.
+/* pro_diag_instrument.js — Frontend diagnostics instrumentation.
  *
  * This file MUST be loaded AFTER api.js.  It wraps window.PipPalAPI.call
  * so that every bridge invocation fires a fire-and-forget diag_js breadcrumb
@@ -7,7 +7,7 @@
  *
  * Design constraints:
  *   - api.js is byte-identical to the public core and MUST NOT be modified.
- *     All Pro-specific instrumentation lives here.
+ *     All diagnostics instrumentation lives here.
  *   - The wrapper is transparent: it returns the EXACT same Promise that the
  *     original PipPalAPI.call returned; calling semantics are unchanged.
  *   - Guard: when method === "diag_js" the wrapper is skipped entirely to

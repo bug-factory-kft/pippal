@@ -1,4 +1,4 @@
-/* app-core.js — shared singletons + helpers for PipPal Pro's web-UI
+/* app-core.js — shared singletons + helpers for PipPal's web-UI
  * module graph. Extracted VERBATIM from the original app.js IIFE header
  * (the cross-cluster bootstrap + shared helpers). Behavior-preserving:
  * every feature module imports the SAME singleton instances these
@@ -29,8 +29,6 @@ export var settingsState = {
   config: {},
   defaults: {},
   controls: {},
-  ai: {},
-  kokoro: null,
 };
 
 var params = new URLSearchParams(location.search);
@@ -121,25 +119,3 @@ document
     });
   });
 
-// Global JS error capture — these are permanent improvements so that JS
-// errors and unhandled rejections are visible in the diagnostics trace.
-// (Previously there was NO global error handler, so JS exceptions were
-// invisible to the trace.)  Both handlers reuse the fire-and-forget
-// diagJs helper from api.js so they never interfere with real calls.
-(function () {
-  var _diag = window.__pippalDiagJs;
-  if (typeof _diag !== "function") return;
-
-  window.addEventListener("unhandledrejection", function (e) {
-    try {
-      _diag("unhandledrejection", null, false, String((e && e.reason) || ""));
-    } catch (err) { /* swallow */ }
-  });
-
-  window.onerror = function (msg, src, line) {
-    try {
-      _diag("error", null, false, (String(msg || "")) + "@" + String(line || ""));
-    } catch (err) { /* swallow */ }
-    return false; // do not suppress default browser handling
-  };
-}());
