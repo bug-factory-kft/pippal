@@ -204,14 +204,18 @@ def _start_reading_session(page: Page, app_url: str, step=None) -> None:
 # Settings
 # ---------------------------------------------------------------------------
 
-def test_settings_renders_seven_cards(page: Page, app_url: str, step):
+def test_settings_renders_eight_cards(page: Page, app_url: str, step):
     _goto(page, app_url, "settings", step)
     titles = page.locator(".card-title")
-    expect(titles).to_have_count(7)
-    step.check("7 settings cards rendered (.card-title == 7)")
+    expect(titles).to_have_count(8)
+    step.check("8 settings cards rendered (.card-title == 8)")
     expect(page.get_by_test_id("settings-engine")).to_be_visible()
     expect(page.get_by_test_id("settings-save")).to_be_visible()
     step.check("engine combo + Save button visible")
+    # The promo banner appears at the top of the Settings view (above the
+    # 8 cards); it uses testid settings-promo and is NOT a card-title node.
+    expect(page.get_by_test_id("settings-promo")).to_be_visible()
+    step.check("settings-promo banner visible (above card rows)")
 
 
 def test_settings_edit_persists_to_backend(page: Page, app_url: str, backend, step):
@@ -1012,18 +1016,20 @@ def test_overlay_transport_buttons_reach_engine_during_playback(
             f"Replay reached the engine (token {tok_before} -> {tok_after})"
         )
 
-        # prev / next are real bridge calls; the engine must stay
-        # consistent (no queue corruption, still healthy) after them.
-        step("click overlay prev then next")
-        page.get_by_test_id("overlay-prev").click()
-        page.get_by_test_id("overlay-next").click()
+        # prev/next: for the single-chunk onboarding clip, these are disabled
+        # (chunk_idx=0, chunk_total=1 => prevDis=True, nextDis=True in overlay.js).
+        # Clicking a disabled HTML button fires no event; assert the disabled
+        # state (correct behaviour), then verify the engine stayed healthy.
+        step("verify prev/next disabled (single-chunk read) and engine consistent")
+        expect(page.get_by_test_id("overlay-prev")).to_be_disabled()
+        expect(page.get_by_test_id("overlay-next")).to_be_disabled()
         page.wait_for_timeout(150)
         assert engine.queue_length() == 0
-        # Overlay is still in a real reading session driven by the engine.
         ostate = backend["overlay"].snapshot()["overlay_state"]
         assert ostate in ("reading", "thinking", "done")
         step.check(
-            f"engine stayed consistent (queue empty, overlay_state={ostate!r})"
+            f"engine stayed consistent (queue empty, overlay_state={ostate!r}); "
+            "prev/next correctly disabled for a single-chunk read"
         )
     finally:
         engine.stop()
@@ -1091,11 +1097,20 @@ def test_notices_window_loads_real_text(page: Page, app_url: str, backend, step)
     _goto(page, app_url, "notices", step)
     body = page.get_by_test_id("notices-body")
     expect(body).to_be_visible()
-    expected = backend["bridge"].get_notices()
-    assert body.inner_text().strip()[:40] == expected.strip()[:40]
+    expected_raw = backend["bridge"].get_notices()
+    # The notices surface now renders Markdown to HTML (notices.js _mdToHtml).
+    # inner_text() returns the rendered text so heading markers ("# ") are
+    # stripped. Strip leading "#..." from the raw text before comparing.
+    import re as _re
+    expected_text = _re.sub(r"^#+\s*", "", expected_raw.strip())
+    rendered = body.inner_text().strip()
+    assert rendered[:40] == expected_text[:40], (
+        f"notices body mismatch: rendered {rendered[:40]!r} != "
+        f"expected {expected_text[:40]!r}"
+    )
     step.check(
-        "notices body matches the real bridge.get_notices() resolver output "
-        f"(prefix {expected.strip()[:40]!r})"
+        "notices body matches get_notices() rendered content "
+        f"(prefix {expected_text[:40]!r})"
     )
 
 
