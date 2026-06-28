@@ -1,6 +1,11 @@
 """Regression tests for Behavior B: closing hide-to-tray surfaces hides
 the window instead of destroying it, keeping the app alive.
 
+Updated to match Pro's window_lifecycle.close() behavior (verbatim port):
+- settings, onboarding, voices, moods, import, queue, release, recent: HIDE
+- notices, overlay, and all other surfaces: DESTROY
+  (overlay is always re-created on demand; notices is not frequently opened)
+
 These tests are headless/unit — no real WebView2 or Win32 required.
 """
 
@@ -40,9 +45,11 @@ def _make_manager(monkeypatch):
     """Return a fresh WebWindowManager with webview stubbed out."""
     fake_wv = _stub_webview()
     monkeypatch.setitem(sys.modules, "webview", fake_wv)
-    # Clear cached module so windows.py picks up the stub
+    # Clear cached modules so windows.py + its sibling lifecycle module pick
+    # up the stub on the next import.  Matching "pippal.web_ui.window" catches
+    # windows, window_lifecycle, window_native, window_geometry.
     for key in list(sys.modules):
-        if "pippal.web_ui.windows" in key:
+        if "pippal.web_ui.window" in key:
             del sys.modules[key]
     from pippal.web_ui.windows import WebWindowManager
     mgr = WebWindowManager()
@@ -53,7 +60,7 @@ def _make_manager(monkeypatch):
 
 
 # ---------------------------------------------------------------------------
-# 1. WebWindowManager.close() — settings hides, not destroys
+# 1. WebWindowManager.close() — settings/onboarding/voices hide, not destroy
 # ---------------------------------------------------------------------------
 
 
@@ -88,25 +95,39 @@ class TestCloseHidesSettingsSurface:
         fake_win.hide.assert_called_once()
         fake_win.destroy.assert_not_called()
 
-    def test_close_notices_calls_hide_not_destroy(self, monkeypatch):
+    def test_close_notices_calls_destroy_not_hide(self, monkeypatch):
+        """Pro behavior: close('notices') destroys the window (not a hide-surface).
+
+        Updated from old free behavior (hide) to match Pro's window_lifecycle.close()
+        verbatim port — notices is not in the hide list; it is destroyed and
+        recreated on demand.
+        """
         mgr = _make_manager(monkeypatch)
         fake_win = mock.MagicMock()
         mgr._windows["notices"] = fake_win
 
         mgr.close("notices")
 
-        fake_win.hide.assert_called_once()
-        fake_win.destroy.assert_not_called()
+        fake_win.destroy.assert_called_once()
+        fake_win.hide.assert_not_called()
 
-    def test_close_overlay_calls_hide_not_destroy(self, monkeypatch):
+    def test_close_overlay_calls_destroy_not_hide(self, monkeypatch):
+        """Pro behavior: close('overlay') destroys the window (not a hide-surface).
+
+        Updated from old free behavior (hide) to match Pro's window_lifecycle.close()
+        verbatim port — overlay is not in the hide list for close().  The app
+        always keeps a hidden settings window alive (via run()), so destroying
+        the overlay does not kill the GUI loop.  The overlay is recreated (or
+        the pre-warmed hidden one is re-shown) on the next open() call.
+        """
         mgr = _make_manager(monkeypatch)
         fake_win = mock.MagicMock()
         mgr._windows["overlay"] = fake_win
 
         mgr.close("overlay")
 
-        fake_win.hide.assert_called_once()
-        fake_win.destroy.assert_not_called()
+        fake_win.destroy.assert_called_once()
+        fake_win.hide.assert_not_called()
 
     def test_close_unknown_surface_destroys(self, monkeypatch):
         mgr = _make_manager(monkeypatch)
@@ -167,7 +188,7 @@ class TestSurfaceForWindow:
 
 
 # ---------------------------------------------------------------------------
-# 4. events.closing wired for hide-to-tray surfaces in _make_window
+# 4. events.closing wired for settings in _make_window (Pro: settings only)
 # ---------------------------------------------------------------------------
 
 
@@ -194,8 +215,9 @@ class TestClosingEventWired:
 
         fake_wv.create_window = _create_window
         monkeypatch.setitem(sys.modules, "webview", fake_wv)
+        # Clear all sibling modules so the fresh webview stub is picked up.
         for key in list(sys.modules):
-            if "pippal.web_ui.windows" in key:
+            if "pippal.web_ui.window" in key:
                 del sys.modules[key]
 
         from pippal.web_ui.windows import WebWindowManager
@@ -229,8 +251,9 @@ class TestClosingEventWired:
 
         fake_wv.create_window = _create_window
         monkeypatch.setitem(sys.modules, "webview", fake_wv)
+        # Clear all sibling modules so the fresh webview stub is picked up.
         for key in list(sys.modules):
-            if "pippal.web_ui.windows" in key:
+            if "pippal.web_ui.window" in key:
                 del sys.modules[key]
 
         from pippal.web_ui.windows import WebWindowManager
@@ -266,8 +289,9 @@ class TestClosingEventWired:
 
         fake_wv.create_window = _create_window
         monkeypatch.setitem(sys.modules, "webview", fake_wv)
+        # Clear all sibling modules so the fresh webview stub is picked up.
         for key in list(sys.modules):
-            if "pippal.web_ui.windows" in key:
+            if "pippal.web_ui.window" in key:
                 del sys.modules[key]
 
         from pippal.web_ui.windows import WebWindowManager

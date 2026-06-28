@@ -1,27 +1,26 @@
-"""Regression test for the karaoke overlay show->hide race (#race-fix).
+"""Tests for Pro's overlay open/hide lifecycle behavior (post window-lifecycle port).
 
-Symptom: on short reads, the engine reaches "idle" and calls hide("overlay")
-BEFORE pywebview's ``shown`` event fires for that overlay window, so the show
-is immediately cancelled and the overlay window flashes then vanishes.
+The old test file tested free's custom race-guard mechanism
+(_overlay_show_pending / _overlay_hide_deferred / _make_overlay_shown_guard).
+That mechanism was FREE's patch around a race; Pro's code does NOT have it.
 
-Root cause (windows.py): ``open("overlay")`` calls ``win.show()`` and returns;
-before pywebview fires the ``shown`` event the engine has already gone idle and
-``hide("overlay")`` calls ``win.hide()``. The window either never appears or
-flashes briefly.
+After the verbatim port of Pro's window_lifecycle.py, the behavior is:
+- hide("overlay") calls win.hide() IMMEDIATELY — no deferred mechanism.
+- open("overlay") calls existing.show() + existing.restore() +
+  mgr._show_no_activate(existing) + evaluate_js(__pippalOverlayKick).
+- The overlay is NEVER destroyed on a failed hide (BUG2/BUG302 guard is
+  preserved in window_lifecycle.hide).
+- The manager has NO _overlay_show_pending or _overlay_hide_deferred attrs.
 
-Fix: ``WebWindowManager.open("overlay")`` sets ``_overlay_show_pending=True``
-before calling ``win.show()``; ``hide("overlay")`` defers to
-``_overlay_hide_deferred`` when pending; the overlay's ``shown`` event handler
-(wired by ``_make_window`` via ``_make_overlay_shown_guard``) clears the flag
-and applies the deferred hide.
+These tests replace the old race-guard tests to document and guard Pro's
+actual behavior.
 
 Run with: python -m pytest tests/test_karaoke_overlay_race.py -v
 """
 
 from __future__ import annotations
 
-from types import SimpleNamespace
-from typing import Callable
+from unittest.mock import MagicMock, patch
 
 
 # ---------------------------------------------------------------------------
@@ -29,174 +28,158 @@ from typing import Callable
 # ---------------------------------------------------------------------------
 
 
-class FakeEvents:
-    """Minimal pywebview event object: supports += and manual .fire()."""
-
-    def __init__(self) -> None:
-        self._handlers: list[Callable[[], None]] = []
-
-    def __iadd__(self, fn: Callable[[], None]) -> "FakeEvents":
-        self._handlers.append(fn)
-        return self
-
-    def fire(self) -> None:
-        for h in list(self._handlers):
-            h()
-
-
-class FakeWindow:
-    """Minimal pywebview Window fake with trackable show/hide calls."""
-
-    def __init__(self) -> None:
-        shown_ev = FakeEvents()
-        closed_ev = FakeEvents()
-        self.events = SimpleNamespace(shown=shown_ev, closed=closed_ev)
-        self.shown_event: FakeEvents = shown_ev
-        self.show_calls = 0
-        self.hide_calls = 0
-
-    def show(self) -> None:
-        self.show_calls += 1
-
-    def hide(self) -> None:
-        self.hide_calls += 1
-
-    def move(self, x: int, y: int) -> None:
-        pass
-
-
-def _make_manager_with_overlay() -> tuple:
-    """Return (mgr, fake_win) with the race guard attached."""
+def _make_manager() -> any:
     from pippal.web_ui.windows import WebWindowManager  # type: ignore[import]
 
     mgr = WebWindowManager()
-    fake_win = FakeWindow()
-    # Wire the same shown-event guard that _make_window() attaches.
-    handler = mgr._make_overlay_shown_guard(fake_win)
-    fake_win.shown_event += handler
-    mgr._windows["overlay"] = fake_win
+    mgr._base_url = "http://127.0.0.1:9999"
+    mgr._bridge = MagicMock()
     mgr._started = True
-    return mgr, fake_win
+    return mgr
 
 
 # ---------------------------------------------------------------------------
-# Tests
+# Pro's overlay lifecycle behavior
 # ---------------------------------------------------------------------------
 
 
-class TestKaraokeOverlayRace:
-    """Race: hide() arrives before pywebview shown event fires."""
+class TestProOverlayLifecycle:
+    """Pro's window_lifecycle has no race-guard; hide is always immediate."""
 
-    def test_hide_before_shown_is_deferred_not_immediate(self) -> None:
-        """hide("overlay") while show is pending must NOT call win.hide() yet.
+    def test_manager_has_no_race_guard_attrs(self) -> None:
+        """Pro's WebWindowManager must NOT have old free-patch race attrs.
 
-        This is the core race: ``open("overlay")`` sets
-        ``_overlay_show_pending=True`` and calls ``win.show()``. On a short
-        read the engine goes idle immediately (before the pywebview ``shown``
-        event fires) and calls ``hide("overlay")``. The fix must defer the
-        hide so the window is visible at least until ``shown`` fires.
+        _overlay_show_pending and _overlay_hide_deferred were free's custom
+        patch, not in Pro's code.  Verify they are absent so we know the
+        port is clean.
         """
-        mgr, fake_win = _make_manager_with_overlay()
+        mgr = _make_manager()
+        assert not hasattr(mgr, "_overlay_show_pending"), (
+            "WebWindowManager has _overlay_show_pending — old free patch not removed"
+        )
+        assert not hasattr(mgr, "_overlay_hide_deferred"), (
+            "WebWindowManager has _overlay_hide_deferred — old free patch not removed"
+        )
+        assert not hasattr(mgr, "_make_overlay_shown_guard"), (
+            "WebWindowManager has _make_overlay_shown_guard — old free patch not removed"
+        )
 
-        # Simulate open("overlay") having set the pending flag.
-        mgr._overlay_show_pending = True
-        mgr._overlay_hide_deferred = False
+    def test_hide_overlay_calls_win_hide_immediately(self) -> None:
+        """hide('overlay') must call win.hide() immediately (no deferred path).
 
-        # Engine goes idle before shown fires -- this is the race.
+        Pro's hide() is a direct call — no pending-flag check, no deferral.
+        """
+        mgr = _make_manager()
+        fake_win = MagicMock()
+        mgr._windows["overlay"] = fake_win
+
         mgr.hide("overlay")
 
-        assert fake_win.hide_calls == 0, (
-            "hide() called win.hide() immediately while show was pending -- "
-            "this is the race that makes the overlay flash and disappear."
-        )
-        assert mgr._overlay_hide_deferred is True, (
-            "hide() should set _overlay_hide_deferred=True when show is pending."
-        )
+        fake_win.hide.assert_called_once()
 
-    def test_shown_event_applies_deferred_hide(self) -> None:
-        """After shown fires with a deferred hide, win.hide() must be called."""
-        mgr, fake_win = _make_manager_with_overlay()
+    def test_hide_overlay_never_destroys_on_failed_hide(self) -> None:
+        """BUG2 / #302 guard: failed overlay hide must NEVER destroy the window.
 
-        # Simulate open("overlay"): pending flag set.
-        mgr._overlay_show_pending = True
-        mgr._overlay_hide_deferred = False
+        This guard is preserved in Pro's window_lifecycle.hide.  The overlay
+        is (often) the last live window; destroying it kills the GUI loop.
+        """
+        mgr = _make_manager()
+        fake_win = MagicMock()
+        fake_win.hide.side_effect = RuntimeError("simulated hide failure")
+        mgr._windows["overlay"] = fake_win
 
-        # Race: hide arrives before shown.
-        mgr.hide("overlay")
-        assert fake_win.hide_calls == 0, "pre-condition: hide not yet called"
+        mgr.hide("overlay")  # must not raise
 
-        # Now the shown event fires (window finally visible).
-        fake_win.shown_event.fire()
-
-        assert fake_win.hide_calls == 1, (
-            "After shown fires, the deferred hide must be applied exactly once."
-        )
-        assert mgr._overlay_show_pending is False, (
-            "shown handler must clear _overlay_show_pending."
-        )
-        assert mgr._overlay_hide_deferred is False, (
-            "shown handler must clear _overlay_hide_deferred after applying it."
+        fake_win.destroy.assert_not_called()
+        assert "overlay" in mgr._windows, (
+            "BUG2: overlay was removed from _windows after a failed hide — "
+            "this would kill the pywebview GUI loop."
         )
 
-    def test_normal_hide_after_shown_is_immediate(self) -> None:
-        """Normal long-read path: hide() after shown fires must work immediately."""
-        mgr, fake_win = _make_manager_with_overlay()
+    def test_hide_overlay_keeps_window_in_registry_on_success(self) -> None:
+        """Successful overlay hide must NOT remove it from _windows."""
+        mgr = _make_manager()
+        fake_win = MagicMock()
+        mgr._windows["overlay"] = fake_win
 
-        # Simulate open() then shown fires (long read -- no race).
-        mgr._overlay_show_pending = True
-        mgr._overlay_hide_deferred = False
-        fake_win.shown_event.fire()  # shown fires before hide() call
-
-        # Now the read finishes and hide is called.
         mgr.hide("overlay")
 
-        assert fake_win.hide_calls == 1, (
-            "Normal path: hide() after shown fires must call win.hide() immediately."
+        assert "overlay" in mgr._windows, (
+            "overlay was removed from _windows after hide — it should stay registered."
         )
 
-    def test_shown_without_pending_is_noop(self) -> None:
-        """Pre-warm path: shown fires with no pending show -> no accidental hide."""
-        mgr, fake_win = _make_manager_with_overlay()
+    def test_hide_non_overlay_failure_destroys_and_pops(self) -> None:
+        """For non-overlay surfaces the destroy fall-through is preserved."""
+        mgr = _make_manager()
+        fake_win = MagicMock()
+        fake_win.hide.side_effect = RuntimeError("simulated hide failure")
+        mgr._windows["settings"] = fake_win
 
-        # No pending show (e.g. the pre-warm's cold-create shown event).
-        mgr._overlay_show_pending = False
-        mgr._overlay_hide_deferred = False
+        mgr.hide("settings")
 
-        fake_win.shown_event.fire()
-
-        assert fake_win.hide_calls == 0, (
-            "shown with no pending state must not hide the window."
+        fake_win.destroy.assert_called_once()
+        assert "settings" not in mgr._windows, (
+            "Non-overlay surface should be popped from registry after failed hide."
         )
 
-    def test_pending_flag_cleared_after_shown(self) -> None:
-        """_overlay_show_pending is False after shown fires (no deferred hide)."""
-        mgr, fake_win = _make_manager_with_overlay()
+    def test_open_existing_overlay_calls_show_and_restore(self) -> None:
+        """open('overlay') on an existing window calls show() + restore().
 
-        mgr._overlay_show_pending = True
-        mgr._overlay_hide_deferred = False
-        fake_win.shown_event.fire()
+        Pro's open() re-shows the existing window in-place: show() to make it
+        visible, restore() to un-minimise, then _show_no_activate() via Win32
+        so the overlay stays no-activate (no foreground steal).
+        """
+        mgr = _make_manager()
+        fake_win = MagicMock()
+        mgr._windows["overlay"] = fake_win
 
-        assert mgr._overlay_show_pending is False, (
-            "_overlay_show_pending must be cleared after shown fires."
+        # _show_no_activate delegates to window_native.show_no_activate which
+        # is a Win32 call.  On non-Windows / test env it returns False (no-op).
+        # We patch it to avoid real Win32 calls.
+        with patch.object(mgr, "_show_no_activate", return_value=False) as mock_sna, \
+             patch.object(mgr, "_overlay_position", return_value=None):
+            mgr.open("overlay")
+
+        fake_win.show.assert_called_once()
+        fake_win.restore.assert_called_once()
+        mock_sna.assert_called_once_with(fake_win)
+
+    def test_open_existing_overlay_fires_kick_js(self) -> None:
+        """open('overlay') must call __pippalOverlayKick evaluate_js (A2 fast-kick)."""
+        mgr = _make_manager()
+        fake_win = MagicMock()
+        mgr._windows["overlay"] = fake_win
+
+        with patch.object(mgr, "_show_no_activate", return_value=False), \
+             patch.object(mgr, "_overlay_position", return_value=None):
+            mgr.open("overlay")
+
+        # evaluate_js must have been called at least once with the kick pattern
+        called_scripts = [
+            str(call.args[0]) if call.args else ""
+            for call in fake_win.evaluate_js.call_args_list
+        ]
+        assert any("__pippalOverlayKick" in s for s in called_scripts), (
+            "open('overlay') must call __pippalOverlayKick evaluate_js (A2 fast-kick)"
         )
 
-    def test_double_shown_does_not_double_hide(self) -> None:
-        """If shown fires twice (edge case), the deferred hide runs exactly once."""
-        mgr, fake_win = _make_manager_with_overlay()
+    def test_open_non_overlay_fires_refresh_js(self) -> None:
+        """open('settings') on an existing window must call __pippalRefresh."""
+        mgr = _make_manager()
+        fake_win = MagicMock()
+        mgr._windows["settings"] = fake_win
 
-        mgr._overlay_show_pending = True
-        mgr._overlay_hide_deferred = False
+        mgr.open("settings")
 
-        # Race: hide before shown.
-        mgr.hide("overlay")
-        assert fake_win.hide_calls == 0
-
-        # First shown fires -- deferred hide is applied.
-        fake_win.shown_event.fire()
-        assert fake_win.hide_calls == 1
-
-        # Second spurious shown -- must not hide again.
-        fake_win.shown_event.fire()
-        assert fake_win.hide_calls == 1, (
-            "Second shown must not call win.hide() again."
+        called_scripts = [
+            str(call.args[0]) if call.args else ""
+            for call in fake_win.evaluate_js.call_args_list
+        ]
+        assert any("__pippalRefresh" in s for s in called_scripts), (
+            "open('settings') must call __pippalRefresh to refresh the UI in-place"
         )
+
+
+# Alias for backwards-compatibility with any external CI that references this
+# class name. The tests now verify Pro's behavior instead of the old race guard.
+TestKaraokeOverlayRace = TestProOverlayLifecycle

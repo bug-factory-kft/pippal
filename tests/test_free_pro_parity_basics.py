@@ -186,6 +186,17 @@ class TestBug1OverlayPrewarm:
     """WebWindowManager.run() pre-warms the overlay window hidden."""
 
     def _make_manager(self):
+        import sys as _sys
+        # Clear all pippal.web_ui.window* siblings (windows, window_lifecycle,
+        # window_native, window_geometry) so that the next _make_window call
+        # re-imports window_lifecycle fresh and picks up whatever webview is
+        # current in sys.modules at that moment (which may be patched by the
+        # test's `patch("webview.create_window", ...)` context).  Without this,
+        # a previous test that loaded window_lifecycle with a fake webview
+        # leaves a stale binding that shadows the patch.
+        for key in list(_sys.modules):
+            if "pippal.web_ui.window" in key:
+                del _sys.modules[key]
         from pippal.web_ui.windows import WebWindowManager
         mgr = WebWindowManager()
         mgr._base_url = "http://127.0.0.1:9999"
@@ -375,4 +386,58 @@ class TestBug2AsyncVoiceInstall:
                ).read_text(encoding="utf-8")
         assert '"voice_install_status"' in src, (
             "voice_install_status polling call missing from app.js"
+        )
+
+
+# ---------------------------------------------------------------------------
+# Window lifecycle port: Pro's window_lifecycle.py ported verbatim to free
+# ---------------------------------------------------------------------------
+
+
+class TestWindowLifecyclePort:
+    """Verify Pro's window layer has been ported to free (window_lifecycle.py).
+
+    These tests FAIL until the port lands.  They serve as the failing-test
+    oracle required by the test-first policy before the implementation.
+    """
+
+    def test_window_lifecycle_module_exists(self) -> None:
+        """window_lifecycle.py must exist and be importable in free."""
+        import importlib
+
+        mod = importlib.import_module("pippal.web_ui.window_lifecycle")
+        assert mod is not None, (
+            "pippal.web_ui.window_lifecycle not importable -- Pro port not complete"
+        )
+
+    def test_manager_has_raise_window(self) -> None:
+        """WebWindowManager must have raise_window() (Pro-only method)."""
+        from pippal.web_ui.windows import WebWindowManager
+
+        mgr = WebWindowManager()
+        assert hasattr(mgr, "raise_window"), (
+            "WebWindowManager.raise_window not found -- Pro windows.py not ported"
+        )
+
+    def test_manager_has_explicit_close_flag(self) -> None:
+        """WebWindowManager must have _explicit_close (Pro shutdown-safety flag)."""
+        from pippal.web_ui.windows import WebWindowManager
+
+        mgr = WebWindowManager()
+        assert hasattr(mgr, "_explicit_close"), (
+            "WebWindowManager._explicit_close not found -- Pro windows.py not ported"
+        )
+
+    def test_window_lifecycle_has_surfaces_dict(self) -> None:
+        """window_lifecycle._SURFACES must be accessible and contain overlay."""
+        import importlib
+
+        mod = importlib.import_module("pippal.web_ui.window_lifecycle")
+        surfaces = getattr(mod, "_SURFACES", None)
+        assert surfaces is not None, "_SURFACES missing from window_lifecycle"
+        assert "overlay" in surfaces, (
+            "'overlay' key missing from window_lifecycle._SURFACES"
+        )
+        assert "settings" in surfaces, (
+            "'settings' key missing from window_lifecycle._SURFACES"
         )

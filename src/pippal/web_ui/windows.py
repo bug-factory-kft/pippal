@@ -1,42 +1,107 @@
-"""pywebview window lifecycle for the web UI.
+"""pywebview window lifecycle for the PipPal web UI.
 
-Each PipPal surface is a pywebview window loading
-``<base_url>/index.html?view=<surface>``. The static UI in ``webui/``
-talks back through the injected ``js_api`` bridge (and the same HTTP
-``/bridge`` endpoint as a fallback / E2E transport).
+Mirrors :mod:`pippal_pro.web_ui.windows` — one frameless dark pywebview
+window per surface loading ``<base_url>/index.html?view=<surface>`` —
+and adds the reader overlay surface.  The reader overlay is a normal
+opaque frameless window, built the same way as the Settings window
+(solid dark background, draggable via the pywebview-drag-region
+mechanism, fully clickable).
 
-Native chrome stays minimal: Settings / Voice Manager / Onboarding /
-Notices keep a frameless dark window (the UI draws its own title bar).
-The reader overlay is a frameless, on-top, opaque dark mini-player (#248).
+NOTE (R1 / Constraint 2): this module is loaded BY FILE PATH with a
+synthetic module name by the regression test harness
+(``importlib.util.spec_from_file_location``), so it has NO package
+context.  A top-level intra-package import (relative OR absolute) would
+raise ``ImportError`` at load time.  The window-surface table, the
+Win32/DWM native-window ops, the pure geometry helpers, and the window
+lifecycle (make_window/open/hide/close/...) therefore live in sibling
+modules (``window_lifecycle.py`` / ``window_native.py`` /
+``window_geometry.py``) and are imported LAZILY at call time via the
+``_lifecycle()`` / ``_native()`` / ``_geometry()`` shims (absolute
+import with a file-path fallback).  Do NOT add any ``from . import ...``
+or ``from pippal... import ...`` at module top level here.
 
-WebView2 (Chromium) is the runtime on Windows; pywebview picks it
-automatically.
+``WebWindowManager``'s public API (every method name + signature) is
+unchanged: the methods whose bodies moved remain as thin delegators on
+the class, so callers (``app_web``) and the bridge server allow-list see
+no difference.
 """
 
 from __future__ import annotations
 
+import sys
 import threading
-from collections.abc import Callable
 from typing import Any
 
-# ``webview`` (pywebview) is imported lazily inside the methods that
-# actually create / run windows so that importing this module — and
-# therefore ``import pippal`` — does not require the GUI runtime to be
-# installed (e.g. on a headless CI host that only runs the unit suite).
-#
-# ``window_native`` and ``window_geometry`` are also imported lazily
-# (call-time) for the same reason (H3).
 
-# Per-surface window geometry.
-_SURFACES: dict[str, dict[str, Any]] = {
-    "settings": {"title": "PipPal", "width": 600, "height": 720},
-    "voices": {"title": "Voices", "width": 820, "height": 640},
-    "onboarding": {"title": "PipPal", "width": 540, "height": 560},
-    "notices": {"title": "PipPal - Open-source licences",
-                "width": 760, "height": 620},
-    "overlay": {"title": "PipPal", "width": 560, "height": 200,
-                "on_top": True, "frameless": True, "easy_drag": False},
-}
+def _sibling(name: str) -> Any:
+    """Lazily import a sibling helper module by short *name* (R1 shim).
+
+    Imports at CALL time, not module-load time, so ``windows.py`` stays
+    file-path-loadable (Constraint 2).
+
+    Two execution contexts must both work:
+
+    1. **Normal package run** — ``windows.py`` was imported as
+       ``pippal.web_ui.windows`` (``__package__ == "pippal.web_ui"``).
+       Use the normal absolute import; the sibling is a real, cached
+       package module that binds the real ``webview``.
+    2. **Synthetic file-path loader** (the regression harness loads
+       ``windows.py`` via ``spec_from_file_location`` with a synthetic
+       name, so ``__package__`` is empty / not the real package). In this
+       context the absolute import would either fail OR — worse — return a
+       STALE cached real-package sibling that bound a different ``webview``
+       than the one the test monkeypatched into ``sys.modules`` for THIS
+       load. So when we are NOT in the real package we ALWAYS load the
+       sibling FRESH from its file path next to ``__file__``; the fresh
+       module's top-level ``import webview`` then binds the currently-
+       patched ``webview``, exactly as the original single-file
+       ``windows.py`` did when it was re-exec'd per test.
+
+    This is a pure import bridge — the moved function bodies run verbatim;
+    only their import path is bridged."""
+    in_real_package = __package__ == "pippal.web_ui"
+    if in_real_package:
+        import importlib
+
+        return importlib.import_module(f"pippal.web_ui.window_{name}")
+
+    import importlib.util
+    import pathlib
+
+    p = pathlib.Path(__file__).with_name(f"window_{name}.py")
+    spec = importlib.util.spec_from_file_location(f"_ppw_{name}", p)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def __getattr__(name: str) -> Any:
+    """PEP 562 module-level lazy attribute resolver.
+
+    Keeps ``windows._SURFACES`` accessible (the surface table now lives in
+    the ``window_lifecycle`` sibling) WITHOUT a top-level intra-package
+    import (R1 / Constraint 2) and without duplicating the table.  Callers
+    and tests that read ``windows._SURFACES`` see the identical dict; the
+    fetch is lazy (at attribute-access time) so module load stays
+    file-path-safe."""
+    if name == "_SURFACES":
+        return _sibling("lifecycle")._SURFACES
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+
+def _lifecycle() -> Any:
+    """Lazily import the sibling ``window_lifecycle`` module (R1 shim)."""
+    return _sibling("lifecycle")
+
+
+def _native() -> Any:
+    """Lazily import the sibling ``window_native`` module (R1 shim)."""
+    return _sibling("native")
+
+
+def _geometry() -> Any:
+    """Lazily import the sibling ``window_geometry`` module (R1 shim)."""
+    return _sibling("geometry")
 
 
 def should_activate(surface: str) -> bool:
@@ -58,412 +123,315 @@ class WebWindowManager:
         self._windows: dict[str, Any] = {}
         self._lock = threading.Lock()
         self._started = False
-        self._overlay_controller: Any = None
-        # Race guard (#race-fix): overlay show→hide race.
-        # True between win.show() and the pywebview ``shown`` event.
-        self._overlay_show_pending: bool = False
-        # True if hide("overlay") was deferred because show was pending.
-        self._overlay_hide_deferred: bool = False
+        self._explicit_close = False
+        self._overlay_controller: Any = None  # set via set_overlay_controller()
 
     def set_overlay_controller(self, controller: Any) -> None:
-        """Store the OverlayWindowController; called once from app_web.main."""
+        """Wire the OverlayWindowController so raise_window can consult its
+        engine-visible state before deciding whether to re-hide the overlay.
+
+        Called once from app_web.main() right after overlay.set_window_callbacks.
+        When not called (tests / early startup), the controller is None and
+        raise_window defaults to treating the overlay as not-visible (safe).
+        """
         self._overlay_controller = controller
 
     def configure(self, base_url: str, bridge: Any) -> None:
         self._base_url = base_url.rstrip("/")
         self._bridge = bridge
 
-    # ------------------------------------------------------------------
-
-    def _make_overlay_shown_guard(self, win: Any) -> Callable[[], None]:
-        """Return a ``shown``-event handler that applies any deferred hide.
-
-        ``_make_window`` wires this on the overlay window so it fires on
-        every ``shown`` event (both the pre-warm's cold-create fire AND
-        each real re-show).  When ``open("overlay")`` sets
-        ``_overlay_show_pending=True`` before calling ``win.show()``, a
-        racing ``hide("overlay")`` sets ``_overlay_hide_deferred=True``
-        instead of calling ``win.hide()`` immediately.  This handler then
-        clears both flags and calls ``win.hide()`` once the window is
-        actually visible.  On non-pending fires (e.g. the pre-warm shown)
-        it is a no-op (#race-fix).
-
-        Also exposed as a public method so unit tests can attach the guard
-        to a fake window without going through ``_make_window``.
-        """
-        def _guard() -> None:
-            with self._lock:
-                self._overlay_show_pending = False
-                do_hide = self._overlay_hide_deferred
-                if do_hide:
-                    self._overlay_hide_deferred = False
-            if do_hide:
-                try:
-                    win.hide()
-                except Exception:
-                    # #302: swallow — never destroy on failed hide.
-                    pass
-
-        return _guard
-
     def _make_window(self, surface: str, *, hidden: bool = False) -> Any:
-        import webview
+        """Create a pywebview window for *surface* (#248/#265/#280 wiring).
 
-        spec = _SURFACES.get(surface, _SURFACES["settings"])
-        url = f"{self._base_url}/index.html?view={surface}"
-        kwargs: dict[str, Any] = {
-            "title": spec["title"],
-            "url": url,
-            "width": spec["width"],
-            "height": spec["height"],
-            "js_api": self._bridge,
-            "background_color": "#13151c",
-            "frameless": spec.get("frameless", True),
-            "easy_drag": False,
-        }
-        if hidden:
-            kwargs["hidden"] = True
-        # Bug 1 fix: only set on_top on NON-hidden windows.  A pre-warmed
-        # hidden overlay with on_top=True becomes TOPMOST immediately; the
-        # z-order shuffle in bring_to_foreground (tray Settings-reopen) then
-        # surfaces the hidden overlay, causing an empty overlay pop.  Defer
-        # on_top to the visible-show path (open() → show_no_activate →
-        # SetWindowPos(HWND_TOPMOST, SWP_NOACTIVATE)).
-        if spec.get("on_top") and not hidden:
-            kwargs["on_top"] = True
-        win = webview.create_window(**kwargs)
+        Thin delegator to :func:`window_lifecycle.make_window` (R1 shim);
+        the body moved verbatim into the sibling lifecycle module.  When
+        *hidden* is True the window is created hidden (BUG 1: tray-only
+        normal launch keeps the GUI loop alive without a visible Settings
+        window)."""
+        return _lifecycle().make_window(self, surface, hidden=hidden)
 
-        def _closed(s: str = surface) -> None:
-            with self._lock:
-                self._windows.pop(s, None)
+    def _host_hwnd(self, win: Any) -> int | None:
+        """Return the native top-level HWND of a pywebview window, or None.
 
-        win.events.closed += _closed
+        Thin delegator to :func:`window_native.host_hwnd` (R1 shim); the
+        body moved verbatim into the sibling native module."""
+        return _native().host_hwnd(win)
 
-        # Intercept the native window X button for hide-to-tray surfaces.
-        # Returning False from the ``closing`` handler cancels the native
-        # destroy so the window is merely hidden and the GUI loop stays alive.
-        # Mirrors Pro window_lifecycle.py make_window() lines 196-210.
-        # The overlay is excluded: it is frameless (no OS chrome / X button).
-        _HIDE_ON_CLOSE = ("settings", "onboarding", "voices", "notices")
-        if surface in _HIDE_ON_CLOSE:
-            def _closing(w: Any = win) -> bool:
-                try:
-                    w.hide()
-                except Exception:
-                    pass
-                return False  # cancel the native close / destroy
+    def _schedule_transparency(self, win: Any) -> None:
+        """Apply the layered colour-key to *win* off the GUI thread, with
+        a short retry so it lands once the native HWND exists and survives
+        the WebView2 repaint that follows show/restore.
 
-            try:
-                win.events.closing += _closing
-            except Exception:
-                pass
-
-        # Apply DWM rounded corners on frameless windows once shown (H4).
-        def _on_shown() -> None:
-            try:
-                from pippal.web_ui import window_native as _wn
-                _wn.apply_dwm_round_corners(win)
-            except Exception:
-                pass
-
-        win.events.shown += _on_shown
-
-        # Bug 1 fix (belt-and-braces): on a COLD create of the overlay
-        # (not the pre-warm path), re-assert no-activate once the native
-        # HWND is realised so the first-ever read does not steal foreground
-        # during selection capture (#265).  Intentionally skipped when
-        # hidden=True: pywebview fires ``shown`` even for a hidden window,
-        # so attaching this handler on the pre-warm would pop an empty
-        # overlay at startup before any action is triggered.
-        if surface == "overlay" and not hidden:
-            def _overlay_no_activate() -> None:
-                try:
-                    from pippal.web_ui import window_native as _wn
-                    _wn.show_no_activate(win)
-                except Exception:
-                    pass
-
-            try:
-                win.events.shown += _overlay_no_activate
-            except Exception:
-                pass
-
-        # Race guard (#race-fix): wire the deferred-hide handler on ALL
-        # overlay creates (hidden and non-hidden). Pre-warm fires shown with
-        # _overlay_show_pending=False so it is a no-op there; real re-shows
-        # (open() sets _overlay_show_pending=True first) apply any deferred
-        # hide once the window is actually visible.
-        if surface == "overlay":
-            try:
-                win.events.shown += self._make_overlay_shown_guard(win)
-            except Exception:
-                pass
-
-        # Overlay loaded-kick: when the overlay page finishes loading (which
-        # can happen AFTER the window was already shown during a read, because
-        # WebView2 deprioritises hidden pre-warmed windows), immediately call
-        # __pippalOverlayKick so the tick picks up any in-progress read state.
-        # If the page loads while idle, the kick is a harmless no-op.
-        if surface == "overlay":
-            def _overlay_loaded_kick() -> None:
-                try:
-                    win.evaluate_js(
-                        "window.__pippalOverlayKick"
-                        " && window.__pippalOverlayKick()"
-                    )
-                except Exception:
-                    pass
-
-            try:
-                win.events.loaded += _overlay_loaded_kick
-            except Exception:
-                pass
-
-        return win
-
-    def open(self, surface: str) -> None:
-        """Show a surface, focusing it if already open. Thread-safe; can
-        be called from tray / hotkey / command-server threads."""
-        with self._lock:
-            existing = self._windows.get(surface)
-            if existing is not None:
-                try:
-                    if should_activate(surface):
-                        existing.show()
-                        existing.restore()
-                        try:
-                            from pippal.web_ui import window_native as _wn
-                            _wn.bring_to_foreground(existing)
-                        except Exception:
-                            pass
-                    else:
-                        # overlay: mark show pending BEFORE calling show() so
-                        # a racing hide() is deferred until shown fires (#race-fix).
-                        self._overlay_show_pending = True
-                        self._overlay_hide_deferred = False
-                        # overlay: re-anchor then show.
-                        self._anchor_overlay(existing)
-                        # Call pywebview show() FIRST so its 'shown' event fires
-                        # and the race guard (_make_overlay_shown_guard) can clear
-                        # _overlay_show_pending and apply any deferred hide.
-                        # show_no_activate() bypasses pywebview's own show path so
-                        # its 'shown' event never fires, leaving _overlay_show_pending
-                        # stuck True and deferred hides never applied (empty overlay).
-                        # After pywebview show(), re-assert NOACTIVATE via Win32 so
-                        # the overlay does not steal foreground during capture (#265).
-                        # Mirrors Pro window_lifecycle.py open() (lines 324-366).
-                        try:
-                            existing.show()
-                        except Exception:
-                            pass
-                        try:
-                            from pippal.web_ui import window_native as _wn
-                            _wn.show_no_activate(existing)
-                        except Exception:
-                            pass
-                        # A2 overlay kick: force immediate tick after show
-                        # (Pro window_lifecycle.py ~lines 358-361 parity).
-                        # Best-effort: evaluate_js no-ops if window not ready.
-                        try:
-                            existing.evaluate_js(
-                                "window.__pippalOverlayKick"
-                                " && window.__pippalOverlayKick()"
-                            )
-                        except Exception:
-                            pass
-                    return
-                except Exception:
-                    # Reset race guard if open() failed — no shown will fire.
-                    if surface == "overlay":
-                        self._overlay_show_pending = False
-                        self._overlay_hide_deferred = False
-                    self._windows.pop(surface, None)
-
-        if not self._started:
-            # First window must be created before webview.start(); queue
-            # it so run() picks it up.
-            win = self._make_window(surface)
-            with self._lock:
-                if surface == "overlay":
-                    self._overlay_show_pending = True
-                    self._overlay_hide_deferred = False
-                self._windows[surface] = win
+        Runs on a daemon thread because the native handle / first paint can
+        lag the ``open`` call by a beat; a few spaced re-applies make the
+        transparency deterministic without blocking the caller (engine /
+        bridge thread).  All failures are swallowed — transparency is
+        best-effort and must never break the read path."""
+        if sys.platform != "win32":
             return
 
-        win = self._make_window(surface)
-        if surface == "overlay":
-            self._anchor_overlay(win)
-        with self._lock:
-            if surface == "overlay":
-                self._overlay_show_pending = True
-                self._overlay_hide_deferred = False
-            self._windows[surface] = win
+        def _runner() -> None:
+            import time as _t
 
-    def _anchor_overlay(self, win: Any) -> None:
-        """Move the overlay window to its bottom-centre anchor (#280).
+            # Re-apply over ~1.5 s: the host is created, then WebView2
+            # paints (which can reset the layered state), so spacing the
+            # applies makes the final state transparent regardless of the
+            # paint timing.
+            for delay in (0.0, 0.15, 0.35, 0.7, 1.2):
+                if delay:
+                    _t.sleep(delay)
+                try:
+                    self._apply_layered_colorkey(win)
+                except Exception:
+                    pass
 
-        Best-effort: any exception is silently swallowed (H4).
-        """
         try:
-            from pippal.web_ui import window_geometry as _wg
-            spec = _SURFACES["overlay"]
-            pos = _wg.overlay_position(spec)
-            if pos is not None:
-                win.move(pos["x"], pos["y"])
+            threading.Thread(target=_runner, daemon=True).start()
+        except Exception:
+            # Synchronous fallback if a thread can't be spawned.
+            try:
+                self._apply_layered_colorkey(win)
+            except Exception:
+                pass
+
+    def _apply_dwm_round_corners(self, win: Any) -> None:
+        """Apply Win11 DWM rounded corners to a frameless pywebview window (#248).
+
+        Thin delegator to :func:`window_native.apply_dwm_round_corners`
+        (R1 shim); the body moved verbatim into the sibling native module."""
+        return _native().apply_dwm_round_corners(win)
+
+    def _apply_layered_colorkey(self, win: Any) -> None:
+        """Make a transparent-spec host genuinely transparent (#248).
+
+        Thin delegator to :func:`window_native.apply_layered_colorkey`
+        (R1 shim); the body moved verbatim into the sibling native module."""
+        return _native().apply_layered_colorkey(win)
+
+    def _show_no_activate(self, win):
+        """Show *win* WITHOUT stealing foreground focus (ISSUE 2 / #265).
+
+        Thin delegator to :func:`window_native.show_no_activate` (R1 shim);
+        the body moved verbatim into the sibling native module."""
+        return _native().show_no_activate(win)
+
+    def _window_position(
+        self,
+        surface: str,
+        spec: dict[str, Any],
+    ) -> dict[str, int] | None:
+        # #280: The reader overlay ALWAYS opens at the bottom-center of the
+        # active screen — never at a saved/restored position.  Restoring a
+        # stale position can place the overlay far from the text the user is
+        # reading (different corner, wrong monitor).  The overlay is a
+        # transient HUD, not a persistent window, so user-dragged positions
+        # are intentionally discarded on re-open.
+        if surface == "overlay":
+            return self._overlay_position(spec)
+        saved = self._saved_window_position(surface)
+        if saved is not None:
+            # B3: clamp — if the saved rect is entirely off all current
+            # screens (e.g. the monitor was disconnected since last run)
+            # fall back to the default placement so the window is reachable.
+            if self._position_on_any_screen(saved, spec):
+                return saved
+            # Saved position is off-screen — fall through to default.
+        if surface != "settings":
+            # Non-settings surfaces (onboarding, voices, notices, etc.) open
+            # centred on the settings window when it exists.  At FIRST launch
+            # there is no settings window yet → _centered_on_parent returns
+            # None.  Fall back to _centered_on_screen so the window is not
+            # abandoned at the OS-default top-left corner.  Fixes #247:
+            # onboarding opens screen-centred on first launch.
+            pos = self._centered_on_parent(spec)
+            return pos if pos is not None else self._centered_on_screen(spec)
+        # settings — first launch: no saved position → centre on screen.
+        return self._centered_on_screen(spec)
+
+    def _saved_window_position(self, surface: str) -> dict[str, int] | None:
+        bridge = self._bridge
+        config = getattr(bridge, "config", None)
+        if not isinstance(config, dict):
+            return None
+        positions = config.get("window_positions")
+        if not isinstance(positions, dict):
+            return None
+        position = positions.get(surface)
+        if not isinstance(position, dict):
+            return None
+        x = self._valid_position_value(position.get("x"))
+        y = self._valid_position_value(position.get("y"))
+        if x is None or y is None:
+            return None
+        return {"x": x, "y": y}
+
+    def _valid_position_value(self, value: Any) -> int | None:
+        """Thin delegator to :func:`window_geometry.valid_position_value`
+        (R1 shim); the body moved verbatim into the sibling geometry module."""
+        return _geometry().valid_position_value(value)
+
+    def _persist_window_position(self, surface: str, win: Any, *, flush: bool = True) -> None:
+        """Write the current x/y of *win* into config['window_positions'][surface].
+
+        When *flush* is True (default, used by the closing handler) the
+        updated config is also written to disk via save_config.  When
+        *flush* is False (used by the moved/resized handlers during drag)
+        only the in-memory dict is updated — this avoids hundreds of disk
+        writes per drag gesture.
+
+        No-ops silently if the bridge/config is not wired (served / test
+        mode without a config dict) or if the window object does not expose
+        x/y.
+        """
+        bridge = self._bridge
+        config = getattr(bridge, "config", None)
+        if not isinstance(config, dict):
+            return
+        try:
+            x = int(win.x)
+            y = int(win.y)
+        except (AttributeError, TypeError, ValueError):
+            return
+        positions = config.setdefault("window_positions", {})
+        if not isinstance(positions, dict):
+            return
+        positions[surface] = {"x": x, "y": y}
+        if flush:
+            # Best-effort flush to disk via the core save_config helper.
+            try:
+                from pippal.config import save_config  # type: ignore[import-untyped]
+
+                save_config(config)
+            except Exception:
+                pass
+
+    def _centered_on_parent(self, spec: dict[str, Any]) -> dict[str, int] | None:
+        with self._lock:
+            parent = self._windows.get("settings")
+        if parent is None:
+            return None
+        try:
+            x = int(parent.x) + (int(parent.width) - int(spec["width"])) // 2
+            y = int(parent.y) + (int(parent.height) - int(spec["height"])) // 2
+        except (AttributeError, TypeError, ValueError):
+            return None
+        return {"x": x, "y": y}
+
+    def _centered_on_screen(self, spec: dict[str, Any]) -> dict[str, int] | None:
+        """Thin delegator to :func:`window_geometry.centered_on_screen`
+        (R1 shim); the body moved verbatim into the sibling geometry module."""
+        return _geometry().centered_on_screen(spec)
+
+    def _position_on_any_screen(
+        self,
+        position: dict[str, int],
+        spec: dict[str, Any],
+    ) -> bool:
+        """Thin delegator to :func:`window_geometry.position_on_any_screen`
+        (R1 shim); the body moved verbatim into the sibling geometry module."""
+        return _geometry().position_on_any_screen(position, spec)
+
+    def _overlay_position(self, spec: dict[str, Any]) -> dict[str, int] | None:
+        """Thin delegator to :func:`window_geometry.overlay_position`
+        (R1 shim); the body moved verbatim into the sibling geometry module."""
+        return _geometry().overlay_position(spec)
+
+    def open(self, surface: str) -> None:
+        """Show a surface, focusing it if already open. Thread-safe.
+
+        Thin delegator to :func:`window_lifecycle.open` (R1 shim); the body
+        moved verbatim into the sibling lifecycle module (#249 load_url
+        re-render, #280/#2/#4 overlay re-anchor, #265 no-activate)."""
+        return _lifecycle().open(self, surface)
+
+    def raise_window(self, surface: str = "settings") -> None:
+        """Open *surface* and pull it to the foreground (#FIX2).
+
+        Used by the single-instance gate: when a SECOND launch happens (or
+        the user clicks the tray notification), the running instance OPENS
+        + foregrounds its main window instead of only printing an
+        "already running" message.  After the start-to-tray change the app
+        may have no visible window, so this is how the user re-opens it.
+
+        Opens via the normal lifecycle path (which show()/restore()s) then
+        asserts Win32 foreground so the window is genuinely raised above
+        the caller's window.  Thread-safe; no-op-safe off Windows.
+
+        TOAST-REOPEN FIX (EDIT 1): After the foreground raise, if we are
+        raising any surface OTHER than the overlay, and the engine is NOT
+        currently driving a visible overlay session, actively re-hide the
+        pre-warmed overlay window.  On WebView2/pywebview the TOPMOST /
+        foreground z-order shuffle in bring_to_foreground surfaces the
+        hidden-but-TOPMOST pre-warmed overlay — causing an empty overlay to
+        pop when the user clicks the tray toast to reopen Settings.  Re-
+        hiding it here is defense-in-depth: best-effort, never breaks reads."""
+        self.open(surface)
+        with self._lock:
+            win = self._windows.get(surface)
+        if win is not None:
+            try:
+                _native().bring_to_foreground(win)
+            except Exception:
+                # Foregrounding is best-effort: the window is already
+                # shown by open(); a foreground failure must never crash.
+                pass
+        # EDIT 1: re-hide the overlay after any non-overlay raise when the
+        # engine is NOT currently driving a visible overlay state.
+        # Wrapped in outer try/except so raise_window can NEVER throw.
+        try:
+            if surface != "overlay":
+                controller = self._overlay_controller
+                overlay_engine_visible = False
+                if controller is not None:
+                    try:
+                        overlay_engine_visible = bool(controller.overlay_window_visible())
+                    except Exception:
+                        pass
+                if not overlay_engine_visible:
+                    try:
+                        self.hide("overlay")
+                    except Exception:
+                        pass
         except Exception:
             pass
 
     def hide(self, surface: str) -> None:
         """Hide a surface's window without destroying it. Thread-safe.
 
-        Used by the overlay auto-hide path: the reader window is hidden
-        (not destroyed) on idle so the next read can re-show it instantly
-        and the live page (and its CDP target) survives. Falls back to
-        destroy if the platform window can't hide.
+        Thin delegator to :func:`window_lifecycle.hide` (R1 shim); the body
+        moved verbatim into the sibling lifecycle module (#302/BUG2 overlay
+        never-destroy on failed hide)."""
+        return _lifecycle().hide(self, surface)
 
-        #302: overlay is exempt from the destroy fall-through — it may be
-        the last live window; destroying it kills the GUI loop. Swallow the
-        hide error and keep it in the live set. Other surfaces keep the
-        original destroy fall-through.
+    def surface_for_window(self, win: Any) -> str | None:
+        """Return the surface name for a pywebview window object, or None.
 
-        Race guard (#race-fix): if the overlay's ``shown`` event has not
-        yet fired (``_overlay_show_pending`` is True), defer the hide so
-        the window can fully appear before it is hidden. The
-        ``_make_overlay_shown_guard`` handler picks up the deferred hide
-        once ``shown`` fires.
-        """
-        with self._lock:
-            win = self._windows.get(surface)
-            # Race guard: hide arrived before pywebview shown event --
-            # defer to the shown handler so the window is visible first.
-            if surface == "overlay" and self._overlay_show_pending:
-                self._overlay_hide_deferred = True
-                return
-        if win is None:
-            return
-        try:
-            win.hide()
-        except Exception:
-            if surface == "overlay":
-                # #302: never destroy on hide failure — may be the last live
-                # window; destroying it kills the GUI loop.
-                return
-            try:
-                win.destroy()
-            except Exception:
-                pass
-            with self._lock:
-                self._windows.pop(surface, None)
-
-    def close_active(self) -> None:
-        """Close whichever window currently has focus (the JS 'X' / Cancel
-        button calls this through the bridge)."""
-        with self._lock:
-            wins = list(self._windows.items())
-        target = None
-        for _surface, w in wins:
-            try:
-                if getattr(w, "gui", None) is not None and w.on_top is False:
-                    target = w
-            except Exception:
-                pass
-        # Fall back to the most recently opened window.
-        if target is None and wins:
-            target = wins[-1][1]
-        if target is not None:
-            try:
-                target.destroy()
-            except Exception:
-                pass
+        Thin delegator to :func:`window_lifecycle.surface_for_window`
+        (R1 shim); the body moved verbatim into the sibling lifecycle
+        module."""
+        return _lifecycle().surface_for_window(self, win)
 
     def close(self, surface: str) -> None:
         """Close a specific surface window by name. Thread-safe.
 
-        For frequently-used surfaces (``settings``, ``onboarding``,
-        ``voices``, ``notices``, ``overlay``) this HIDES the window
-        instead of destroying it so the tray app keeps running and can
-        re-open the window on demand.  All other surfaces are destroyed.
+        Thin delegator to :func:`window_lifecycle.close` (R1 shim); the body
+        moved verbatim into the sibling lifecycle module (#261/#284
+        hide-not-destroy surfaces)."""
+        return _lifecycle().close(self, surface)
 
-        This is the preferred target for ``on_close_window`` wiring — it
-        closes *that* surface's window, not the last-opened window as the
-        old ``close_active()`` heuristic did.  Mirrors Pro's
-        ``window_lifecycle.close()`` (~lines 449-491).
-        """
-        with self._lock:
-            win = self._windows.get(surface)
-        if win is None:
-            return
-        _HIDE_SURFACES = ("settings", "onboarding", "voices", "notices", "overlay")
-        if surface in _HIDE_SURFACES:
-            try:
-                win.hide()
-            except Exception:
-                pass
-        else:
-            try:
-                win.destroy()
-            except Exception:
-                pass
-
-    def surface_for_window(self, win: Any) -> str | None:
-        """Return the surface name for a given pywebview window object, or None.
-
-        Used by ``on_close_window`` wiring to identify which surface the
-        active window belongs to before calling ``close(surface)``.
-        Mirrors Pro's ``window_lifecycle.surface_for_window()``.
-        """
-        with self._lock:
-            for surface, w in self._windows.items():
-                if w is win:
-                    return surface
-        return None
+    def close_active(self) -> None:
+        """Thin delegator to :func:`window_lifecycle.close_active` (R1 shim);
+        the body moved verbatim into the sibling lifecycle module."""
+        return _lifecycle().close_active(self)
 
     def shutdown(self) -> None:
-        with self._lock:
-            wins = list(self._windows.values())
-        for w in wins:
-            try:
-                w.destroy()
-            except Exception:
-                pass
-        try:
-            import webview
-
-            webview.windows.clear()
-        except Exception:
-            pass
+        """Thin delegator to :func:`window_lifecycle.shutdown` (R1 shim);
+        the body moved verbatim into the sibling lifecycle module."""
+        return _lifecycle().shutdown(self)
 
     def run(self) -> None:
-        """Block on the pywebview GUI loop until all windows close."""
-        import webview
+        """Block on the pywebview GUI loop until all windows close.
 
-        if not self._windows:
-            # Nothing queued — open Settings so the app has a face.
-            self.open("settings")
-
-        # Bug 1 fix: pre-warm the overlay HIDDEN before the GUI loop starts
-        # so the first read shows it warm (~1-2 s WebView2 init avoided) and
-        # the hide→show cycle is properly initialised.  Without pre-warming,
-        # the overlay is cold-created when reading starts: pywebview's GUI
-        # thread creates+shows it AFTER the engine may have already finished
-        # (short text), causing the "flashes open then disappears" symptom.
-        # Created hidden=True → NOT on_top (see _make_window comment) so the
-        # pre-warmed HWND does not surface during tray/Settings foreground
-        # operations.  Best-effort: a failure must never block startup.
-        with self._lock:
-            overlay_already = "overlay" in self._windows
-        if not overlay_already:
-            try:
-                overlay_win = self._make_window("overlay", hidden=True)
-            except Exception:
-                overlay_win = None
-            if overlay_win is not None:
-                with self._lock:
-                    self._windows["overlay"] = overlay_win
-
-        self._started = True
-        webview.start()
-
-
-def _resolve_close_target(win: Any) -> Any:
-    return win
+        Thin delegator to :func:`window_lifecycle.run` (R1 shim); the body
+        moved verbatim into the sibling lifecycle module."""
+        return _lifecycle().run(self)
