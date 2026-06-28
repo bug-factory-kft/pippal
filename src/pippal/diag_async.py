@@ -2,7 +2,7 @@
 
 Pure stdlib. QueueHandler on root logger; background QueueListener owns
 the DailyFileHandler and does all file I/O off the hot path.
-_PipPalOnlyFilter passes only pippal/pippal_pro records into the queue.
+_PipPalOnlyFilter passes only pippal records into the queue.
 """
 
 from __future__ import annotations
@@ -17,8 +17,8 @@ from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
-# Loggers we care about — 'pippal' covers core; 'pippal_pro' covers Pro when present.
-_PIPPAL_LOGGER_PREFIXES: tuple[str, ...] = ("pippal", "pippal_pro")
+# Logger prefix filter — 'pippal' covers all core records.
+_PIPPAL_LOGGER_PREFIXES: tuple[str, ...] = ("pippal",)
 
 # Known-noisy third-party DEBUG emitters: raised to WARNING while active.
 _NOISY_THIRD_PARTY: tuple[str, ...] = (
