@@ -180,6 +180,26 @@ class WebWindowManager:
             except Exception:
                 pass
 
+        # Overlay loaded-kick: when the overlay page finishes loading (which
+        # can happen AFTER the window was already shown during a read, because
+        # WebView2 deprioritises hidden pre-warmed windows), immediately call
+        # __pippalOverlayKick so the tick picks up any in-progress read state.
+        # If the page loads while idle, the kick is a harmless no-op.
+        if surface == "overlay":
+            def _overlay_loaded_kick() -> None:
+                try:
+                    win.evaluate_js(
+                        "window.__pippalOverlayKick"
+                        " && window.__pippalOverlayKick()"
+                    )
+                except Exception:
+                    pass
+
+            try:
+                win.events.loaded += _overlay_loaded_kick
+            except Exception:
+                pass
+
         return win
 
     def open(self, surface: str) -> None:
@@ -202,14 +222,26 @@ class WebWindowManager:
                         # a racing hide() is deferred until shown fires (#race-fix).
                         self._overlay_show_pending = True
                         self._overlay_hide_deferred = False
-                        # overlay: re-anchor then show no-activate (#265)
+                        # overlay: re-anchor then show.
                         self._anchor_overlay(existing)
+                        # Call pywebview show() FIRST so its 'shown' event fires
+                        # and the race guard (_make_overlay_shown_guard) can clear
+                        # _overlay_show_pending and apply any deferred hide.
+                        # show_no_activate() bypasses pywebview's own show path so
+                        # its 'shown' event never fires, leaving _overlay_show_pending
+                        # stuck True and deferred hides never applied (empty overlay).
+                        # After pywebview show(), re-assert NOACTIVATE via Win32 so
+                        # the overlay does not steal foreground during capture (#265).
+                        # Mirrors Pro window_lifecycle.py open() (lines 324-366).
+                        try:
+                            existing.show()
+                        except Exception:
+                            pass
                         try:
                             from pippal.web_ui import window_native as _wn
-                            if not _wn.show_no_activate(existing):
-                                existing.show()
+                            _wn.show_no_activate(existing)
                         except Exception:
-                            existing.show()
+                            pass
                         # A2 overlay kick: force immediate tick after show
                         # (Pro window_lifecycle.py ~lines 358-361 parity).
                         # Best-effort: evaluate_js no-ops if window not ready.
