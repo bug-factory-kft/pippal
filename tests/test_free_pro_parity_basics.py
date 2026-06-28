@@ -106,11 +106,13 @@ class TestBug4ActiveWebviewWindow:
 # ---------------------------------------------------------------------------
 
 class TestBug5PersistClosesWindow:
-    """Verify app.js persist() behaviour without running a browser."""
+    """Verify persist() behaviour without running a browser.
+    After the ES6-module port (step 5), persist() lives in settings-footer.js."""
 
     def _read_app_js(self) -> str:
         import pathlib
-        p = pathlib.Path(__file__).parent.parent / "webui" / "js" / "app.js"
+        # persist() moved to settings-footer.js (step 5 ES6 port). app.js deleted.
+        p = pathlib.Path(__file__).parent.parent / "webui" / "js" / "settings-footer.js"
         return p.read_text(encoding="utf-8")
 
     def test_persist_calls_close_window_when_close_true(self):
@@ -130,9 +132,9 @@ class TestBug5PersistClosesWindow:
         src = self._read_app_js()
         # Find the persist function, then locate the close_window call inside it.
         persist_idx = src.find("function persist(close)")
-        assert persist_idx >= 0, "persist() function not found in app.js"
+        assert persist_idx >= 0, "persist() function not found in settings-footer.js"
         # Find the end of persist function — next top-level function declaration
-        next_fn = src.find("\n  function ", persist_idx + 1)
+        next_fn = src.find("\nexport function ", persist_idx + 1)
         persist_body = src[persist_idx:next_fn if next_fn > 0 else persist_idx + 2000]
         # The close_window call must exist inside the persist body
         assert '"close_window"' in persist_body, (
@@ -149,11 +151,13 @@ class TestBug5PersistClosesWindow:
 # ---------------------------------------------------------------------------
 
 class TestBug3VoiceCatalogueRefresh:
-    """Verify app.js doInstall re-fetches get_voice_catalogue."""
+    """Verify doInstall re-fetches get_voice_catalogue.
+    After ES6-module port (step 5), voice manager lives in voices.js."""
 
     def _read_app_js(self) -> str:
         import pathlib
-        p = pathlib.Path(__file__).parent.parent / "webui" / "js" / "app.js"
+        # Voice manager (doInstall, vmState) moved to voices.js. app.js deleted.
+        p = pathlib.Path(__file__).parent.parent / "webui" / "js" / "voices.js"
         return p.read_text(encoding="utf-8")
 
     def test_install_voice_async_called_first(self):
@@ -380,12 +384,13 @@ class TestBug2AsyncVoiceInstall:
         assert status.get("installed") == "test-voice.onnx"
 
     def test_app_js_has_voice_install_status_call(self):
-        """app.js must call voice_install_status to poll progress."""
+        """voices.js must call voice_install_status to poll progress.
+        After ES6-module port (step 5), voice manager lives in voices.js."""
         import pathlib
-        src = (pathlib.Path(__file__).parent.parent / "webui" / "js" / "app.js"
+        src = (pathlib.Path(__file__).parent.parent / "webui" / "js" / "voices.js"
                ).read_text(encoding="utf-8")
         assert '"voice_install_status"' in src, (
-            "voice_install_status polling call missing from app.js"
+            "voice_install_status polling call missing from voices.js"
         )
 
 

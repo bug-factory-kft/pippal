@@ -287,33 +287,35 @@ class TestWebWindowManagerHideGuard:
 
 
 class TestAppJsLoadingMessages:
-    """app.js must contain the rotating loading messages from Pro's overlay.js."""
+    """overlay.js must contain the rotating loading messages from Pro's overlay.js.
+    After ES6-module port (step 5), renderOverlay lives in overlay.js; app.js deleted."""
 
     @pytest.fixture
     def app_js(self) -> str:
         repo_root = pathlib.Path(__file__).parent.parent
-        js_path = repo_root / "webui" / "js" / "app.js"
+        # Loading messages moved to overlay.js (step 5 ES6 port). app.js deleted.
+        js_path = repo_root / "webui" / "js" / "overlay.js"
         return js_path.read_text(encoding="utf-8")
 
     def test_loading_messages_array_present(self, app_js: str) -> None:
         assert "LOADING_MESSAGES" in app_js, (
-            "LOADING_MESSAGES array not found in webui/js/app.js -- "
+            "LOADING_MESSAGES array not found in webui/js/overlay.js -- "
             "port it from Pro's overlay.js."
         )
 
     def test_current_loading_message_function_present(self, app_js: str) -> None:
         assert "currentLoadingMessage" in app_js, (
-            "currentLoadingMessage() function not found in webui/js/app.js."
+            "currentLoadingMessage() function not found in webui/js/overlay.js."
         )
 
     def test_preparing_literal_removed_as_default(self, app_js: str) -> None:
         # The static "preparing..." fallback must be replaced by currentLoadingMessage().
         assert ('"preparing…"' not in app_js) and ("'preparing…'" not in app_js), (
-            "Static 'preparing...' literal still used as loader default in app.js -- "
+            "Static 'preparing...' literal still used as loader default in overlay.js -- "
             "replace with currentLoadingMessage()."
         )
 
     def test_loading_rotate_ms_present(self, app_js: str) -> None:
         assert "LOADING_ROTATE_MS" in app_js, (
-            "LOADING_ROTATE_MS not found in app.js."
+            "LOADING_ROTATE_MS not found in overlay.js."
         )

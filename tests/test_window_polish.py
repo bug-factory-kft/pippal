@@ -168,14 +168,16 @@ class TestDragRegionPresence:
         assert "no-drag" in snippet
 
     def test_app_js_overlay_head_has_drag_region(self):
-        """app.js renderOverlay must use overlay-drag-region + pywebview-drag-region."""
-        js = (_WEBUI / "js" / "app.js").read_text(encoding="utf-8")
+        """overlay.js renderOverlay must use overlay-drag-region + pywebview-drag-region.
+        After ES6-module port (step 5), renderOverlay lives in overlay.js."""
+        js = (_WEBUI / "js" / "overlay.js").read_text(encoding="utf-8")
         assert "overlay-drag-region" in js
         assert "pywebview-drag-region" in js
 
     def test_app_js_no_right_button_drag(self):
-        """app.js must NOT contain the old right-button JS drag block."""
-        js = (_WEBUI / "js" / "app.js").read_text(encoding="utf-8")
+        """overlay.js must NOT contain the old right-button JS drag block.
+        After ES6-module port (step 5), renderOverlay lives in overlay.js."""
+        js = (_WEBUI / "js" / "overlay.js").read_text(encoding="utf-8")
         # The old drag block used data-dragging attribute
         assert "data-dragging" not in js
 

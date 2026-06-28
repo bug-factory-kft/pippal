@@ -7,19 +7,15 @@
  * app-core.js and the feature-surface renderers from their own modules,
  * then dispatches the ?view= surface.
  *
- * Surfaces in this build: overlay, voices, notices, onboarding.
- * Settings: temporary stub (settings-stub.js) until Step 5 ports the full
- *           settings surface from Pro. ?view=settings renders a placeholder.
- * Stripped (not in free): moods, release, import, queue, recent.
- *
- * Step-5 implementer: swap the settings-stub.js imports for the real
- *   import { renderSettings } from "./settings.js";
- *   import { wireFooter }     from "./settings-footer.js";
- * once those modules are ported. */
+ * Surfaces in this build: overlay, voices, notices, onboarding, settings.
+ * Settings: full ES6-module port (step 5) — settings.js + settings-cards.js +
+ *           settings-footer.js. settings-stub.js deleted.
+ * Stripped (not in free): moods, release, import, queue, recent. */
 "use strict";
 
 import { API, SURFACE, toast, fail } from "./app-core.js";
-import { renderSettings, wireFooter } from "./settings-stub.js";
+import { renderSettings } from "./settings.js";
+import { wireFooter } from "./settings-footer.js";
 import { renderOnboarding } from "./onboarding.js";
 import { renderVoiceManager } from "./voices.js";
 import { renderNotices } from "./notices.js";

@@ -314,22 +314,24 @@ class TestBehaviorAListenerPresent:
     def _read_appjs(self):
         import pathlib
         repo = pathlib.Path(__file__).parent.parent
-        return (repo / "webui" / "js" / "app.js").read_text(encoding="utf-8")
+        # refreshPiperVoices + voice-change listeners live in settings.js
+        # after the ES6-module port (step 5). app.js was deleted.
+        return (repo / "webui" / "js" / "settings.js").read_text(encoding="utf-8")
 
     def test_refresh_piper_voices_function_present(self):
         js = self._read_appjs()
         assert "refreshPiperVoices" in js, (
-            "app.js must define refreshPiperVoices() for voice-list live refresh"
+            "settings.js must define refreshPiperVoices() for voice-list live refresh"
         )
 
     def test_installed_voices_changed_event_listener_present(self):
         js = self._read_appjs()
         assert "addEventListener" in js and "INSTALLED_VOICES_CHANGED_EVENT" in js, (
-            "app.js must register window.addEventListener(INSTALLED_VOICES_CHANGED_EVENT, ...)"
+            "settings.js must register window.addEventListener(INSTALLED_VOICES_CHANGED_EVENT, ...)"
         )
 
     def test_storage_listener_present(self):
         js = self._read_appjs()
         assert "INSTALLED_VOICES_CHANGED_KEY" in js, (
-            "app.js must check INSTALLED_VOICES_CHANGED_KEY in storage listener"
+            "settings.js must check INSTALLED_VOICES_CHANGED_KEY in storage listener"
         )
