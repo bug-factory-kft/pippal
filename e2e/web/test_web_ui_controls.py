@@ -210,23 +210,53 @@ def test_onboarding_install_default_voice_real_effect(
     page: Page, app_url: str, readiness, backend, monkeypatch, step
 ):
     """Install default voice must call the REAL bridge.install_default
-    _voice → install_piper_voice; we stub only the network download
-    (urllib) so a real file lands in the real per-test voices dir and
-    the live config voice is updated — the bridge/installer code path is
-    entirely real."""
+    _voice_async → install_piper_voice; only the network download seam is
+    stubbed so a real file lands in the real per-test voices dir and the
+    live config voice is updated — the bridge/installer code path is
+    entirely real.
+
+    Seam discipline (identical to test_voice_manager_row_install_real_effect
+    and test_ucc9_first_run_vm_install_completion_flips_onboarding_ready):
+    the UI calls install_default_voice_async, which drives the bridge's
+    _stream_voice_with_progress (async path); the sync _streaming_download
+    is patched as a belt-and-suspenders fallback. Both seams write a small
+    fake .onnx + .json locally instead of downloading ~120 MB from the
+    network, making the test deterministic on CI.
+    """
     from pippal import voices as voices_mod
     from pippal import voice_install as vm
+    import pippal.web_ui.bridge as _bridge_mod
 
-    step("force readiness = missing_voice; stub only the network download")
+    step("force readiness = missing_voice; stub the network download seam "
+         "(async _stream_voice_with_progress + sync _streaming_download fallback)")
     readiness["missing_voice"]()
 
+    # Belt-and-suspenders: stub the sync download fallback path.
     def _fake_download(url: str, dest: Path, *a, **k) -> None:
         dest.write_bytes(b"stub-voice-model-bytes")
 
     monkeypatch.setattr(vm, "_streaming_download", _fake_download)
 
+    # Primary seam: stub the async path that install_default_voice_async uses
+    # (voices.js calls install_default_voice_async → bridge thread →
+    # _stream_voice_with_progress). This is the only network seam — the real
+    # install_piper_voice installer, the real config update, and the real
+    # onboarding state transition all run unchanged.
+    def _fake_stream_with_progress(voice, is_cancelled, set_progress):
+        from pippal.voices import voice_filename
+        filename = voice_filename(voice)
+        _bridge_mod.VOICES_DIR.mkdir(parents=True, exist_ok=True)
+        (_bridge_mod.VOICES_DIR / filename).write_bytes(b"stub-voice-model-bytes")
+        (_bridge_mod.VOICES_DIR / f"{filename}.json").write_text("{}", "utf-8")
+        set_progress(pct=100.0, status="Done.")
+        return filename
+
+    monkeypatch.setattr(
+        backend["bridge"], "_stream_voice_with_progress", _fake_stream_with_progress
+    )
+
     _goto(page, app_url, "onboarding", step)
-    step("click Install default voice (real installer path)")
+    step("click Install default voice (real installer path, stubbed download)")
     page.get_by_test_id("onboarding-install-voice").click()
 
     def _installed() -> bool:
