@@ -47,7 +47,7 @@ def _winsound_noop_on_ci(monkeypatch: pytest.MonkeyPatch) -> None:
     if sys.platform != "win32":
         return  # Non-Windows: the root conftest already installed a stub.
     try:
-        import winsound  # noqa: F401 — Windows-only, always available here
+        import winsound  # Windows-only, always available here
     except ImportError:
         return  # Defensive: shouldn't happen on win32, but be safe.
     monkeypatch.setattr(winsound, "PlaySound", lambda *_a, **_k: None)

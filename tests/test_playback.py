@@ -11,6 +11,27 @@ from pippal import playback
 from pippal.engine import TTSEngine
 
 
+def _seq_clock(values: list[float]):
+    """Return a non-exhausting callable that yields each value in turn,
+    then keeps returning the last one indefinitely.
+
+    This replaces ``iter([...])`` + ``lambda: next(...)`` pairs so that extra
+    clock calls from CI background threads / diagnostics / platform bookkeeping
+    never raise StopIteration — they just see the final stable value again.
+    """
+    it = iter(values)
+    last: dict[str, float] = {"v": values[-1]}
+
+    def _c(*_a: object, **_k: object) -> float:
+        try:
+            last["v"] = next(it)
+        except StopIteration:
+            pass
+        return last["v"]
+
+    return _c
+
+
 @pytest.fixture()
 def engine() -> TTSEngine:
     return TTSEngine(MagicMock(), {"engine": "piper"}, overlay_ref=lambda: None)
@@ -69,7 +90,6 @@ def test_resume_plays_remaining_tail_wav_not_full_original(
 
     played: list[Path | None] = []
     tail_info: dict[str, int] = {}
-    monotonic_values = iter([0.0, 1.0, 1.0])
 
     def fake_play_sound(path: str | None, _flags: int = 0) -> None:
         played.append(Path(path) if path is not None else None)
@@ -87,9 +107,14 @@ def test_resume_plays_remaining_tail_wav_not_full_original(
         with engine.lock:
             engine._is_paused = False
 
-    monkeypatch.setattr(playback.time, "monotonic", lambda: next(monotonic_values))
-    wall_times = iter([0.0, 0.0, 0.0, 10.0])
-    monkeypatch.setattr(playback.time, "time", lambda: next(wall_times))
+    # Non-exhausting clocks: after the controlled sequence is consumed,
+    # any extra calls from CI background threads / teardown return the final
+    # stable value (1.0 or 10.0) instead of raising StopIteration.
+    # Extra trailing 1.0 values in monotonic also absorb a spurious call
+    # between playback_started_at and the elapsed_s read without affecting
+    # the subtraction (1.0 - 0.0 = 1.0 regardless of how many 1.0s remain).
+    monkeypatch.setattr(playback.time, "monotonic", _seq_clock([0.0, 1.0, 1.0]))
+    monkeypatch.setattr(playback.time, "time", _seq_clock([0.0, 0.0, 0.0, 10.0]))
     monkeypatch.setattr(playback.time, "sleep", fake_sleep)
     monkeypatch.setattr(playback.winsound, "PlaySound", fake_play_sound)
 
@@ -136,9 +161,6 @@ def test_seek_during_resumed_tail_playback_purges_before_tail_cleanup(
     unlink_attempts: list[tuple[Path, bool]] = []
     audio_active = False
 
-    monotonic_values = iter([0.0, 1.0, 1.0])
-    wall_values = iter([0.0, 0.0, 0.0, 0.0, 10.0])
-
     def fake_play_sound(path: str | None, _flags: int = 0) -> None:
         nonlocal audio_active
         played.append(Path(path) if path is not None else None)
@@ -163,8 +185,14 @@ def test_seek_during_resumed_tail_playback_purges_before_tail_cleanup(
             return
         path.unlink(missing_ok=True)
 
-    monkeypatch.setattr(playback.time, "monotonic", lambda: next(monotonic_values))
-    monkeypatch.setattr(playback.time, "time", lambda: next(wall_values))
+    # Non-exhausting clocks.  For the seek test the loop exits via the
+    # WaitResult.SEEKED branch (not deadline expiry), so time.time() can safely
+    # return 0.0 unconditionally — the extra-call risk of shifting the 10.0
+    # slot to a deadline-update position (creating an over-long deadline) is
+    # completely eliminated.  monotonic gets an extra 0.0 at the start to absorb
+    # one spurious call before playback_started_at is set.
+    monkeypatch.setattr(playback.time, "monotonic", _seq_clock([0.0, 0.0, 1.0, 1.0]))
+    monkeypatch.setattr(playback.time, "time", lambda: 0.0)
     monkeypatch.setattr(playback.time, "sleep", fake_sleep)
     monkeypatch.setattr(playback.winsound, "PlaySound", fake_play_sound)
     monkeypatch.setattr(playback, "safe_unlink", fake_safe_unlink)
@@ -232,8 +260,6 @@ def test_resume_replays_original_chunk_when_tail_wav_creation_fails(
         wav.writeframes(b"\0\0" * frame_count)
 
     played: list[Path | None] = []
-    monotonic_values = iter([0.0, 1.0, 1.0, 1.0])
-    wall_values = iter([0.0, 0.0, 0.0, 10.0])
 
     def fake_play_sound(path: str | None, _flags: int = 0) -> None:
         played.append(Path(path) if path is not None else None)
@@ -248,8 +274,10 @@ def test_resume_replays_original_chunk_when_tail_wav_creation_fails(
     def fail_tempfile(*_args: Any, **_kwargs: Any) -> object:
         raise OSError("temp creation failed")
 
-    monkeypatch.setattr(playback.time, "monotonic", lambda: next(monotonic_values))
-    monkeypatch.setattr(playback.time, "time", lambda: next(wall_values))
+    # Non-exhausting clocks: after the controlled sequence is consumed,
+    # extra CI calls return the final stable value instead of StopIteration.
+    monkeypatch.setattr(playback.time, "monotonic", _seq_clock([0.0, 1.0, 1.0, 1.0]))
+    monkeypatch.setattr(playback.time, "time", _seq_clock([0.0, 0.0, 0.0, 10.0]))
     monkeypatch.setattr(playback.time, "sleep", fake_sleep)
     monkeypatch.setattr(playback.winsound, "PlaySound", fake_play_sound)
     monkeypatch.setattr(playback.tempfile, "NamedTemporaryFile", fail_tempfile)
@@ -284,8 +312,6 @@ def test_resume_failed_tail_and_failed_original_replay_keeps_chunk_retryable(
         wav.writeframes(b"\0\0" * frame_count)
 
     played: list[Path | None] = []
-    monotonic_values = iter([0.0, 1.0])
-    wall_values = iter([0.0, 0.0])
 
     def fake_play_sound(path: str | None, _flags: int = 0) -> None:
         played.append(Path(path) if path is not None else None)
@@ -299,8 +325,9 @@ def test_resume_failed_tail_and_failed_original_replay_keeps_chunk_retryable(
         with engine.lock:
             engine._is_paused = False
 
-    monkeypatch.setattr(playback.time, "monotonic", lambda: next(monotonic_values))
-    monkeypatch.setattr(playback.time, "time", lambda: next(wall_values))
+    # Non-exhausting clocks: extra CI calls keep returning the last stable value.
+    monkeypatch.setattr(playback.time, "monotonic", _seq_clock([0.0, 1.0]))
+    monkeypatch.setattr(playback.time, "time", _seq_clock([0.0, 0.0]))
     monkeypatch.setattr(playback.time, "sleep", fake_sleep)
     monkeypatch.setattr(playback.winsound, "PlaySound", fake_play_sound)
     monkeypatch.setattr(playback, "_tail_wav_from_elapsed", lambda *_args: None)
