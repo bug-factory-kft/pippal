@@ -1,13 +1,6 @@
 /* settings-footer.js — Settings surface glue: context-menu status helper,
  * read-back of control values, persist (Save/Apply), and footer button
- * wiring (Save / Apply / Cancel / Reset).
- *
- * Ported from Pro's settings-footer.js with paid fields stripped:
- *   - ollama_endpoint / ollama_allow_remote / ollama_model /
- *     ai_translate_target removed (no AI card in free)
- *   - Kokoro voice branch removed from collectSettingsValues (no Kokoro)
- *   - cleanup_* loop removed (no Cleanup card in free)
- *   - kokoro_lang skip removed from reset loop (no Kokoro) */
+ * wiring (Save / Apply / Cancel / Reset). Free build: Piper voices only. */
 "use strict";
 
 import {

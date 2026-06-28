@@ -1,21 +1,11 @@
-/* settings-cards.js — FREE Settings card builders.
- * Ported from Pro's settings-cards.js with paid cards removed:
- *   - buildAICard (get_ai_config / list_ollama_models) -- REMOVED
- *   - buildReleaseCard (pro_about / open_release_window) -- REMOVED
- *   - buildCleanupCard (get_cleanup_rules) -- REMOVED
- *   - buildDiagCard Pro upload path (send_diag_logs / get_diag_upload_status /
- *     set_diag_upload_config) -- REPLACED with free no-upload version
- * Free diag card source: app.js buildDiagCard (lines ~77-165).
+/* settings-cards.js — Settings card builders. Free build: Piper voices only.
  * Only export: buildDiagCard. */
 "use strict";
 
 import { U, API, toast, fail, confirmDialog } from "./app-core.js";
 
 // ------------------------------------------------------------------
-// Diagnostics card (free build -- no "Send to creator" upload path).
-// Controls backed by free bridge: get_diag_state / set_diag_level /
-// open_diag_folder / delete_diag_logs.
-// Stripped: send_diag_logs, get_diag_upload_status, set_diag_upload_config.
+// Diagnostics card (local logs only — no upload path).
 // ------------------------------------------------------------------
 export function buildDiagCard(state) {
   state = state || {};
@@ -28,8 +18,7 @@ export function buildDiagCard(state) {
   ], state.level || "off");
   levelSel.classList.add("grow");
 
-  // 2. Privacy description -- no upload / "send to creator" sentences
-  //    (Pro-only). Text matches free's original buildDiagCard notice.
+  // 2. Privacy description — no upload path.
   var noticeEl = U.el("div", {
     class: "card-hint",
     testid: "settings-diag-notice",
@@ -62,7 +51,7 @@ export function buildDiagCard(state) {
     }).catch(function () {});
   }
 
-  // 4. Buttons: Open log folder + Delete logs (danger). No "Send to creator".
+  // 4. Buttons: Open log folder + Delete logs (danger).
   var openBtn = U.el("button", {
     testid: "settings-diag-open",
     text: "Open log folder",

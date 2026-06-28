@@ -1,7 +1,7 @@
-/* voices.js — the VOICE MANAGER surface (voice_manager.py parity, extended
- * Pro catalogue). Extracted VERBATIM from app.js/main.js (vmState,
- * renderVoiceManager, voiceRow); behavior-preserving — same DOM, same
- * data-testid values, same bridge calls, same install-progress UX (#252).
+/* voices.js — the VOICE MANAGER surface (voice_manager.py parity).
+ * Extracted VERBATIM from app.js/main.js (vmState, renderVoiceManager,
+ * voiceRow); behavior-preserving — same DOM, same data-testid values,
+ * same bridge calls, same async install-progress UX.
  * Shared singletons/helpers come from app-core.js. */
 "use strict";
 
@@ -157,7 +157,7 @@ function voiceRow(v, onChanged) {
     text: v.installed ? "Remove" : "Install",
     class: v.installed ? "danger" : "",
   });
-  // Progress bar + cancel button for install (issue #252)
+  // Progress bar + cancel button for install.
   var voiceCancelBtn = U.el("button", {
     testid: "vm-cancel-" + v.id,
     text: "Cancel",
@@ -208,7 +208,7 @@ function voiceRow(v, onChanged) {
         }
         voiceProgressLabel.textContent = lbl;
         // statusEl (.vstatus span) is intentionally NOT updated here to prevent
-        // the duplicate-indicator layout break (#252); it is cleared in doInstall
+        // the duplicate-indicator layout break; it is cleared in doInstall
         // and only restored on completion/failure via _stopInstallUI.
         if (s.done) {
           if (s.cancelled || s.error) {
@@ -264,7 +264,7 @@ function voiceRow(v, onChanged) {
   }
   function doInstall() {
     btn.disabled = true;
-    // Clear legacy status text — progress-wrap is the single indicator (#252)
+    // Clear legacy status text — progress-wrap is the single indicator.
     statusEl.textContent = "";
     statusEl.className = "vstatus";
     voiceCancelBtn.style.display = "";
@@ -318,7 +318,7 @@ function voiceRow(v, onChanged) {
     }
   });
   // Progress is placed immediately above the action button row so it is
-  // visually anchored to the buttons (#252 UX placement).
+  // visually anchored to the buttons.
   return U.el("div", { class: "card" }, [
     U.el("div", { class: "vrow" }, [
       U.el("div", { class: "vmeta" }, [

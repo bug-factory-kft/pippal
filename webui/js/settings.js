@@ -1,15 +1,4 @@
-/* settings.js — SETTINGS surface entry for the FREE build.
- * Ported from Pro's settings.js with paid features stripped:
- *   - Promise.all reduced to 8 free calls (no get_kokoro_state, pro_about,
- *     get_cleanup_rules, get_build_info, get_ai_config)
- *   - Kokoro extras removed: no install btn/progress/cancel, no lang-row,
- *     no applyEngineView kokoro branch — Voice card = Engine + Voice + Manage
- *   - AI card, Release card, Pronunciation card, Cleanup card removed
- *   - About version: cfg.brand_name + " " + about.version (no build number)
- *   - Branding: "PipPal" (not "PipPal Pro") in all user-visible strings
- * The card order matches free's current Settings:
- *   Voice · Speech · Hotkeys · Reader panel · Windows integration ·
- *   Diagnostics (no upload) · Open-source notices · About */
+/* settings.js — Settings surface entry. Free build: Piper voices only. */
 "use strict";
 
 import {
@@ -43,8 +32,6 @@ export function renderSettings() {
     teardownSettingsVoiceRefresh();
     teardownSettingsVoiceRefresh = null;
   }
-  // 8 free bridge calls only -- no get_kokoro_state, pro_about,
-  // get_cleanup_rules, get_build_info, get_ai_config.
   return Promise.all([
     API.call("get_config"),
     API.call("get_defaults"),
@@ -132,7 +119,7 @@ export function renderSettings() {
     ]);
 
     // Live-refresh the voice list when voices are installed in the Voices
-    // window (ported from Pro settings.js lines 296-327).
+    // window.
     var piperVoiceRefreshToken = 0;
     function refreshPiperVoices() {
       var token = ++piperVoiceRefreshToken;
@@ -330,7 +317,7 @@ export function renderSettings() {
       ]),
     ]);
 
-    // ---- Diagnostics card (no upload -- free build) ----
+    // ---- Diagnostics card ----
     var diagCard = buildDiagCard(diagState);
 
     // ---- Open-source notices card ----
