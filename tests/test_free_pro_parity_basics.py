@@ -446,3 +446,98 @@ class TestWindowLifecyclePort:
         assert "settings" in surfaces, (
             "'settings' key missing from window_lifecycle._SURFACES"
         )
+
+
+# ---------------------------------------------------------------------------
+# Relaunch-foreground: second-instance sends IPC signal, no popup
+# ---------------------------------------------------------------------------
+
+
+class TestRelaunchForeground:
+    """Second-instance relaunch must signal the running instance via IPC
+    (POST /settings) and exit quietly — never show a MessageBox popup.
+    """
+
+    def test_signal_running_instance_function_exists(self) -> None:
+        """app_web must export _signal_running_instance_to_show."""
+        import pippal.web_ui.app_web as aw
+
+        assert hasattr(aw, "_signal_running_instance_to_show"), (
+            "_signal_running_instance_to_show missing from app_web — Pro port not done"
+        )
+
+    def test_foreground_running_window_win32_exists(self) -> None:
+        """app_web must export _foreground_running_window_win32."""
+        import pippal.web_ui.app_web as aw
+
+        assert hasattr(aw, "_foreground_running_window_win32"), (
+            "_foreground_running_window_win32 missing from app_web — Pro port not done"
+        )
+
+    def test_no_messagebox_in_already_running_branch(self) -> None:
+        """The already-running branch must NOT call MessageBoxW (no popup)."""
+        import pathlib
+
+        src = (
+            pathlib.Path(__file__).parent.parent
+            / "src"
+            / "pippal"
+            / "web_ui"
+            / "app_web.py"
+        ).read_text(encoding="utf-8")
+
+        assert "MessageBoxW" not in src, (
+            "MessageBoxW popup still present in app_web.py — dead-end popup not removed"
+        )
+
+    def test_command_callbacks_settings_uses_raise_window(self) -> None:
+        """command_callbacks['settings'] must use raise_window, not plain open."""
+        import pathlib
+
+        src = (
+            pathlib.Path(__file__).parent.parent
+            / "src"
+            / "pippal"
+            / "web_ui"
+            / "app_web.py"
+        ).read_text(encoding="utf-8")
+
+        assert 'raise_window("settings")' in src, (
+            "raise_window not called for 'settings' in app_web.py"
+        )
+
+    def test_signal_function_posts_to_settings(self) -> None:
+        """_signal_running_instance_to_show must POST to /settings endpoint."""
+        import importlib
+        from unittest.mock import patch
+
+        mod = importlib.import_module("pippal.web_ui.app_web")
+        fn = getattr(mod, "_signal_running_instance_to_show", None)
+        assert fn is not None, "_signal_running_instance_to_show not found"
+
+        captured: dict = {}
+
+        class _FakeResp:
+            status = 200
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                pass
+
+        def fake_urlopen(req, timeout=None):
+            captured["url"] = req.full_url
+            captured["method"] = req.get_method()
+            return _FakeResp()
+
+        with patch("urllib.request.urlopen", side_effect=fake_urlopen):
+            result = fn()
+
+        assert result is True, "_signal_running_instance_to_show should return True on 200"
+        assert captured.get("url", "").endswith("/settings"), (
+            f"Expected POST to /settings, got {captured.get('url')}"
+        )
+        assert captured.get("method") == "POST", (
+            f"Expected POST method, got {captured.get('method')}"
+        )
