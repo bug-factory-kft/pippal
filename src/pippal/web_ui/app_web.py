@@ -25,7 +25,7 @@ from ..onboarding import should_show_activation_panel
 from ..paths import PIPER_EXE, ensure_dirs
 from ..tray import make_tray_icon
 from .bridge import PipPalBridge
-from .overlay_state import WebOverlay
+from .overlay_window import OverlayWindowController
 from .server import start_web_ui_server
 from .startup_toast import show_startup_toast
 from .windows import WebWindowManager
@@ -34,6 +34,102 @@ from .windows import WebWindowManager
 def _selected_piper_missing(config: dict[str, Any]) -> bool:
     engine_name = str(config.get("engine") or "piper").lower()
     return engine_name == "piper" and not PIPER_EXE.exists()
+
+
+def _signal_running_instance_to_show() -> bool:
+    """Tell the already-running instance to OPEN + foreground its window.
+
+    POSTs /settings to the running instance IPC (wired to
+    windows.raise_window("settings")).
+    Returns True iff HTTP 200; False on any failure.
+    """
+    import os
+    import urllib.error
+    import urllib.request
+
+    from ..paths import CMD_SERVER_PORT
+
+    # Respect the env-override port so the E2E harness (PIPPAL_CMD_SERVER_PORT)
+    # hits the real running instance rather than the static default port.
+    try:
+        port = int(os.environ.get("PIPPAL_CMD_SERVER_PORT") or CMD_SERVER_PORT)
+    except (ValueError, TypeError):
+        port = CMD_SERVER_PORT
+
+    url = f"http://127.0.0.1:{port}/settings"
+    req = urllib.request.Request(url, data=b"", method="POST")
+    try:
+        with urllib.request.urlopen(req, timeout=3) as resp:
+            return 200 <= getattr(resp, "status", 200) < 300
+    except urllib.error.HTTPError:
+        return False
+    except Exception:
+        return False
+
+
+def _foreground_running_window_win32() -> bool:
+    """Best-effort Win32 foreground of the already-running PipPal window.
+
+    Used as a fallback when the IPC signal cannot be delivered.  Uses
+    ``EnumWindows`` to find a top-level visible window whose title contains
+    "PipPal" that belongs to a DIFFERENT process (not the current second
+    instance), then calls ``ShowWindow(SW_RESTORE)`` +
+    ``BringWindowToTop`` + ``SetForegroundWindow``.
+
+    Windows-only; wraps everything in try/except and returns False on any
+    failure or on non-Windows platforms.  The caller must never rely on
+    the return value for correctness — this is purely best-effort UX.
+    """
+    if sys.platform != "win32":
+        return False
+    try:
+        import ctypes
+        import ctypes.wintypes
+        import os as _os
+
+        user32 = ctypes.windll.user32
+        SW_RESTORE = 9
+        current_pid = _os.getpid()
+        found_hwnd: list[int] = []
+
+        WNDENUMPROC = ctypes.WINFUNCTYPE(
+            ctypes.wintypes.BOOL,
+            ctypes.wintypes.HWND,
+            ctypes.wintypes.LPARAM,
+        )
+
+        def _enum_callback(hwnd: int, _lparam: int) -> bool:
+            try:
+                if not user32.IsWindowVisible(hwnd):
+                    return True
+                length = user32.GetWindowTextLengthW(hwnd)
+                if length == 0:
+                    return True
+                buf = ctypes.create_unicode_buffer(length + 1)
+                user32.GetWindowTextW(hwnd, buf, length + 1)
+                if "pippal" not in buf.value.lower():
+                    return True
+                pid = ctypes.wintypes.DWORD(0)
+                user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+                if pid.value == current_pid:
+                    return True  # skip our own windows
+                found_hwnd.append(hwnd)
+                return False  # stop once we have one match
+            except Exception:
+                return True  # keep enumerating on any error
+
+        user32.EnumWindows(WNDENUMPROC(_enum_callback), 0)
+
+        if not found_hwnd:
+            return False
+
+        hwnd = found_hwnd[0]
+        user32.ShowWindow(hwnd, SW_RESTORE)
+        user32.BringWindowToTop(hwnd)
+        user32.SetForegroundWindow(hwnd)
+        return True
+    except Exception:
+        return False
 
 
 def build_tray_menu(
@@ -45,7 +141,7 @@ def build_tray_menu(
 ) -> tuple[pystray.Menu, dict[str, Any]]:
     """Compose the native pystray menu the web app runs in the tray.
 
-    Extracted verbatim from :func:`main` so the *exact same* menu and
+    Factored out of :func:`main` so the *exact same* menu and
     callables can be exercised head-less by the integration suite (a
     ``pystray.MenuItem`` is callable — ``item(icon)`` is precisely the
     dispatch a real tray click performs, minus the OS pixel rendering).
@@ -120,7 +216,7 @@ def main() -> None:
         )
 
     # ----- Backend -----
-    overlay = WebOverlay(config)
+    overlay = OverlayWindowController(config)
     engine = TTSEngine(config=config, root=_NullRoot(), overlay_ref=lambda: overlay)
     engine.attach_history(load_history(), save_history)
 
@@ -181,7 +277,9 @@ def main() -> None:
         on_open_settings=lambda: windows.open("settings"),
         on_open_voice_manager=lambda: windows.open("voices"),
         on_open_notices=lambda: windows.open("notices"),
-        on_close_window=windows.close_active,
+        on_close_window=lambda: windows.close(
+            windows.surface_for_window(bridge._active_webview_window()) or "settings"
+        ),
         on_hotkey_change=bind_hotkeys,
         on_engine_change=engine.reset_backend,
     )
@@ -189,31 +287,35 @@ def main() -> None:
     base_url = f"http://127.0.0.1:{port}"
     windows.configure(base_url, bridge)
 
+    # Wire the overlay window controller so state transitions open/hide the
+    # overlay window so state transitions open/hide it. The callbacks run on
+    # engine / playback / auto-hide-timer threads -- same context as the
+    # other on_open_* callbacks -- and are deduplicated by the controller.
+    overlay.set_window_callbacks(
+        on_show=lambda: windows.open("overlay"),
+        on_hide=lambda: windows.hide("overlay"),
+    )
+    windows.set_overlay_controller(overlay)
+
     # ----- Local IPC / single-instance gate -----
     command_callbacks = {
-        "settings": lambda: windows.open("settings"),
+        "settings": lambda: windows.raise_window("settings"),
         "stop": engine.stop,
         "pause": engine.pause_toggle,
         "prev": engine.prev_chunk,
         "replay": engine.replay_chunk,
         "next": engine.next_chunk,
         "voice-manager": lambda: windows.open("voices"),
-        "first-run-check": lambda: windows.open("onboarding"),
+        "first-run-check": lambda: windows.raise_window("onboarding"),
     }
     cmd_server = start_command_server(engine, commands=command_callbacks)
     if cmd_server is None:
-        try:
-            import ctypes
-
-            ctypes.windll.user32.MessageBoxW(
-                None,
-                "PipPal is already running.\n\nLook for the icon in the "
-                "system tray (next to the clock).",
-                "PipPal",
-                0x40,
-            )
-        except Exception:
-            pass
+        # Already running: ask the LIVE instance over local IPC to open +
+        # foreground its window, then exit quietly. If the IPC signal cannot
+        # be delivered, fall back to a best-effort direct Win32 foreground of
+        # the running window. NEVER show a message box.
+        if not _signal_running_instance_to_show():
+            _foreground_running_window_win32()
         raise SystemExit(0)
 
     # ----- Tray (native pystray) -----
@@ -254,10 +356,10 @@ def main() -> None:
     tray["icon"] = icon
     icon.run_detached()
 
-    # Show a brief "running in background" toast once at startup.
+    # Show a brief "running in background" tray balloon once at startup.
     # Fires ~200 ms after the tray icon is ready; silently skipped in CI
     # (PIPPAL_NO_STARTUP_NOTIFICATION=1) and on any display error.
-    show_startup_toast()
+    show_startup_toast(icon)
 
     if _selected_piper_missing(config) or should_show_activation_panel():
         windows.open("onboarding")
@@ -283,7 +385,7 @@ class _NullRoot:
     *delayed* callback — running it inline would fire it immediately
     (this is exactly the ``auto_hide_ms`` regression). So a timed call
     schedules a real ``threading.Timer`` and exposes ``after_cancel``
-    for parity with Tk's cancellable ``after`` ids.
+    matching Tk's cancellable ``after`` ids.
     """
 
     def __init__(self) -> None:

@@ -64,6 +64,7 @@ def _resolve_asset_path(*parts: str) -> Path:
         return install_asset
     return PACKAGE_ROOT / "assets" / Path(*parts)
 
+
 # Bundled engine binary + static assets — the install layer is allowed
 # to be read-only.
 PIPER_DIR: Path = INSTALL_ROOT / "piper"
@@ -73,19 +74,103 @@ ASSET_ICON_PATH: Path = _resolve_asset_path("pippal_icon.png")
 # Pre-recorded onboarding clip played when the user triggers a Read /
 # Queue action and no engine is ready (no voice installed). Tells the
 # user how to install a voice — without needing a working TTS to do it.
-ASSET_NO_VOICE_WAV: Path = (
-    _resolve_asset_path("onboarding", "pippal-no-installed-language.wav")
-)
+ASSET_NO_VOICE_WAV: Path = _resolve_asset_path("onboarding", "pippal-no-installed-language.wav")
 
 
 # ---- Data root (always writable) -------------------------------------
+
+
+def _get_current_package_full_name() -> str | None:
+    """Return the MSIX package full name via ctypes, or None.
+
+    Safe on every platform: the WinDLL load is guarded; returns None on
+    Linux/macOS/CI and when the process is unpackaged
+    (APPMODEL_ERROR_NO_PACKAGE = 15700).  Never raises.
+    """
+    try:
+        import ctypes
+
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        fn = kernel32.GetCurrentPackageFullName
+        fn.argtypes = [ctypes.POINTER(ctypes.c_uint32), ctypes.c_wchar_p]
+        fn.restype = ctypes.c_long
+        length = ctypes.c_uint32(0)
+        rc = fn(ctypes.byref(length), None)
+        if rc == 15700:  # APPMODEL_ERROR_NO_PACKAGE — running unpackaged
+            return None
+        buf = ctypes.create_unicode_buffer(length.value)
+        rc = fn(ctypes.byref(length), buf)
+        if rc != 0:
+            return None
+        return buf.value or None
+    except Exception:
+        return None
+
+
+def _package_family_name(full_name: str) -> str | None:
+    """Derive PackageFamilyName from a PackageFullName.
+
+    PackageFullName format:
+        <Name>_<Version>_<Arch>_<ResourceId>_<PublisherHash>
+
+    PackageFamilyName is the first component (Name) plus the last
+    component (PublisherHash), joined by ``_``:
+        <Name>_<PublisherHash>
+
+    Returns None when the full name cannot be parsed.
+    """
+    parts = full_name.split("_")
+    # Minimum valid full name has 5 parts: name, version, arch, resourceid, hash
+    if len(parts) < 5:
+        return None
+    name = parts[0]
+    publisher_hash = parts[-1]
+    if not name or not publisher_hash:
+        return None
+    return f"{name}_{publisher_hash}"
+
+
+def _packaged_local_appdata_root() -> Path | None:
+    """Return the container-redirected LocalAppData root when packaged, else None.
+
+    Under MSIX the OS silently redirects ``%LOCALAPPDATA%`` writes to
+    ``%LOCALAPPDATA%\\Packages\\<PackageFamilyName>\\LocalCache\\Local``.
+    This function resolves that explicit path so that both in-container
+    writers and out-of-container callers (e.g. Explorer) agree on one
+    canonical location.
+
+    Returns None (never raises) when:
+    - Not running on Windows.
+    - The process has no package identity (running unpackaged / in dev).
+    - The package full name cannot be parsed.
+    - Any error occurs.
+    """
+    try:
+        full_name = _get_current_package_full_name()
+        if full_name is None:
+            return None
+        family_name = _package_family_name(full_name)
+        if family_name is None:
+            return None
+        local_appdata = os.environ.get("LOCALAPPDATA") or os.path.expanduser("~/AppData/Local")
+        return Path(local_appdata) / "Packages" / family_name / "LocalCache" / "Local"
+    except Exception:
+        return None
+
+
 def _resolve_data_root() -> Path:
+    # 1. Explicit override wins (test fixtures, dev overrides).
     override = os.environ.get("PIPPAL_DATA_DIR")
     if override:
         return Path(override)
-    local_appdata = os.environ.get("LOCALAPPDATA") or os.path.expanduser(
-        "~/AppData/Local"
-    )
+    # 2. Under MSIX packaged identity: use the container-redirected path so
+    #    that both in-container writers and out-of-container callers (Explorer)
+    #    resolve to the same canonical directory.
+    packaged_root = _packaged_local_appdata_root()
+    if packaged_root is not None:
+        return packaged_root / "PipPal"
+    # 3. Unpackaged / dev / Linux / CI: plain %LOCALAPPDATA%\PipPal.
+    local_appdata = os.environ.get("LOCALAPPDATA") or os.path.expanduser("~/AppData/Local")
     return Path(local_appdata) / "PipPal"
 
 

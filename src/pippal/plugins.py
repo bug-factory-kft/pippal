@@ -343,6 +343,52 @@ def voice_card_engine_handlers() -> list[Callable[[Any, str], None]]:
 _voice_card_persist_hooks: list[Callable[[Any, str, dict[str, Any]], None]] = []
 
 
+# ---------------------------------------------------------------------------
+# Text-transform registry (B3 — main-read pronunciation hook)
+# ---------------------------------------------------------------------------
+# Core has zero knowledge of pronunciation or any other text-processing Pro
+# feature. Extension packages register callables here; `apply_text_transforms`
+# runs them in registration order at the single playback chokepoint so EVERY
+# read entry-point (speak, read_text, replay_text, queued items) gets the
+# transforms applied exactly once.
+#
+# Contract:
+# - Each `fn(text: str) -> str` receives the current text and returns the
+#   (possibly modified) text.  Returning the input unchanged is always safe.
+# - Failures are best-effort: a transform that raises is skipped and the
+#   un-transformed text continues.  A broken transform must never block
+#   reading (H3 in SPEC_overlay_pronunciation_regressions.md).
+# - When no transform is registered `apply_text_transforms` is a cheap no-op
+#   that returns the text unchanged, keeping the core Pro-neutral (H5).
+
+_text_transforms: list[Callable[[str], str]] = []
+
+
+def register_text_transform(fn: Callable[[str], str]) -> None:
+    """Register a text-transform callback.
+
+    ``fn(text) -> text`` is called once per ``play_one`` invocation,
+    before sentence-splitting, so the transform sees the full un-split
+    text.  Register from an extension package's ``_register()`` /
+    ``__init__`` to apply a global substitution (e.g. pronunciation rules)
+    on every read without touching core."""
+    _text_transforms.append(fn)
+
+
+def apply_text_transforms(text: str) -> str:
+    """Apply all registered text transforms to ``text`` in order.
+
+    Each transform is wrapped in a best-effort try/except so a failing
+    plugin never blocks reading.  Returns ``text`` unchanged when no
+    transform is registered (identity no-op on the public core)."""
+    for fn in _text_transforms:
+        try:
+            text = fn(text)
+        except Exception:
+            pass  # best-effort: transform failure must not block reading
+    return text
+
+
 def register_voice_card_persist_hook(
     hook: Callable[[Any, str, dict[str, Any]], None],
 ) -> None:
@@ -409,3 +455,4 @@ def _reset_for_tests() -> None:
     _voice_card_extras_builders.clear()
     _voice_card_engine_handlers.clear()
     _voice_card_persist_hooks.clear()
+    _text_transforms.clear()

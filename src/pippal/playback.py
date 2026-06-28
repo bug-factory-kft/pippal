@@ -22,6 +22,7 @@ from enum import Enum
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from . import plugins
 from .config import DEFAULT_CONFIG
 from .engines.base import TTSBackend
 from .paths import TEMP_DIR
@@ -48,18 +49,18 @@ if TYPE_CHECKING:  # pragma: no cover
 # goes through) emitted ZERO events.  So a real read under Trace produced no
 # genuine playback/synth event for any non-Kokoro engine.
 #
-# LEAK-SAFE BY CONSTRUCTION: core must NOT import or know about Pro's
-# diagnostics module (CORE-NO-PRO-LEAK).  Instead this emits a plain stdlib
-# ``logging`` record on a DEDICATED logger name with METADATA-ONLY structured
-# fields carried in ``extra`` — never the read text.  The log message body is
-# the empty string, so even Pro's redaction layer (which blanks legacy record
-# messages) has nothing to scrub.  Pro's diagnostics handler (when installed
-# on the root logger at trace/error) recognises this dedicated logger + the
-# ``diag_evt`` marker and surfaces it as a structured, non-``legacy`` event,
-# re-whitelisting every field through its own privacy guard.  When no Pro
-# handler is attached (the public core app, or diagnostics off) this is a
-# cheap no-op: the record propagates to a root logger with no diag handler and
-# is dropped.
+# LEAK-SAFE BY CONSTRUCTION: core must NOT import or depend on an optional
+# external diagnostics module.  Instead this emits a plain stdlib ``logging``
+# record on a DEDICATED logger name with METADATA-ONLY structured fields
+# carried in ``extra`` — never the read text.  The log message body is the
+# empty string, so even an optional redaction layer (which blanks legacy
+# record messages) has nothing to scrub.  An optional diagnostics handler
+# (when installed on the root logger at trace/error) recognises this dedicated
+# logger + the ``diag_evt`` marker and surfaces it as a structured,
+# non-``legacy`` event, re-whitelisting every field through its own privacy
+# guard.  When no optional handler is attached (the public core app, or
+# diagnostics off) this is a cheap no-op: the record propagates to a root
+# logger with no diag handler and is dropped.
 #
 # The fields are strictly metadata: chunk character COUNT (an int, never the
 # text), chunk index/total, and the engine NAME (an enum-like id such as
@@ -159,10 +160,9 @@ def play_one(
 ) -> None:
     """Drive the per-text playback loop. Returns when the text has
     finished playing, the user cancelled, or synthesis failed."""
-    chunks = split_sentences(text)
+    chunks = split_sentences(plugins.apply_text_transforms(text))
     if not chunks:
         return
-
     # Pin a single backend for the whole text. Without this, a mid-text
     # mood change (apply_mood -> reset_backend) would cause the next
     # chunk to use a fresh backend with a new voice, swapping the
@@ -170,7 +170,6 @@ def play_one(
     # backend, so respect that.
     if backend is None:
         backend = engine._get_backend()
-
     session = PlaybackSession(
         chunks=chunks,
         chunk_paths=_chunk_paths(my_token, len(chunks)),
@@ -354,6 +353,27 @@ def _play_chunk(
     chunks = session.chunks
     wav_path = session.chunk_paths[idx]
     dur = wav_duration(wav_path)
+
+    # Arm the overlay's "reading" state and publish karaoke word timings
+    # BEFORE attempting winsound playback so the overlay always transitions
+    # to "reading" with chunk_text populated even if audio output fails
+    # (e.g. no audio device, format mismatch, exclusive-mode lock).
+    # Without this, a PlaySound exception caused the overlay to stay stuck
+    # in "loading" and jump directly to "done" — the karaoke window was
+    # always empty/black on any read that couldn't play audio.
+    ov = engine._overlay()
+    if ov is not None:
+        # Re-assert "reading" on EVERY chunk entry, not just idx 0. A seek
+        # (engine.seek) flips the overlay to "thinking" to show the loader
+        # while the target chunk may re-synthesise; without this unconditional
+        # re-assert, a forward/back to any non-zero chunk left the overlay
+        # stuck in "thinking"/loading forever (the BIG multi-page nav wedge).
+        # ``start_chunk`` clears the synth flag (audio-ready event) so the
+        # loader hides as soon as this chunk's audio is about to play.
+        ov.set_state("reading")
+        offset = _karaoke_offset_s(engine)
+        ov.start_chunk(chunks[idx], dur, idx, len(chunks), offset_s=offset)
+
     try:
         winsound.PlaySound(
             str(wav_path),
@@ -375,19 +395,6 @@ def _play_chunk(
         chunk_total=len(chunks),
         engine=getattr(backend, "name", None) if backend is not None else None,
     )
-
-    ov = engine._overlay()
-    if ov is not None:
-        # Re-assert "reading" on EVERY chunk entry, not just idx 0. A seek
-        # (engine.seek) flips the overlay to "thinking" to show the loader
-        # while the target chunk may re-synthesise; without this unconditional
-        # re-assert, a forward/back to any non-zero chunk left the overlay
-        # stuck in "thinking"/loading forever (the BIG multi-page nav wedge).
-        # ``start_chunk`` then clears the synth flag (audio-ready event) so the
-        # loader hides exactly when this chunk's audio begins playing.
-        ov.set_state("reading")
-        offset = _karaoke_offset_s(engine)
-        ov.start_chunk(chunks[idx], dur, idx, len(chunks), offset_s=offset)
 
     result = _wait_for_chunk_end(
         engine,

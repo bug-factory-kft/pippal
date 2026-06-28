@@ -498,8 +498,9 @@ def test_overlay_no_text_selected_message_and_self_dismiss(
                    "'No text selected' (engine.py:488) — at the real sink")
 
         # The REAL served DOM shows it: state flips to 'done' and the
-        # overlay-text element renders the message (app.js:742-743). It
-        # stays for the full OVERLAY_MESSAGE_MS (no read in progress).
+        # overlay-text element renders the message (overlay.js tick(),
+        # the st==="done" && s.overlay_message branch). It stays
+        # for the full OVERLAY_MESSAGE_MS (no read in progress).
         expect(page.locator("body")).to_have_attribute(
             "data-overlay-state", "done", timeout=4000
         )

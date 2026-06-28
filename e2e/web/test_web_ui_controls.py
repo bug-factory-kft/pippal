@@ -85,12 +85,16 @@ def test_onboarding_sample_textbox_holds_sample(
 def test_onboarding_ready_skip_closes_window(
     page: Page, app_url: str, readiness, backend, step
 ):
+    # In the READY state (activation pre-seeded as complete by conftest),
+    # the onboarding surface renders a "Close" button (testid: onboarding-finish)
+    # that calls closeWin(). The onboarding-skip testid only exists in the
+    # MISSING_VOICE state.
     step("force readiness = ready")
     readiness["ready"]()
     _goto(page, app_url, "onboarding", step)
     before = len(backend["close_calls"])
-    step("click onboarding Skip")
-    page.get_by_test_id("onboarding-skip").click()
+    step("click onboarding Close (testid: onboarding-finish, text: Close)")
+    page.get_by_test_id("onboarding-finish").click()
 
     def _closed() -> bool:
         return len(backend["close_calls"]) > before
@@ -98,8 +102,8 @@ def test_onboarding_ready_skip_closes_window(
     deadline = page.evaluate("Date.now()") + 4000
     while page.evaluate("Date.now()") < deadline and not _closed():
         page.wait_for_timeout(50)
-    assert _closed(), "Skip did not reach on_close_window"
-    step.check("Skip reached the real on_close_window host callback")
+    assert _closed(), "Close did not reach on_close_window"
+    step.check("Close (onboarding-finish) reached the real on_close_window host callback")
 
 
 def test_onboarding_ready_open_settings(
@@ -206,23 +210,53 @@ def test_onboarding_install_default_voice_real_effect(
     page: Page, app_url: str, readiness, backend, monkeypatch, step
 ):
     """Install default voice must call the REAL bridge.install_default
-    _voice → install_piper_voice; we stub only the network download
-    (urllib) so a real file lands in the real per-test voices dir and
-    the live config voice is updated — the bridge/installer code path is
-    entirely real."""
+    _voice_async → install_piper_voice; only the network download seam is
+    stubbed so a real file lands in the real per-test voices dir and the
+    live config voice is updated — the bridge/installer code path is
+    entirely real.
+
+    Seam discipline (identical to test_voice_manager_row_install_real_effect
+    and test_ucc9_first_run_vm_install_completion_flips_onboarding_ready):
+    the UI calls install_default_voice_async, which drives the bridge's
+    _stream_voice_with_progress (async path); the sync _streaming_download
+    is patched as a belt-and-suspenders fallback. Both seams write a small
+    fake .onnx + .json locally instead of downloading ~120 MB from the
+    network, making the test deterministic on CI.
+    """
     from pippal import voices as voices_mod
     from pippal import voice_install as vm
+    import pippal.web_ui.bridge as _bridge_mod
 
-    step("force readiness = missing_voice; stub only the network download")
+    step("force readiness = missing_voice; stub the network download seam "
+         "(async _stream_voice_with_progress + sync _streaming_download fallback)")
     readiness["missing_voice"]()
 
+    # Belt-and-suspenders: stub the sync download fallback path.
     def _fake_download(url: str, dest: Path, *a, **k) -> None:
         dest.write_bytes(b"stub-voice-model-bytes")
 
     monkeypatch.setattr(vm, "_streaming_download", _fake_download)
 
+    # Primary seam: stub the async path that install_default_voice_async uses
+    # (voices.js calls install_default_voice_async → bridge thread →
+    # _stream_voice_with_progress). This is the only network seam — the real
+    # install_piper_voice installer, the real config update, and the real
+    # onboarding state transition all run unchanged.
+    def _fake_stream_with_progress(voice, is_cancelled, set_progress):
+        from pippal.voices import voice_filename
+        filename = voice_filename(voice)
+        _bridge_mod.VOICES_DIR.mkdir(parents=True, exist_ok=True)
+        (_bridge_mod.VOICES_DIR / filename).write_bytes(b"stub-voice-model-bytes")
+        (_bridge_mod.VOICES_DIR / f"{filename}.json").write_text("{}", "utf-8")
+        set_progress(pct=100.0, status="Done.")
+        return filename
+
+    monkeypatch.setattr(
+        backend["bridge"], "_stream_voice_with_progress", _fake_stream_with_progress
+    )
+
     _goto(page, app_url, "onboarding", step)
-    step("click Install default voice (real installer path)")
+    step("click Install default voice (real installer path, stubbed download)")
     page.get_by_test_id("onboarding-install-voice").click()
 
     def _installed() -> bool:
@@ -541,8 +575,9 @@ def test_settings_view_licences_opens_notices(
 def test_settings_about_links_open_real_urls(
     page: Page, app_url: str, backend, monkeypatch, step
 ):
-    """Each of the 5 About links must call the real bridge.open_url with
-    the exact URL the backend's about_info() returns."""
+    """Each of the 6 About links must call the real bridge.open_url with
+    the exact URL the backend's about_info() returns. The reddit Community
+    link was added in the web-UI migration alongside the other 5."""
     import pippal.web_ui.bridge as bridge_mod
 
     opened: list[str] = []
@@ -551,8 +586,8 @@ def test_settings_about_links_open_real_urls(
     )
     about = backend["bridge"].about_info()
     expected = {link["key"]: link["url"] for link in about["links"]}
-    assert set(expected) == {"website", "github", "licence", "privacy", "terms"}
-    step.check("real about_info() exposes the 5 expected About links")
+    assert set(expected) == {"website", "github", "licence", "privacy", "terms", "reddit"}
+    step.check("real about_info() exposes the 6 expected About links")
 
     _goto(page, app_url, "settings", step)
     for key, url in expected.items():
@@ -700,11 +735,29 @@ def test_voice_manager_row_install_real_effect(
     to 'installed'."""
     from pippal import voices as voices_mod
     from pippal import voice_install as vm
+    import pippal.web_ui.bridge as _bridge_mod
 
     def _fake_download(url: str, dest: Path, *a, **k) -> None:
         dest.write_bytes(b"stub-voice-model-bytes")
 
+    # Seam both the sync path (voice_install._streaming_download) and the
+    # async path (bridge._stream_voice_with_progress) so neither performs
+    # a real network download. voices.js calls install_voice_async first,
+    # which uses the bridge async path; the sync path is a fallback.
     monkeypatch.setattr(vm, "_streaming_download", _fake_download)
+
+    def _fake_stream_with_progress(voice, is_cancelled, set_progress):
+        from pippal.voices import voice_filename
+        filename = voice_filename(voice)
+        _bridge_mod.VOICES_DIR.mkdir(parents=True, exist_ok=True)
+        (_bridge_mod.VOICES_DIR / filename).write_bytes(b"stub-voice-model-bytes")
+        (_bridge_mod.VOICES_DIR / f"{filename}.json").write_text("{}", "utf-8")
+        set_progress(pct=100.0, status="Done.")
+        return filename
+
+    monkeypatch.setattr(
+        backend["bridge"], "_stream_voice_with_progress", _fake_stream_with_progress
+    )
 
     _goto(page, app_url, "voices", step)
     # Pick the first not-installed catalogue row.
@@ -779,55 +832,60 @@ def _start_reading_session(page: Page, app_url: str, step=None) -> None:
 def test_overlay_paused_chip_shows_on_pause(
     page: Page, app_url: str, backend, step
 ):
-    """The paused chip must appear when the engine is paused mid-read
-    and clear on resume — driven by a real reading session + the real
-    engine.pause_toggle."""
+    """The overlay pause button icon state must reflect the real engine
+    pause state — driven by a real reading session + the real engine.pause_toggle.
+
+    The overlay-paused chip testid no longer exists. The pause button
+    (testid: overlay-pause) now reflects pause state via its data-icon
+    attribute: "pause" while playing (click to pause), "play" while
+    paused (click to resume).
+    """
     engine = backend["engine"]
     try:
         _start_reading_session(page, app_url, step)
         expect(page.locator("body")).to_have_attribute(
             "data-overlay-state", "reading", timeout=8000
         )
-        chip = page.get_by_test_id("overlay-paused")
-        expect(chip).to_be_hidden()
-        step.check("overlay 'reading'; paused chip hidden")
+        pause_btn = page.get_by_test_id("overlay-pause")
+        expect(pause_btn).to_have_attribute("data-icon", "pause", timeout=4000)
+        step.check("overlay 'reading'; pause button data-icon=pause (playing state)")
 
         step("engine.pause_toggle() — real pause mid-read")
         engine.pause_toggle()  # real engine pause
-        expect(chip).to_be_visible(timeout=4000)
+        # When paused the button shows the play icon (click to resume).
+        expect(pause_btn).to_have_attribute("data-icon", "play", timeout=4000)
         assert backend["overlay"].snapshot()["is_paused"] is True
-        step.check("paused chip visible; backend snapshot is_paused == True")
+        step.check("pause button data-icon=play; backend is_paused == True")
 
         step("engine.pause_toggle() — real resume")
         engine.pause_toggle()  # real resume
-        expect(chip).to_be_hidden(timeout=4000)
+        # After resume the button flips back to pause icon.
+        expect(pause_btn).to_have_attribute("data-icon", "pause", timeout=4000)
         assert backend["overlay"].snapshot()["is_paused"] is False
-        step.check("paused chip hidden again; backend is_paused == False")
+        step.check("pause button data-icon=pause again; backend is_paused == False")
     finally:
         engine.stop()
 
 
 def test_overlay_drag_repositions_panel(page: Page, app_url: str, backend, step):
-    """Right-button drag must offset the panel (Tk <B3-Motion> parity).
-    Asserts the panel's data-offset attribute changes and a transform is
-    applied — a real DOM effect of the real drag handlers."""
+    """The overlay panel is now dragged via the native pywebview-drag-region
+    mechanism on the brand area. The custom right-button DOM drag handler
+    and its data-offset / transform attributes no longer exist.
+
+    Assert that the drag region element is present with the
+    pywebview-drag-region CSS class that enables native OS window dragging.
+    """
     _goto(page, app_url, "overlay", step)
-    panel = page.get_by_test_id("overlay-panel")
-    box = panel.bounding_box()
-    assert box is not None
-    cx = box["x"] + box["width"] / 2
-    cy = box["y"] + box["height"] / 2
-
-    step("right-button drag the panel by (+60, +40)")
-    page.mouse.move(cx, cy)
-    page.mouse.down(button="right")
-    page.mouse.move(cx + 60, cy + 40, steps=8)
-    page.mouse.up(button="right")
-
-    expect(panel).to_have_attribute("data-offset", "60,40", timeout=3000)
-    transform = panel.evaluate("e => e.style.transform")
-    assert "translate(60px,40px)" in transform.replace(" ", "")
-    step.check("panel data-offset == '60,40' and transform translate(60px,40px)")
+    drag_region = page.get_by_test_id("overlay-drag-region")
+    expect(drag_region).to_be_visible()
+    classes = drag_region.get_attribute("class") or ""
+    assert "pywebview-drag-region" in classes, (
+        f"overlay-drag-region lacks the pywebview-drag-region class: {classes!r}"
+    )
+    step.check(
+        "overlay-drag-region visible with pywebview-drag-region class "
+        "(native OS window dragging enabled)"
+    )
 
 
 # ===========================================================================

@@ -1,9 +1,11 @@
-"""Tests for the startup tray notification (issue #98).
+"""Tests for the startup tray notification (D5 port).
 
 Verifies:
-1. ``show_startup_toast`` is called exactly ONCE during app launch.
+1. ``show_startup_toast`` is callable and schedules a tray balloon.
 2. Under PIPPAL_NO_STARTUP_NOTIFICATION=1 the call is skipped entirely.
 3. Any exception inside the helper is swallowed (silent-fail, no crash).
+4. ``webview.create_window`` is NEVER called (D5 acceptance oracle).
+5. ``icon.notify`` IS called when an icon is supplied; None icon no-ops.
 """
 
 from __future__ import annotations
@@ -17,7 +19,6 @@ import unittest.mock as mock
 
 def _import_startup_toast():
     from pippal.web_ui import startup_toast
-
     return startup_toast
 
 
@@ -40,7 +41,7 @@ class TestStartupToastHelper:
 
         calls: list[str] = []
 
-        def fake_display():
+        def fake_display(icon=None):
             calls.append("displayed")
 
         # Make the timer fire synchronously so the test doesn't wait.
@@ -66,7 +67,7 @@ class TestStartupToastHelper:
 
         calls: list[str] = []
 
-        def fake_display():
+        def fake_display(icon=None):
             calls.append("displayed")
 
         monkeypatch.setattr(mod, "_display_toast", fake_display)
@@ -80,7 +81,7 @@ class TestStartupToastHelper:
         """A crash inside _display_toast must not propagate."""
         mod = _import_startup_toast()
 
-        def boom():
+        def boom(icon=None):
             raise RuntimeError("headless / no GUI")
 
         def fake_timer(delay, fn):
@@ -100,10 +101,45 @@ class TestStartupToastHelper:
         """CI environment (PIPPAL_NO_STARTUP_NOTIFICATION) suppresses toast."""
         mod = _import_startup_toast()
         calls: list[str] = []
-        monkeypatch.setattr(mod, "_display_toast", lambda: calls.append("x"))
+        monkeypatch.setattr(mod, "_display_toast", lambda icon=None: calls.append("x"))
         monkeypatch.setenv("PIPPAL_NO_STARTUP_NOTIFICATION", "1")
         mod.show_startup_toast()
         assert calls == []
+
+    # D5 acceptance oracle: no webview.create_window, icon.notify called
+    def test_no_webview_create_window_with_icon(self, monkeypatch):
+        """_display_toast must never call webview.create_window (D5).
+        With a live icon, it calls icon.notify instead."""
+        mod = _import_startup_toast()
+
+        # Stub webview so create_window raises if called
+        class FakeWebview:
+            @staticmethod
+            def create_window(*a, **kw):
+                raise AssertionError("webview.create_window must NOT be called")
+
+        import sys
+        monkeypatch.setitem(sys.modules, "webview", FakeWebview())  # type: ignore[arg-type]
+
+        fake_icon = mock.MagicMock()
+        # Should not raise; must call icon.notify
+        mod._display_toast(icon=fake_icon)
+        fake_icon.notify.assert_called_once_with("Running in the background", "PipPal")
+
+    def test_no_webview_create_window_with_none(self, monkeypatch):
+        """_display_toast(icon=None) must be a complete no-op (D5)."""
+        mod = _import_startup_toast()
+
+        class FakeWebview:
+            @staticmethod
+            def create_window(*a, **kw):
+                raise AssertionError("webview.create_window must NOT be called")
+
+        import sys
+        monkeypatch.setitem(sys.modules, "webview", FakeWebview())  # type: ignore[arg-type]
+
+        # Must not raise, must not call anything
+        mod._display_toast(icon=None)  # no-op
 
 
 # ---------------------------------------------------------------------------
@@ -131,12 +167,13 @@ class TestStartupToastWiredInMain:
         assert app_web.show_startup_toast is show_startup_toast
 
     def test_main_source_calls_show_startup_toast(self):
-        """A source-level guard: main()'s source must contain the call."""
+        """A source-level guard: main()'s source must call show_startup_toast."""
         import inspect
 
         from pippal.web_ui import app_web
 
         src = inspect.getsource(app_web.main)
-        assert "show_startup_toast()" in src, (
-            "main() must call show_startup_toast() — found no such call in source"
+        # The call now passes the tray icon: show_startup_toast(icon)
+        assert "show_startup_toast(icon)" in src, (
+            "main() must call show_startup_toast(icon) — found no such call in source"
         )

@@ -769,6 +769,25 @@ def test_ucc9_first_run_vm_install_completion_flips_onboarding_ready(
 
     monkeypatch.setattr(vm, "_streaming_download", _fake_download)
 
+    # voices.js calls install_voice_async first, which drives the bridge's
+    # _stream_voice_with_progress (imports voice_url_base from pippal.voices
+    # at call time). Seam that async path too so neither path performs a
+    # real network download.
+    import pippal.web_ui.bridge as _bridge_mod
+
+    def _fake_stream_with_progress(voice, is_cancelled, set_progress):
+        from pippal.voices import voice_filename
+        filename = voice_filename(voice)
+        _bridge_mod.VOICES_DIR.mkdir(parents=True, exist_ok=True)
+        (_bridge_mod.VOICES_DIR / filename).write_bytes(b"stub-voice-model-bytes")
+        (_bridge_mod.VOICES_DIR / f"{filename}.json").write_text("{}", "utf-8")
+        set_progress(pct=100.0, status="Done.")
+        return filename
+
+    monkeypatch.setattr(
+        backend["bridge"], "_stream_voice_with_progress", _fake_stream_with_progress
+    )
+
     # The user is now in the real served Voice Manager window and clicks
     # the per-row Install for a real catalogue voice.
     _goto(page, app_url, "voices", step)

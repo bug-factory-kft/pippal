@@ -31,6 +31,7 @@ from .onboarding import (
     record_activation_failure,
     should_show_activation_panel,
 )
+from .overlay_actions import begin_action_overlay
 
 
 class _OverlayProto(Protocol):
@@ -490,6 +491,10 @@ class TTSEngine:
     # ------------------------------------------------------------------
 
     def _speak_selection_impl(self) -> None:
+        # Capture FIRST (needs the user's app to keep focus for the synthetic
+        # Ctrl+C), THEN begin_action_overlay once we have non-empty text —
+        # showing the overlay BEFORE capture stole focus and produced
+        # "No text selected".
         if self._maybe_play_onboarding():
             return
         with self.lock:
@@ -502,9 +507,6 @@ class TTSEngine:
             pass
 
         ov = self._overlay()
-        if ov is not None:
-            ov.set_state("thinking")
-
         text = clipboard_capture.capture_for_action(self, "speak")
         if self._is_cancelled(my_token):
             return
@@ -514,6 +516,9 @@ class TTSEngine:
                 ov.show_message("No text selected")
             return
 
+        # Text is non-empty: show the loading overlay now (capture already
+        # done while the user's app had focus).
+        begin_action_overlay(self)
         self._mark_activation_selected_text_complete()
         self._remember(text)
         with self.lock:
@@ -521,6 +526,12 @@ class TTSEngine:
         playback.synthesize_and_play(self, text, my_token)
 
     def _queue_selection_impl(self) -> None:
+        # Capture FIRST (needs the user's app to keep focus for the synthetic
+        # Ctrl+C), THEN begin_action_overlay once we have non-empty text —
+        # showing the overlay BEFORE capture stole focus and produced
+        # "No text selected".  On the idle branch this becomes a normal Read;
+        # on the busy branch the queued message replaces the loader (and a
+        # continuing read keeps the window).
         if self._maybe_play_onboarding():
             return
         text = clipboard_capture.capture_for_action(self, "queue")
@@ -529,6 +540,9 @@ class TTSEngine:
             if ov is not None:
                 ov.show_message("No text selected")
             return
+        # Text is non-empty: show the loading overlay now (capture already
+        # done while the user's app had focus).
+        begin_action_overlay(self)
         with self.lock:
             speaking = self.is_speaking
             if speaking:
@@ -539,18 +553,20 @@ class TTSEngine:
             if ov is not None:
                 ov.show_message(f"Queued — {qlen} pending")
             return
-        # Idle → behave like Read.
+        # Idle → behave like Read. begin_action_overlay() was called above
+        # after capture returned non-empty text; keep that loading state (do
+        # NOT flip back to the invisible ``thinking`` state) until playback
+        # emits ``reading``.
         self._remember(text)
         with self.lock:
             self.token += 1
             my_token = self.token
             self.is_speaking = True
-        ov = self._overlay()
-        if ov is not None:
-            ov.set_state("thinking")
         playback.synthesize_and_play(self, text, my_token)
 
     def _read_text_impl(self, text: str) -> None:
+        # Loading-first: pop the overlay before the (cache-miss) synth runs.
+        begin_action_overlay(self)
         if self._maybe_play_onboarding():
             return
         text = (text or "").strip()
@@ -565,13 +581,12 @@ class TTSEngine:
             winsound.PlaySound(None, winsound.SND_PURGE)
         except Exception:
             pass
-        ov = self._overlay()
-        if ov is not None:
-            ov.set_state("thinking")
         self._remember(text)
         playback.synthesize_and_play(self, text, my_token)
 
     def _replay_text_impl(self, text: str) -> None:
+        # Loading-first: pop the overlay before the (cache-miss) synth runs.
+        begin_action_overlay(self)
         if self._maybe_play_onboarding():
             return
         text = (text or "").strip()
@@ -586,7 +601,4 @@ class TTSEngine:
             winsound.PlaySound(None, winsound.SND_PURGE)
         except Exception:
             pass
-        ov = self._overlay()
-        if ov is not None:
-            ov.set_state("thinking")
         playback.synthesize_and_play(self, text, my_token)

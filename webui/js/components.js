@@ -1,7 +1,7 @@
 /* components.js — tiny DOM builders mirroring src/pippal/ui/theme.py's
  * make_card() + the row helpers in settings_cards.py. No framework;
- * the surface is small and parity-driven, so plain DOM keeps the CSS
- * a 1:1 port of the Tk styles. */
+ * the surface is simple enough that plain DOM keeps the CSS
+ * a 1:1 match of the Tk styles. */
 (function () {
   "use strict";
 

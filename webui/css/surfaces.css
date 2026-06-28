@@ -1,0 +1,668 @@
+/* surfaces.css — PipPal (free) web UI surface-specific styling.
+ *
+ * Styles for the free web UI; the paid import surface
+ * (.import-surface / .import-body / .import-footer / .import-preview-text)
+ * is not included — that surface does not exist in the free edition.
+ *
+ * Keep additive — never re-declare a core token or core component here. */
+
+/* ---- Crash-detection banner (§5.7 / AC-T5) ----
+ *
+ * Non-intrusive top-of-page banner shown on settings load when the
+ * previous session ended unexpectedly.  Only appears when
+ * get_crash_prompt() returns {prompt:true} (i.e. diag logging is on AND
+ * the previous session crashed).  Hidden when dismissed or when the
+ * privacy guard is active (diag_log_level == "off").
+ *
+ * Placed above #view (injected into #root by app.js); does NOT overlap
+ * the titlebar or footer. */
+.crash-banner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 14px;
+  background: var(--bg-card, #1a1d28);
+  border-bottom: 1px solid var(--border-lt, #2f3447);
+  font-size: 12px;
+  color: var(--text, #e8ebfa);
+  flex-shrink: 0;
+}
+.crash-banner-msg {
+  flex: 1;
+  min-width: 0;
+}
+.crash-banner button {
+  font-size: 11px;
+  padding: 3px 10px;
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+/* ---- Titlebar drag region (Pro-surface window drag fix) ----
+ *
+ * Non-overlay Pro windows use easy_drag=False (whole-window drag would
+ * hijack text selection and slider drags in Settings). pywebview's
+ * cross-backend drag mechanism (WebView2 / GTK) fires on elements
+ * carrying .pywebview-drag-region — -webkit-app-region alone is NOT
+ * honoured by WebView2/pywebview.
+ *
+ * We wrap ONLY the icon + brand span in .titlebar-drag which carries
+ * .pywebview-drag-region. .winbtn is a sibling (NOT a descendant of
+ * .titlebar-drag) so a click on the close button never walks up to a
+ * drag-region ancestor and never triggers a window drag.
+ */
+.titlebar-drag {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  flex: 1; /* fills the space the .winbtn leaves, so the whole
+                        non-button area is draggable */
+  min-width: 0;
+  /* Propagate the cursor so the drag area looks native. */
+  cursor: default;
+}
+
+/* Mood preset rows reuse the .vrow / .card layout from theme.css; the
+ * selected preset is marked with the accent dot in the label text and
+ * the primary-button style, both already defined in theme.css. No new
+ * rules are required today — this placeholder keeps the <link> stable
+ * and documents the "theme reused 1:1" decision for future Pro UI. */
+
+/* ---- Notices rendered-Markdown styling (notices surface only) ----
+ *
+ * The open-source notices window renders its Markdown payload as HTML
+ * into a .notices-rendered container (see webui/js/notices.js renderNotices).
+ * All rules below are surface-only and live here so that theme.css
+ * stays byte-identical to the public core copy.
+ */
+/* Rendered Markdown output — notices surface only. */
+.notices-rendered {
+  font-family: var(--font);
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--text);
+  user-select: text;
+  -webkit-user-select: text;
+  padding: 4px 0;
+}
+.notices-rendered h1,
+.notices-rendered h2,
+.notices-rendered h3,
+.notices-rendered h4,
+.notices-rendered h5,
+.notices-rendered h6 {
+  font-weight: 700;
+  margin: 1em 0 0.4em;
+  line-height: 1.3;
+}
+.notices-rendered h1 {
+  font-size: 18px;
+}
+.notices-rendered h2 {
+  font-size: 15px;
+}
+.notices-rendered h3 {
+  font-size: 13px;
+}
+.notices-rendered p {
+  margin: 0.5em 0;
+}
+.notices-rendered ul {
+  margin: 0.4em 0 0.4em 1.4em;
+  padding: 0;
+  list-style: disc;
+}
+.notices-rendered li {
+  margin: 0.2em 0;
+}
+.notices-rendered a {
+  color: var(--accent, #7ecfff);
+  text-decoration: underline;
+}
+.notices-rendered code {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  background: rgba(255, 255, 255, 0.08);
+  padding: 1px 4px;
+  border-radius: 3px;
+}
+.notices-rendered table {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: 12px;
+  margin: 0.6em 0;
+}
+.notices-rendered th,
+.notices-rendered td {
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  padding: 4px 8px;
+  text-align: left;
+  vertical-align: top;
+}
+.notices-rendered th {
+  background: rgba(255, 255, 255, 0.06);
+  font-weight: 700;
+}
+.notices-rendered hr {
+  border: none;
+  border-top: 1px solid rgba(255, 255, 255, 0.15);
+  margin: 1em 0;
+}
+.notices-rendered strong {
+  font-weight: 700;
+}
+.notices-rendered em {
+  font-style: italic;
+}
+
+/* ---- Install progress (issue #252 — voice/Kokoro download progress) ----
+ *
+ * .install-progress-wrap: container shown/hidden by JS during a download.
+ * .install-progress-bar:  track (background lane).
+ * .install-progress-fill: filled portion, width set by JS as a percentage.
+ * .install-progress-label: text below the bar (status message + %).
+ *
+ * Prominent variant (UX feedback #252 round 2): taller bar, stronger text,
+ * padding so the bar stands out clearly when it appears near a button row.
+ *
+ * Colours use CSS variables from theme.css so no hex values here. */
+
+.install-progress-wrap {
+  margin-top: 0;
+  margin-bottom: 8px;
+  padding: 10px 12px;
+  border-radius: var(--radius-card, 10px);
+  background: var(--bg-card, #1a1d28);
+  border: 1px solid var(--border-lt, #2f3447);
+}
+.install-progress-bar {
+  height: 10px;
+  border-radius: 5px;
+  background: var(--bg-input, #1f2230);
+  overflow: hidden;
+}
+.install-progress-fill {
+  height: 100%;
+  width: 0%;
+  background: var(--accent, #6dd9b8);
+  border-radius: 5px;
+  transition: width 0.25s linear;
+}
+.install-progress-label {
+  margin-top: 6px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text, #e8ebfa);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ---- Onboarding bottom area (#252 UX placement) ----
+ * Wraps the install-progress-wrap and the action button row together
+ * so the progress bar is visually anchored directly above the buttons,
+ * and sticks to the bottom of the scroll-body viewport. */
+.onboarding-bottom {
+  position: sticky;
+  bottom: 0;
+  padding: 12px 16px 16px;
+  background: var(--bg, #13151c);
+  margin-top: 16px;
+  /* Ensure the sticky container never narrows below its content. */
+  box-sizing: border-box;
+  width: 100%;
+}
+
+/* ---- Layout-collapse fix (#layout-collapse) ----
+ * theme.css defines `.row { display:flex; align-items:center; gap:8px }`
+ * with NO flex-wrap.  When the onboarding-bottom container is sticky and
+ * the window is narrow, the three-button action row has no room to wrap
+ * and each button is squeezed / text truncated.  The fix is scoped to
+ * the two affected containers so other surfaces are not impacted.
+ *
+ * .onboarding-bottom .row  — the three-button onboarding action row.
+ * .vm-action-row           — the Install/Cancel button row in voice cards.
+ *
+ * `flex-wrap:wrap` — row wraps to next line when viewport is too narrow.
+ * `flex-shrink:0`  — each button keeps its natural (unwrapped) width.
+ * `white-space:nowrap` — text inside each button is never soft-wrapped. */
+.onboarding-bottom .row {
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.onboarding-bottom .row button {
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+/* ---- Voice manager action row (#252 UX placement) ----
+ * Separates the install/cancel buttons from the voice metadata row so
+ * the progress bar can sit between them. */
+.vm-action-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+}
+/* Ensure vm-action buttons keep the canonical 13 px button font-size
+ * (CANON["button_font_px"]) regardless of any wrapper inheritance, and
+ * never shrink below their natural text width. */
+.vm-action-row button {
+  font-size: 13px;
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+/* ---- Overlay window: normal opaque frameless window (#248 decisive fix) ----
+ *
+ * The overlay is now built the SAME WAY as the Settings window — a normal
+ * opaque frameless window with solid dark background (#13151c).  The
+ * previous transparent/WS_EX_LAYERED/colour-key approach was fundamentally
+ * broken: it made buttons click-through, disabled dragging, and caused
+ * layout collapse with short content.
+ *
+ * The overlay fills the host the same way Settings fills its host: the
+ * window IS the content (no floating panel, no transparency hacks).  The
+ * ``body.overlay-mode`` body background is restored to the dark solid colour
+ * (NOT transparent), matching the Settings window look.
+ *
+ * Drag: handled by .pywebview-drag-region on the header row (same mechanism
+ * as all other Pro windows with easy_drag=False in windows.py).  The header
+ * brand/icon area gets the class; buttons inside the header are excluded from
+ * the drag region via ``-webkit-app-region: no-drag`` (same pattern as the
+ * Settings titlebar in index.html).
+ *
+ * Layout: proper flex column — header (fixed height, drag region) + body
+ * (flex:1, scrollable text, min-height so layout never collapses) + footer
+ * (progress bar, pinned at bottom).  No positioning hacks needed. */
+
+/* Body in overlay mode: solid dark, same as Settings (#13151c = var(--bg)). */
+body.overlay-mode {
+  background: var(--bg);
+  overflow: hidden;
+}
+
+/* #root in overlay mode: same card/border styling as all other surfaces. */
+body.overlay-mode #root {
+  border: 1px solid var(--border);
+  background: var(--bg);
+  border-radius: var(--radius);
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow: hidden;
+}
+
+/* The overlay panel fills the window — no floating, no transforms. */
+body.overlay-mode .overlay-panel {
+  position: static;
+  inset: auto;
+  width: 100%;
+  height: 100%;
+  max-width: none;
+  transform: none;
+  bottom: auto;
+  left: auto;
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  /* Restore opaque dark background — no green gradient, no transparency.
+   * Consistent with --bg (#13151c), same as Settings and all other surfaces. */
+  background: var(--bg);
+  border: none;
+  border-radius: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+/* ---- Overlay HEADER (drag region + controls) ----
+ *
+ * The header is the drag region for the window (same mechanism as the
+ * Settings titlebar: .pywebview-drag-region makes pywebview's cross-
+ * backend drag work even with easy_drag=False so individual button clicks
+ * are never hijacked by a whole-window drag).
+ *
+ * DOM order: [drag-region: img · dot · label] [controls: prev · replay · pause · next · close]
+ * The drag region wraps only the brand area (icon + dot + label).  The
+ * transport buttons and close button are siblings of the drag region (NOT
+ * descendants) so clicking them never triggers a drag.  This matches the
+ * exact pattern used in index.html's Settings titlebar. */
+body.overlay-mode .overlay-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg);
+  flex-shrink: 0;
+  height: auto;
+  min-height: 40px;
+}
+
+/* Drag region wraps the brand area: icon + dot + label.
+ * .pywebview-drag-region is set in JS (renderOverlay) on this element. */
+body.overlay-mode .overlay-head .overlay-drag-region {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1;
+  min-width: 0;
+  -webkit-app-region: drag;
+  app-region: drag;
+  cursor: default;
+}
+
+/* Logo image */
+body.overlay-mode .overlay-head img {
+  flex-shrink: 0;
+  width: 18px;
+  height: 18px;
+}
+
+/* Status dot */
+body.overlay-mode .overlay-head .overlay-dot {
+  flex-shrink: 0;
+}
+
+/* Label: "PipPal" — one line, no wrap. */
+body.overlay-mode .overlay-head .ohlabel {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+  font-size: 11px;
+  color: var(--text-dim);
+  letter-spacing: 0.01em;
+}
+
+/* Transport buttons in the header — NOT inside the drag region.
+ * #280.1/#281: icons are inline SVG (14×14 px, 16×16 viewBox, fill:currentColor)
+ * so all five glyphs occupy an identical box — no per-glyph unicode metric
+ * differences.  The button is a flex container that centres the SVG both
+ * horizontally and vertically. */
+body.overlay-mode .overlay-head .obtn {
+  -webkit-app-region: no-drag;
+  app-region: no-drag;
+  width: 26px;
+  height: 26px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  align-self: center;
+  color: var(--text-dim);
+  cursor: pointer;
+  background: transparent;
+  border: 0;
+  flex-shrink: 0;
+  border-radius: 4px;
+  transition: color 0.12s, background 0.12s;
+}
+body.overlay-mode .overlay-head .obtn svg,
+body.overlay-mode .overlay-head .overlay-close svg {
+  display: block;
+  flex-shrink: 0;
+  pointer-events: none;
+}
+body.overlay-mode .overlay-head .obtn:hover {
+  color: var(--text);
+  background: var(--bg-hover);
+}
+body.overlay-mode .overlay-head .obtn:disabled,
+body.overlay-mode .overlay-head .obtn.disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+/* Close button — same styling as winbtn in the Settings titlebar.
+ * #280.1/#281: SVG icon matches the transport buttons — identical box sizing,
+ * so all five icons in the header row have their tops and centres aligned. */
+body.overlay-mode .overlay-head .overlay-close {
+  -webkit-app-region: no-drag;
+  app-region: no-drag;
+  flex-shrink: 0;
+  width: 26px;
+  height: 26px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  align-self: center;
+  color: var(--text-dim);
+  cursor: pointer;
+  background: transparent;
+  border: 0;
+  border-radius: 6px;
+  transition: color 0.12s, background 0.12s;
+}
+body.overlay-mode .overlay-head .overlay-close:hover {
+  background: #5a2a2a;
+  color: #e8b0b0;
+}
+
+/* ---- Overlay BODY (reading text, flex:1, never collapses) ----
+ *
+ * The mini-player body is a compact NOW-READING indicator, NOT a
+ * scrollable reader.  Rules:
+ *
+ * 1. Scrollbar ALWAYS hidden (Firefox + Chromium/WebView2):
+ *    - scrollbar-width: none      (Firefox)
+ *    - ::-webkit-scrollbar rules  (Chromium / WebView2 — see below)
+ *    The body still auto-scrolls internally via JS (scrollIntoView on the
+ *    active .cur word) so the highlighted word is always visible without
+ *    any visible scroll bar.
+ *
+ * 2. overflow-y stays "auto" (not hidden) so that the JS auto-scroll
+ *    actually works — hiding the scrollbar only suppresses the visual
+ *    track, NOT the ability to scroll programmatically.
+ *
+ * 3. Static/non-reading text (thinking message, done message) is clamped
+ *    by the fixed body height; no overflow, no visible bar.
+ *
+ * flex:1 + min-height: 0 ensures the body takes remaining space between
+ * header and footer.  min-height: 0 allows it to shrink (flex item) while
+ * the parent panel's height is bounded by the window height. */
+body.overlay-mode .overlay-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 10px 14px 8px;
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--text);
+  /* Hide the scrollbar track on Firefox. */
+  scrollbar-width: none;
+  /* Static text: no overflow beyond the body box. */
+  display: block;
+  -webkit-box-orient: unset;
+  -webkit-line-clamp: unset;
+  line-clamp: unset;
+}
+
+/* Hide the scrollbar track on Chromium / WebView2 (the ::-webkit-scrollbar
+ * pseudo-element approach is required because WebView2 ignores
+ * scrollbar-width on Windows as of Edge 122). */
+body.overlay-mode .overlay-body::-webkit-scrollbar {
+  display: none;
+  width: 0;
+}
+
+/* ---- Overlay FOOTER (progress bar, pinned at bottom) ---- */
+body.overlay-mode .overlay-progress {
+  flex-shrink: 0;
+  padding: 6px 14px 8px;
+  border-top: 1px solid var(--border);
+  background: var(--bg);
+}
+
+/* ---- Overlay LOADING indicator (BUG 1 fix — in-flow inside overlay-body) ----
+ *
+ * During overlay_state == "thinking", tick() sets bodyEl.innerHTML to a
+ * .reader-loading block so the progress indicator lives WHERE the text was,
+ * in normal document flow.  The popup chrome (header transport buttons and
+ * footer progress bar) stays fully visible at opacity 1 — nothing is dimmed
+ * or covered.
+ *
+ * The old approach (absolute-positioned .overlay-loading spinner + dimmed
+ * .overlay-body) is retired: .overlay-body.dimmed no longer exists, and
+ * .overlay-loading is kept in the DOM but always hidden (.hidden class) —
+ * it is only preserved so that tests checking data-testid="overlay-loading"
+ * can still find the element.
+ *
+ * .reader-loading: flex column, fills the full body height, centres
+ * a progress bar + label.  Uses only token colours — no hard-coded hex.
+ */
+@keyframes reader-loading-pulse {
+  0%, 100% { opacity: 0.4; }
+  50%       { opacity: 1; }
+}
+/* #6 — animated shimmer that travels along the loader bar, giving the
+ * impression of work in progress while Kokoro synthesizes the first chunk.
+ * Token-based colours only (accent + a soft highlight); no assets. */
+@keyframes reader-loading-shimmer {
+  0%   { background-position: -150% 0; }
+  100% { background-position: 250% 0; }
+}
+/* Gentle fade so each rotating message swap reads as a soft cross-update
+ * rather than an abrupt jump. */
+@keyframes reader-loading-label-in {
+  from { opacity: 0; transform: translateY(2px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+body.overlay-mode .reader-loading {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  width: 100%;
+  height: 100%;
+  min-height: 48px;
+  pointer-events: none;
+}
+body.overlay-mode .reader-loading-bar {
+  position: relative;
+  width: 60%;
+  max-width: 180px;
+  height: 4px;
+  border-radius: 2px;
+  overflow: hidden;
+  /* Base lane tinted from the accent, with a travelling highlight band. */
+  background:
+    linear-gradient(
+      90deg,
+      color-mix(in srgb, var(--accent, #6dd9b8) 35%, transparent) 0%,
+      color-mix(in srgb, var(--accent, #6dd9b8) 35%, transparent) 40%,
+      var(--accent, #6dd9b8) 50%,
+      color-mix(in srgb, var(--accent, #6dd9b8) 35%, transparent) 60%,
+      color-mix(in srgb, var(--accent, #6dd9b8) 35%, transparent) 100%
+    );
+  background-size: 200% 100%;
+  background-repeat: no-repeat;
+  animation: reader-loading-shimmer 1.4s linear infinite;
+}
+body.overlay-mode .reader-loading-label {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  color: var(--accent, #6dd9b8);
+  white-space: nowrap;
+  max-width: 92%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-align: center;
+  animation: reader-loading-pulse 2.4s ease-in-out infinite;
+}
+/* Respect reduced-motion: drop the travelling shimmer + pulse, keep a calm
+ * static accent bar so the cue is still visible but not animated. */
+@media (prefers-reduced-motion: reduce) {
+  body.overlay-mode .reader-loading-bar {
+    animation: none;
+    background: var(--accent, #6dd9b8);
+  }
+  body.overlay-mode .reader-loading-label {
+    animation: none;
+  }
+}
+
+/* overlay-panel needs no position:relative override now that the loader
+   is in normal flow inside the body; kept as a neutral declaration. */
+body.overlay-mode .overlay-panel {
+  position: relative;
+}
+
+/* ---- Settings promotional banner (free → Pro upsell) ----
+ *
+ * Shown at the very top of the Settings view, before the Voice card.
+ * Two CTAs side-by-side (or stacked when narrow):
+ *   .promo-pro-cta    — primary, accent-bordered, drives to Microsoft Store
+ *   .promo-reddit-cta — secondary, drives to r/PipPalApp
+ *
+ * Uses only design tokens — no hard-coded hex values. */
+.settings-promo {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  padding: 14px 16px;
+  margin-bottom: 4px;
+  background: var(--bg-card, #1a1d28);
+  border: 1px solid var(--border-lt, #2f3447);
+  border-radius: var(--radius-card, 10px);
+}
+
+/* Pro CTA: accent-tinted left border + subtle accent gradient band. */
+.promo-pro-cta {
+  flex: 1 1 220px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 14px;
+  background: linear-gradient(
+    135deg,
+    color-mix(in srgb, var(--accent, #6dd9b8) 10%, transparent) 0%,
+    transparent 60%
+  );
+  border: 1px solid color-mix(in srgb, var(--accent, #6dd9b8) 40%, transparent);
+  border-radius: var(--radius-card, 10px);
+}
+
+.promo-pro-headline {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--accent, #6dd9b8);
+  letter-spacing: 0.01em;
+}
+
+.promo-pro-sub {
+  font-size: 12px;
+  color: var(--text-dim, #8a93b4);
+  line-height: 1.45;
+}
+
+.promo-pro-cta button {
+  align-self: flex-start;
+  margin-top: 4px;
+}
+
+/* Reddit CTA: secondary, no accent highlight. */
+.promo-reddit-cta {
+  flex: 1 1 180px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  justify-content: center;
+  padding: 10px 14px;
+  border: 1px solid var(--border-lt, #2f3447);
+  border-radius: var(--radius-card, 10px);
+}
+
+.promo-reddit-text {
+  font-size: 12px;
+  color: var(--text-dim, #8a93b4);
+  line-height: 1.45;
+}
+
+.promo-reddit-cta button {
+  align-self: flex-start;
+  margin-top: 4px;
+}

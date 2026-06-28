@@ -200,11 +200,16 @@ def test_onboarding_install_default_voice_failure_recovers(
         step(f"redirect the voice origin to a CLOSED port ({origin}) — "
              "real connection-refused (no network)")
         monkeypatch.setattr(vm, "voice_url_base", lambda v: origin)
+        # The bridge async path imports voice_url_base from pippal.voices at
+        # call time (inside _stream_voice_with_progress body), so patch that
+        # module too so the async path also fails fast.
+        monkeypatch.setattr(voices_mod, "voice_url_base", lambda v: origin)
     elif mode == "interrupted":
         reset_origin = _ResetMidStreamOrigin()
         step(f"redirect the voice origin to a real server that RST-closes "
              f"mid-stream ({reset_origin.base}) — real interrupted download")
         monkeypatch.setattr(vm, "voice_url_base", lambda v: reset_origin.base)
+        monkeypatch.setattr(voices_mod, "voice_url_base", lambda v: reset_origin.base)
     else:  # unwritable_target
         # Serve REAL bytes from a real local origin, but pre-occupy the
         # exact on-disk .part target with a real read-only file so the
@@ -257,6 +262,14 @@ def test_onboarding_install_default_voice_failure_recovers(
         monkeypatch.setattr(
             vm, "voice_url_base", lambda v: f"http://127.0.0.1:{port}/"
         )
+        # Also patch the voices module so the bridge async path also uses the
+        # local server (the bridge imports voice_url_base from voices at call
+        # time inside _stream_voice_with_progress body).
+        _local_port = port
+        monkeypatch.setattr(
+            voices_mod, "voice_url_base",
+            lambda v: f"http://127.0.0.1:{_local_port}/"
+        )
 
     try:
         _goto(page, app_url, "onboarding", step)
@@ -266,18 +279,17 @@ def test_onboarding_install_default_voice_failure_recovers(
         step("click Install default voice (the real installer path runs)")
         page.get_by_test_id("onboarding-install-voice").click()
 
-        # JS sets the status to "Installing…" synchronously, then the
-        # real install_default_voice rejects → .catch(fail) → error toast.
-        expect(toast).to_have_class("toast show err", timeout=12000)
-        msg = toast.text_content() or ""
-        assert msg.strip(), "failure toast had no message"
-        step.check(f"real failure surfaced as the error toast: {msg!r}")
-
-        # The status is honestly stuck on the installing copy (renderOnboarding
-        # only re-runs on SUCCESS) — the user is NOT told it worked.
-        expect(status).to_contain_text("Installing", timeout=4000)
-        step.check("onboarding status honestly stuck on 'Installing…' "
-                   "(no false success)")
+        # With the async install path (install_default_voice_async), failure
+        # is surfaced via the polling handler which sets the status text to
+        # "Install failed." — renderOnboarding only re-runs on SUCCESS.
+        # The old sync .catch(fail) path showed an error toast; the async
+        # polling path updates the status element directly instead.
+        expect(status).to_contain_text("Install failed.", timeout=12000)
+        msg = status.text_content() or ""
+        assert "Install failed." in msg, (
+            f"status did not reflect the failure: {msg!r}"
+        )
+        step.check(f"real failure surfaced via status text: {msg!r}")
 
         # Real disk: NO voice installed, NO leftover .part of the model.
         assert voices_mod.installed_voices() == [], (
@@ -335,11 +347,15 @@ def test_voice_manager_row_install_failure_ui(
         origin = _closed_origin()
         step(f"redirect voice origin to a CLOSED port ({origin})")
         monkeypatch.setattr(vm, "voice_url_base", lambda v: origin)
+        # Bridge async path imports voice_url_base from pippal.voices at call
+        # time; patch that module too so the async doInstall path also fails fast.
+        monkeypatch.setattr(voices_mod, "voice_url_base", lambda v: origin)
     else:
         reset_origin = _ResetMidStreamOrigin()
         step(f"redirect voice origin to a real RST-mid-stream server "
              f"({reset_origin.base})")
         monkeypatch.setattr(vm, "voice_url_base", lambda v: reset_origin.base)
+        monkeypatch.setattr(voices_mod, "voice_url_base", lambda v: reset_origin.base)
 
     try:
         _goto(page, app_url, "voices", step)
