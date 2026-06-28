@@ -81,6 +81,18 @@ jobs:
           pip install pyinstaller
 
       # ------------------------------------------------------------------
+      # 3b. Generate the app icon (.ico) from the committed .png.
+      #     assets/pippal_icon.ico is .gitignored, so it is absent after a
+      #     fresh checkout — both PyInstaller and Inno Setup reference it.
+      # ------------------------------------------------------------------
+      - name: Generate app icon (.ico from committed .png)
+        shell: pwsh
+        run: |
+          python -c "from PIL import Image; Image.open('assets/pippal_icon.png').convert('RGBA').save('assets/pippal_icon.ico', sizes=[(16,16),(24,24),(32,32),(48,48),(64,64),(128,128),(256,256)])"
+          if (-not (Test-Path 'assets\pippal_icon.ico')) { throw 'icon generation failed' }
+          Write-Host "generated assets\pippal_icon.ico"
+
+      # ------------------------------------------------------------------
       # 4. Build with PyInstaller
       # ------------------------------------------------------------------
       - name: Run PyInstaller
