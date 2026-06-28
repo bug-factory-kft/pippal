@@ -138,7 +138,7 @@ def test_emit_session_start_includes_system_metadata(_isolated_diag: Path) -> No
         assert key in allowed_structural or key in ALLOWED_META_KEYS
 
     for meta_key in ("os_platform", "python_version", "pippal_version",
-                     "pippal_pro_version", "pywebview_version"):
+                     "pywebview_version"):
         assert meta_key in ALLOWED_META_KEYS
 
 
@@ -163,7 +163,7 @@ def test_emit_session_start_metadata_values_are_not_user_text(_isolated_diag: Pa
 
     evt = start_lines[0]
     meta_keys = ("os_platform", "python_version", "pippal_version",
-                 "pippal_pro_version", "pywebview_version")
+                 "pywebview_version")
     for k in meta_keys:
         if k not in evt:
             continue

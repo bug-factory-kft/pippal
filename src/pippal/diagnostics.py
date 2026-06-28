@@ -89,7 +89,7 @@ ALLOWED_META_KEYS: frozenset[str] = frozenset(
         "detail",
         # Session-start system metadata
         "os_platform", "python_version",
-        "pippal_version", "pippal_pro_version", "pywebview_version",
+        "pippal_version", "pywebview_version",
     }
 )
 
@@ -106,7 +106,7 @@ _ENUM_VALUE_RE = re.compile(r"^[A-Za-z0-9.:+\-]{1,64}$")
 IDENTIFIER_STRING_KEYS: frozenset[str] = frozenset({
     "method", "phase", "surface", "detail",
     "os_platform", "python_version",
-    "pippal_version", "pippal_pro_version", "pywebview_version",
+    "pippal_version", "pywebview_version",
 })
 _IDENTIFIER_VALUE_RE = re.compile(r"^[A-Za-z0-9_.\-]{1,64}$")
 
@@ -362,7 +362,6 @@ def emit_session_start() -> None:
     from importlib.metadata import version as _iv
     for _p, _k in (
         ("pippal", "pippal_version"),
-        ("pippal_pro", "pippal_pro_version"),
         ("pywebview", "pywebview_version"),
     ):
         try:
