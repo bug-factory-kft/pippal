@@ -257,7 +257,15 @@ export function renderOverlay() {
   var _tickFast = null; // true=fast, false=slow, null=none set yet
 
   var TICK_FAST_MS = 120;
-  var TICK_SLOW_MS = 2000;
+  // TICK_SLOW_MS must be strictly less than OVERLAY_MESSAGE_MS (1800 ms) so
+  // the slow idle heartbeat fires at least once during the "done" window of a
+  // one-shot banner (e.g. "No text selected").  A 2000 ms idle poll misses the
+  // entire 1800 ms window, leaving data-overlay-state stuck at "idle" and the
+  // overlay panel never showing the message to the user.  1000 ms gives a
+  // comfortable margin: the first slow tick always lands inside the 1800 ms
+  // window, which then switches the poll to fast mode (120 ms) for the
+  // remainder of the banner duration.
+  var TICK_SLOW_MS = 1000;
 
   function _setTickRate(fast) {
     if (_tickFast === fast) return; // already at the right rate
