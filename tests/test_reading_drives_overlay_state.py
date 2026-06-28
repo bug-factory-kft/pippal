@@ -69,6 +69,7 @@ class TestReadingDrivesOverlayState:
     def test_overlay_reaches_reading_when_winsound_raises(
         self,
         monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
     ) -> None:
         """When PlaySound raises, overlay must still reach 'reading' with
         non-empty chunk_text.
@@ -112,14 +113,18 @@ class TestReadingDrivesOverlayState:
 
         monkeypatch.setattr(WebOverlay, "set_state", _spy_set_state)
 
-        # Synthesis stub: write a real 100 ms WAV so wav_duration() > 0.
-        # Ensure the parent dir exists: on a fresh CI SYSTEM-profile runner,
-        # %LOCALAPPDATA%\PipPal\temp does not exist and wave.open("wb") raises
-        # FileNotFoundError before we can test the overlay state transition.
+        # Redirect chunk temp-files to pytest's tmp_path so this test never
+        # touches %LOCALAPPDATA%\PipPal\temp.  On a headless CI SYSTEM-profile
+        # runner that directory does not exist; any approach that creates it
+        # (mkdir) is fragile under permission restrictions.  tmp_path is always
+        # a writable, pre-created directory.
+        monkeypatch.setattr(_playback, "TEMP_DIR", tmp_path)
+
+        # Synthesis stub: write a minimal valid WAV so wav_duration() > 0.
+        # tmp_path is pre-created by pytest — no mkdir() needed.
         def _fake_synthesize(
             text: str, out_path: Path, backend: Any = None
         ) -> bool:
-            out_path.parent.mkdir(parents=True, exist_ok=True)
             _make_wav(out_path, duration_s=0.1)
             return True
 
@@ -127,6 +132,9 @@ class TestReadingDrivesOverlayState:
         monkeypatch.setattr(engine, "_maybe_play_onboarding", lambda: False)
 
         # Simulate the failure: winsound raises (no audio device etc.).
+        # _wait_for_chunk_end is never reached when PlaySound raises
+        # (_play_chunk catches the exception and returns idx+1 immediately),
+        # so no time-patching is required here.
         def _winsound_raises(*args: Any, **kwargs: Any) -> None:
             raise RuntimeError("No audio device available")
 
@@ -176,6 +184,7 @@ class TestReadingDrivesOverlayState:
     def test_overlay_reaches_reading_when_winsound_succeeds(
         self,
         monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
     ) -> None:
         """Happy path: reading is also reached when winsound succeeds
         (no regression on the normal working flow)."""
@@ -201,12 +210,16 @@ class TestReadingDrivesOverlayState:
 
         monkeypatch.setattr(WebOverlay, "start_chunk", _spy_start_chunk)
 
-        # Ensure the parent dir exists before writing the WAV: on a CI
-        # SYSTEM-profile runner %LOCALAPPDATA%\PipPal\temp does not exist.
+        # Redirect chunk temp-files to pytest's tmp_path so this test never
+        # touches %LOCALAPPDATA%\PipPal\temp.  On a headless CI SYSTEM-profile
+        # runner that directory does not exist; tmp_path is always pre-created.
+        monkeypatch.setattr(_playback, "TEMP_DIR", tmp_path)
+
+        # Synthesis stub: write a minimal valid WAV.  tmp_path is pre-created
+        # by pytest — no mkdir() needed.
         def _fake_synthesize(
             text: str, out_path: Path, backend: Any = None
         ) -> bool:
-            out_path.parent.mkdir(parents=True, exist_ok=True)
             _make_wav(out_path, duration_s=0.1)
             return True
 
@@ -216,17 +229,22 @@ class TestReadingDrivesOverlayState:
         # winsound is a no-op — audio "plays" silently.
         monkeypatch.setattr(_playback.winsound, "PlaySound", lambda *a, **k: None)
 
-        # Make time jump past the 0.1 s chunk deadline on the first poll tick
-        # so _wait_for_chunk_end returns immediately without actually sleeping.
-        _call_count = [0]
-
-        def _fast_time() -> float:
-            _call_count[0] += 1
-            # First call sets the deadline; all subsequent calls return a large
-            # value so the first poll instantly satisfies >= deadline.
-            return 0.0 if _call_count[0] <= 1 else 999.0
-
-        monkeypatch.setattr(_playback.time, "time", _fast_time)
+        # Bypass _wait_for_chunk_end entirely: the previous approach patched
+        # time.time() with a call-counter that returned 0.0 for the first call
+        # and 999.0 for all subsequent ones.  On CI (headless SYSTEM profile)
+        # an extra time.time() call consumed the counter one iteration early,
+        # making deadline = 999.15 s and the while-loop check 999.0 < 999.15
+        # evaluate True forever — causing a 16-minute hang.
+        #
+        # Mocking _wait_for_chunk_end directly is both simpler and correct:
+        # this test only cares that the overlay reached "reading" with
+        # chunk_text before PlaySound was called; the wait loop itself is
+        # exercised by the dedicated test_playback.py resume tests.
+        monkeypatch.setattr(
+            _playback,
+            "_wait_for_chunk_end",
+            lambda *_args, **_kwargs: _playback.WaitResult.COMPLETED,
+        )
 
         engine._read_text_impl("hello from the karaoke overlay")
 
