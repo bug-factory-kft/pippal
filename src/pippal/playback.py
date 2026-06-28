@@ -353,6 +353,27 @@ def _play_chunk(
     chunks = session.chunks
     wav_path = session.chunk_paths[idx]
     dur = wav_duration(wav_path)
+
+    # Arm the overlay's "reading" state and publish karaoke word timings
+    # BEFORE attempting winsound playback so the overlay always transitions
+    # to "reading" with chunk_text populated even if audio output fails
+    # (e.g. no audio device, format mismatch, exclusive-mode lock).
+    # Without this, a PlaySound exception caused the overlay to stay stuck
+    # in "loading" and jump directly to "done" — the karaoke window was
+    # always empty/black on any read that couldn't play audio.
+    ov = engine._overlay()
+    if ov is not None:
+        # Re-assert "reading" on EVERY chunk entry, not just idx 0. A seek
+        # (engine.seek) flips the overlay to "thinking" to show the loader
+        # while the target chunk may re-synthesise; without this unconditional
+        # re-assert, a forward/back to any non-zero chunk left the overlay
+        # stuck in "thinking"/loading forever (the BIG multi-page nav wedge).
+        # ``start_chunk`` clears the synth flag (audio-ready event) so the
+        # loader hides as soon as this chunk's audio is about to play.
+        ov.set_state("reading")
+        offset = _karaoke_offset_s(engine)
+        ov.start_chunk(chunks[idx], dur, idx, len(chunks), offset_s=offset)
+
     try:
         winsound.PlaySound(
             str(wav_path),
@@ -374,19 +395,6 @@ def _play_chunk(
         chunk_total=len(chunks),
         engine=getattr(backend, "name", None) if backend is not None else None,
     )
-
-    ov = engine._overlay()
-    if ov is not None:
-        # Re-assert "reading" on EVERY chunk entry, not just idx 0. A seek
-        # (engine.seek) flips the overlay to "thinking" to show the loader
-        # while the target chunk may re-synthesise; without this unconditional
-        # re-assert, a forward/back to any non-zero chunk left the overlay
-        # stuck in "thinking"/loading forever (the BIG multi-page nav wedge).
-        # ``start_chunk`` then clears the synth flag (audio-ready event) so the
-        # loader hides exactly when this chunk's audio begins playing.
-        ov.set_state("reading")
-        offset = _karaoke_offset_s(engine)
-        ov.start_chunk(chunks[idx], dur, idx, len(chunks), offset_s=offset)
 
     result = _wait_for_chunk_end(
         engine,
