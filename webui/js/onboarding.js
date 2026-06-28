@@ -1,7 +1,7 @@
 /* onboarding.js — the ONBOARDING / first-run surface (activation_panel.py
  * parity). Extracted VERBATIM from app.js/main.js (renderOnboarding);
  * behavior-preserving — same DOM, same data-testid values, same bridge
- * calls, same #252 async install-progress path. Isolated as its own
+ * calls, same async install-progress path. Isolated as its own
  * module so the onboarding follow-up touches only this file. Shared
  * singletons come from app-core.js; closeWin is shared with the overlay
  * cluster and imported from overlay.js (same single instance the monolith
@@ -132,7 +132,7 @@ export function renderOnboarding() {
       );
       view.appendChild(actions);
     } else if (rd.status === "missing_voice") {
-      // Progress wrap for the "Install default voice" async path (#252)
+      // Progress wrap for the "Install default voice" async path.
       var odvProgressWrap = U.el("div", {
         class: "install-progress-wrap",
         testid: "onboarding-install-progress",
@@ -158,7 +158,7 @@ export function renderOnboarding() {
             var pct = s.pct || 0;
             odvProgressFill.style.width = Math.min(100, pct) + "%";
             // The backend status string already contains size + pct + speed;
-            // append a bare "(N%)" only when the status text lacks one (#252).
+            // Append a bare "(N%)" only when the status text lacks one.
             var lbl = s.status || "";
             if (pct > 0 && pct < 100 && lbl.indexOf("%") < 0) {
               lbl += "  (" + Math.round(pct) + "%)";
@@ -198,7 +198,7 @@ export function renderOnboarding() {
           odvProgressWrap.style.display = "";
           odvProgressFill.style.width = "0%";
           odvProgressLabel.textContent = "Starting…";
-          // Use async path for progress feedback (#252)
+          // Use async path for progress feedback.
           API.call("install_default_voice_async")
             .then(function (r) {
               if (!r || !r.task_id) {
@@ -220,7 +220,7 @@ export function renderOnboarding() {
       );
       actions.appendChild(odvInstallBtn);
       // Anchor progress immediately above the action buttons in a shared
-      // bottom container so it is always visible with the button row (#252).
+      // bottom container so it is always visible with the button row.
       var odbottom = U.el("div", {
         class: "onboarding-bottom",
         testid: "onboarding-bottom",

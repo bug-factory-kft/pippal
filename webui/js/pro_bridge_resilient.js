@@ -1,7 +1,7 @@
-/* pro_bridge_resilient.js — Pro-owned cold-create bridge resilience.
+/* pro_bridge_resilient.js — Cold-create bridge resilience.
  *
  * HARD CONSTRAINT H1: api.js is byte-identical to the public core and MUST
- * NOT be edited.  All Pro-specific hardening lives here.
+ * NOT be edited.  All bridge-resilience hardening lives here.
  *
  * Problem: on cold create (first launch / onboarding) there is a narrow
  * post-load warmup window where window.pywebview.api is chosen as the
@@ -20,7 +20,7 @@
  * api.js: POST {method, args}).  The Promise contract is transparent
  * (same resolve/reject shape to callers).
  *
- * This file MUST be loaded AFTER api.js AND pro_diag_instrument.js (so it
+ * This file MUST be loaded AFTER api.js and pro_diag_instrument.js (so it
  * wraps the already-instrumented call).
  */
 (function () {
@@ -35,21 +35,12 @@
   var WARMUP_MS = 3000;
   var _loadTime = Date.now();
 
-  // Read-only / idempotent methods safe to retry once.
+  // Read-only / idempotent free bridge methods safe to retry once.
   var RETRY_SAFE = {
     get_config: true,
-    get_queue: true,
     get_voice_catalogue: true,
     get_hotkey_actions: true,
-    get_pronunciation_rules: true,
-    get_onboarding_state: true,
-    get_release_history: true,
-    get_kokoro_state: true,
     get_crash_prompt: true,
-    get_ctx_menu_status: true,
-    get_overlay_state: true,
-    get_mood_list: true,
-    get_recent_docs: true,
   };
 
   // HTTP fallback that mirrors api.js's httpCall exactly.

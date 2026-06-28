@@ -3,8 +3,8 @@
  * Extracted VERBATIM from app.js/main.js (renderOverlay, closeWin);
  * behavior-preserving — same DOM, same data-testid values, same
  * setInterval(tick, 120) cadence, same .reader-loading "thinking"
- * block. Isolated as its own module so the #305 event-driven follow-up
- * touches only this file. Shared singletons come from app-core.js. */
+ * block. Isolated as its own module so the event-driven loading-state
+ * follow-up touches only this file. Shared singletons come from app-core.js. */
 "use strict";
 
 import {
@@ -17,10 +17,10 @@ import {
 } from "./app-core.js";
 
 // ------------------------------------------------------------------
-// Playful loading messages (#6) — whimsical, fake-technical lines in
+// Playful loading messages — whimsical, fake-technical lines in
 // the charming STYLE of classic life-sim loading screens, tailored to
 // a text-to-speech READER. ORIGINAL strings (no trademarked phrases).
-// The UI language is English (cf. "PipPal Pro", "Loading…"), so these
+// The UI language is English (cf. "PipPal", "Loading…"), so these
 // are English. They rotate while the overlay is in the loading/thinking
 // state; see the rotation logic in tick() below.
 // ------------------------------------------------------------------
@@ -50,34 +50,6 @@ function currentLoadingMessage() {
   return LOADING_MESSAGES[idx];
 }
 
-// #6 — AI shortcuts (summary / explain / translate / define) set the
-// backend ``action_label`` to a bare one-word action id (e.g. "summary",
-// or "translate · en"). Showing that raw id as the loader text is ugly and
-// breaks the playful rotating-message experience. Instead, for AI actions
-// we lead with a friendly action-specific line and then keep ROTATING the
-// whimsical loading set, so the loader stays varied and charming rather
-// than freezing on the bare word. The action id is the part before any
-// " · …" suffix (translate carries the target language after the dot).
-var AI_ACTION_LINES = {
-  summary: "Distilling the key points…",
-  explain: "Gathering an explanation…",
-  translate: "Switching languages…",
-  define: "Looking it up…",
-};
-function aiActionId(label) {
-  if (!label) return null;
-  var id = String(label).split("·")[0].trim().toLowerCase();
-  return Object.prototype.hasOwnProperty.call(AI_ACTION_LINES, id) ? id : null;
-}
-// Loader text for an AI action: alternate the friendly action line with the
-// playful rotating set so the loader stays lively for the whole synth.
-function aiLoadingMessage(actionId) {
-  var step = Math.floor(Date.now() / LOADING_ROTATE_MS);
-  // Even steps show the action-specific friendly line; odd steps show a
-  // rotating whimsical message — never the bare action id.
-  if (step % 2 === 0) return AI_ACTION_LINES[actionId];
-  return currentLoadingMessage();
-}
 function escapeLoadingText(s) {
   return String(s).replace(/[<>&"]/g, function (c) {
     return { "<": "&lt;", ">": "&gt;", "&": "&amp;", '"': "&quot;" }[c];
@@ -123,7 +95,7 @@ export function renderOverlay() {
     testid: "overlay-close",
   });
   var bodyEl = U.el("div", { class: "overlay-body", testid: "overlay-text" });
-  // #281.6 loading indicator: shown while synthesis is in progress
+  // Loading indicator: shown while synthesis is in progress
   // (overlay_state == "thinking"), hidden during reading/idle/done.
   var loadingEl = U.el("div", {
     class: "overlay-loading hidden",
@@ -144,7 +116,7 @@ export function renderOverlay() {
   // SVG icon helpers — all icons share the same 16×16 viewBox so every
   // glyph occupies an identical box.  This eliminates the per-glyph
   // vertical-metric differences that unicode transport characters have
-  // across font families (fixes #280/#281 icon-top misalignment).
+  // across font families (fixes icon-top misalignment).
   function svgIcon(pathD, extraAttrs) {
     var ns = "http://www.w3.org/2000/svg";
     var svg = document.createElementNS(ns, "svg");
@@ -217,33 +189,18 @@ export function renderOverlay() {
     counter,
     legacyCounterMarker,
   ]);
-  // Track whether an AI action is currently in flight so the close/X and
-  // Escape paths can fire cancel_ai_action() before dismissing the overlay.
-  // Set to true when the overlay enters a thinking/loading state for a known
-  // AI action id (action_label matches an AI id); cleared on any other state.
-  var _aiActionInFlight = false;
-
   closeBtn.addEventListener("click", function () {
-    // If an AI action is in flight, cancel it first so the daemon thread
-    // stops blocking on the Ollama socket immediately (~1 s) rather than
-    // running silently for up to 30 s after the overlay has been dismissed.
-    if (_aiActionInFlight) {
-      API.call("cancel_ai_action").catch(fail);
-    }
     API.call("overlay_action", "close").catch(fail);
   });
 
-  // Escape key: dismiss the overlay (and cancel AI if in flight).
-  // Uses capture phase so Escape is intercepted even if focus is inside the
-  // overlay panel.  The keydown listener is attached to the document so it
-  // works regardless of which element has focus.
+  // Escape key: dismiss the overlay.  Uses capture phase so Escape is
+  // intercepted even if focus is inside the overlay panel.  The keydown
+  // listener is attached to the document so it works regardless of which
+  // element has focus.
   // Guard: document.addEventListener may not exist in node/JSDOM test harnesses.
   if (typeof document.addEventListener === "function") {
     document.addEventListener("keydown", function (e) {
       if (e.key === "Escape" && !panel.classList.contains("hidden")) {
-        if (_aiActionInFlight) {
-          API.call("cancel_ai_action").catch(fail);
-        }
         API.call("overlay_action", "close").catch(fail);
       }
     }, true);
@@ -330,7 +287,6 @@ export function renderOverlay() {
           bodyEl.textContent = "";
           barFill.style.width = "0%";
           lastText = null;
-          _aiActionInFlight = false;
           // Back off to slow heartbeat: nothing to update while idle.
           _setTickRate(false);
           return;
@@ -349,18 +305,13 @@ export function renderOverlay() {
         label.textContent =
           (s.brand_name || "PipPal") +
           (s.action_label ? "  ·  " + s.action_label : "");
-        // T1: Disabled states for transport buttons.
-        // SPEC ISSUE 1 / #305 nav-unwedge: prev/next MUST stay enabled while
-        // "thinking" on a multi-chunk doc so rapid presses are delivered to the
-        // bridge. Previously gating on ``!isReading`` prevented a second press
-        // during synthesis, causing the overlay to wedge in "loading".
-        // Fix: only gate on chunk-boundary (first/last), NOT on reading state.
-        // pause/replay are reading-only (no audio to pause while synthesizing).
+        // Transport button disabled-states: prev/next stay enabled during
+        // synthesis so rapid presses are delivered to the bridge even while
+        // "thinking". Gate only on chunk-boundary (first/last). pause/replay
+        // are reading-only (no audio to pause while synthesizing).
+        // "loading" is the post-capture, pre-synth state — treat it like
+        // "thinking" for nav so rapid prev/next are deliverable immediately.
         var isReading = st === "reading";
-        // ISSUE 2 — the post-capture "loading" state shows the overlay
-        // instantly (engine emits it after capture, before synth). Treat it
-        // like "thinking" for the loader + nav so the in-body loader renders
-        // and rapid prev/next stay deliverable while the synth runs.
         var isNavigable = isReading || st === "thinking" || st === "loading";
         var prevDis = s.chunk_idx <= 0 || !isNavigable;
         var nextDis =
@@ -384,9 +335,8 @@ export function renderOverlay() {
         if (pbSvgPath) pbSvgPath.setAttribute("d", ICONS[pbIconKey]);
         pauseBtn.setAttribute("data-icon", pbIconKey);
         if (st === "reading" && s.chunk_text) {
-          // #281.6: hide loading indicator once audio is playing.
-          // BUG 1 fix: also remove "dimmed" so new chunk's text is fully visible.
-          _aiActionInFlight = false;
+          // Hide loading indicator once audio is playing; remove "dimmed"
+          // so the new chunk's text is fully visible.
           loadingEl.classList.add("hidden");
           bodyEl.classList.remove("dimmed");
           if (s.chunk_text !== lastText) {
@@ -432,73 +382,22 @@ export function renderOverlay() {
             s.chunk_total > 1 ? s.chunk_idx + 1 + "/" + s.chunk_total : "";
           legacyCounterMarker.textContent = counter.textContent;
         } else if (st === "thinking" || st === "loading") {
-          // ISSUE 2 — "loading" is the POST-capture, pre-synth state the
-          // engine sets the instant the selection is captured (the overlay
-          // window pops immediately via SW_SHOWNOACTIVATE). It renders the
-          // SAME in-body loader as "thinking" so the user sees the loading
-          // screen immediately, then karaoke once "reading" arrives.
-          //
-          // BUG 1 fix (SPEC §BUG1 + ISSUE 1/3, #305 re-apply):
-          //
-          // SHOW: inject an in-flow .reader-loading block into overlay-body
-          // for EVERY "thinking" tick. Chrome (header + footer) stays at
-          // opacity 1; no .dimmed class; no absolute spinner.
-          // This runs regardless of is_synthesizing so the served-E2E fixture
-          // (which returns overlay_state='thinking' without is_synthesizing)
-          // also gets the loader — keeping test_overlay_thinking*.py green.
-          //
-          // HIDE (EVENT-DRIVEN): the loader is NOT hidden by a timer or poll.
-          // When the core audio-ready event fires, the backend flips
-          // ``is_synthesizing`` → false and ``overlay_state`` → "reading"
-          // (core #105 guarantee). The next tick() sees st === "reading" and
-          // falls into the reading branch above, which hides loadingEl and
-          // replaces bodyEl with word spans. No setTimeout/setInterval governs
-          // this transition — it is entirely driven by the state-machine edge.
-          //
-          // Cache-HIT path: is_synthesizing is false when the chunk was
-          // already prefetched; "reading" arrives in ~1 tick (~120 ms), so
-          // the loader shows only for the polling interval — not for a full
-          // synth duration. No spurious lingering loader.
-          //
-          // Navigation during loading: prev/next are enabled (see T1 above)
-          // so rapid forward/back presses are delivered even while thinking.
-          // #6 playful rotating loader.
-          //
-          // AI shortcuts (summary/explain/translate/define) set action_label
-          // to a bare one-word action id — show a friendly action line that
-          // rotates with the whimsical set instead of the raw "summary" word.
-          //
-          // For any OTHER meaningful action_label (anything other than the
-          // generic "Loading…" placeholder and not a known AI action id) we
-          // still honour it verbatim so explicit status text is not overridden.
-          // When there is no meaningful label, rotate the playful set.
-          var aiId = aiActionId(s.action_label);
-          // Track AI-in-flight so close/X and Escape can cancel the action.
-          _aiActionInFlight = !!aiId;
+          // Inject an in-body loader for every "thinking"/"loading" tick.
+          // The loader is hidden event-driven when state transitions to
+          // "reading". If action_label is set (not the generic placeholder),
+          // show it; otherwise rotate the playful loading set.
           var explicit =
-            !aiId && s.action_label && s.action_label !== "Loading…"
+            s.action_label && s.action_label !== "Loading…"
               ? s.action_label
               : null;
-          var loadingLabel = aiId
-            ? aiLoadingMessage(aiId)
-            : explicit || currentLoadingMessage();
+          var loadingLabel = explicit || currentLoadingMessage();
           lastText = null;
           loadingEl.classList.add("hidden");
           bodyEl.classList.remove("dimmed");
-          // Build the .reader-loading block ONCE (when entering the loading
-          // state) so the shimmer/pulse animation isn't restarted on every
-          // 120 ms tick. On subsequent ticks only swap the label text when the
-          // rotating message actually changes — the animation keeps running.
-          // For AI actions: also render a Cancel button so the user can abort
-          // a slow/hung Ollama request without waiting for the 30 s timeout.
+          // Build the .reader-loading block once per state entry so the
+          // shimmer animation is not restarted on every 120 ms tick.
           var labelSpan = bodyEl.querySelector(".reader-loading-label");
           if (!labelSpan) {
-            // Fix C — the redundant Cancel button is REMOVED. The X (close)
-            // button already cancels in-flight AI actions via cancel_ai_action()
-            // (see closeBtn.addEventListener above). A separate Cancel button is
-            // redundant and confusing (two controls for the same action). The X
-            // remains wired and must be used to cancel; this keeps one clear
-            // cancellation affordance rather than two.
             bodyEl.innerHTML =
               '<div class="reader-loading">' +
               '<div class="reader-loading-bar"></div>' +
@@ -523,15 +422,14 @@ export function renderOverlay() {
       })
       .catch(function () {});
   }
-  // A2 — trigger-driven fast-kick: expose a guarded global so the Pro
+  // Trigger-driven fast-kick: expose a guarded global so the
   // re-show path (window_lifecycle.py overlay branch) can call
   //   evaluate_js("window.__pippalOverlayKick && window.__pippalOverlayKick()")
   // immediately after show(). This forces _setTickRate(true) + a synchronous
   // tick() the instant the window reappears, without waiting for the next
   // slow 2000 ms poll to notice the new engine state.  The guard (&&) makes
-  // it a no-op on the core public frontend and in served-E2E where the
-  // function may be absent — Pro-neutral.  The idle throttle is unchanged:
-  // this only fires on an actual re-show, never while the overlay is hidden.
+  // it a no-op where the function may be absent.  The idle throttle is
+  // unchanged: this only fires on an actual re-show, never while hidden.
   window.__pippalOverlayKick = function () {
     _setTickRate(true);
     tick();
