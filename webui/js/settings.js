@@ -16,6 +16,12 @@ import { buildDiagCard } from "./settings-cards.js";
 import { ctxText } from "./settings-footer.js";
 
 // ------------------------------------------------------------------
+// Promotional URLs — kept as named constants for clarity and testability.
+// ------------------------------------------------------------------
+var STORE_URL  = "https://apps.microsoft.com/detail/9p0jx4n42nsl";
+var REDDIT_URL = "https://www.reddit.com/r/PipPalApp/";
+
+// ------------------------------------------------------------------
 // Speed <-> length_scale converters (shared with settings-footer.js).
 // ------------------------------------------------------------------
 var teardownSettingsVoiceRefresh = null;
@@ -372,6 +378,39 @@ export function renderSettings() {
       linkRow,
     ]);
 
+    // ---- Promo banner (free → Pro upsell + Reddit community) ----
+    var promoGetProBtn = U.el("button", {
+      testid: "promo-get-pro",
+      text: "Get PipPal Pro",
+    });
+    promoGetProBtn.classList.add("primary");
+    promoGetProBtn.addEventListener("click", function () {
+      API.call("open_url", STORE_URL).catch(fail);
+    });
+
+    var promoRedditBtn = U.el("button", {
+      testid: "promo-reddit",
+      text: "Open Reddit",
+    });
+    promoRedditBtn.addEventListener("click", function () {
+      API.call("open_url", REDDIT_URL).catch(fail);
+    });
+
+    var promoCard = U.el("div", { testid: "settings-promo", class: "settings-promo" }, [
+      U.el("div", { class: "promo-pro-cta" }, [
+        U.el("div", { class: "promo-pro-headline", text: "Unlock PipPal Pro" }),
+        U.el("div", { class: "promo-pro-sub",
+          text: "AI summaries, premium neural voices, document import, and more." }),
+        promoGetProBtn,
+      ]),
+      U.el("div", { class: "promo-reddit-cta" }, [
+        U.el("div", { class: "promo-reddit-text",
+          text: "Join r/PipPalApp — share voices, tips & ideas." }),
+        promoRedditBtn,
+      ]),
+    ]);
+
+    view.appendChild(promoCard);
     view.appendChild(voiceCard);
     view.appendChild(speechCard);
     view.appendChild(hotkeysCard);
