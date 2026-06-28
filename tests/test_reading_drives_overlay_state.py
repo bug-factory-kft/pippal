@@ -113,9 +113,13 @@ class TestReadingDrivesOverlayState:
         monkeypatch.setattr(WebOverlay, "set_state", _spy_set_state)
 
         # Synthesis stub: write a real 100 ms WAV so wav_duration() > 0.
+        # Ensure the parent dir exists: on a fresh CI SYSTEM-profile runner,
+        # %LOCALAPPDATA%\PipPal\temp does not exist and wave.open("wb") raises
+        # FileNotFoundError before we can test the overlay state transition.
         def _fake_synthesize(
             text: str, out_path: Path, backend: Any = None
         ) -> bool:
+            out_path.parent.mkdir(parents=True, exist_ok=True)
             _make_wav(out_path, duration_s=0.1)
             return True
 
@@ -197,9 +201,12 @@ class TestReadingDrivesOverlayState:
 
         monkeypatch.setattr(WebOverlay, "start_chunk", _spy_start_chunk)
 
+        # Ensure the parent dir exists before writing the WAV: on a CI
+        # SYSTEM-profile runner %LOCALAPPDATA%\PipPal\temp does not exist.
         def _fake_synthesize(
             text: str, out_path: Path, backend: Any = None
         ) -> bool:
+            out_path.parent.mkdir(parents=True, exist_ok=True)
             _make_wav(out_path, duration_s=0.1)
             return True
 
