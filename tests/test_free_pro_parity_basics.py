@@ -9,9 +9,8 @@ from __future__ import annotations
 
 import threading
 import types
-from typing import Any
+from typing import Any, ClassVar
 from unittest.mock import MagicMock, patch
-
 
 # ---------------------------------------------------------------------------
 # Bug 4: _active_webview_window() now tries webview.active_window()
@@ -23,7 +22,7 @@ class TestBug4ActiveWebviewWindow:
     def _make_mixin(self):
         from pippal.web_ui.bridge_diag_settings import DiagSettingsBridgeMixin
         class _M(DiagSettingsBridgeMixin):
-            config = {}
+            config: ClassVar[dict[str, Any]] = {}
         return _M()
 
     def test_returns_none_when_webview_missing(self):
@@ -94,6 +93,7 @@ class TestBug4ActiveWebviewWindow:
                 with patch("pippal.diagnostics.DIAG_DIR", tmp_path):
                     result = m.open_diag_folder()
             assert result.get("handled") is True
+            assert mock_popen.called
         finally:
             if original is None:
                 sys.modules.pop("webview", None)
@@ -392,6 +392,67 @@ class TestBug2AsyncVoiceInstall:
         assert '"voice_install_status"' in src, (
             "voice_install_status polling call missing from voices.js"
         )
+
+
+# ---------------------------------------------------------------------------
+# Blocking Fix 1: install_default_voice_async added to free bridge
+# ---------------------------------------------------------------------------
+
+class TestInstallDefaultVoiceAsync:
+    """install_default_voice_async returns task_id and tracks progress."""
+
+    def _make_bridge(self):
+        from pippal.web_ui.bridge import PipPalBridge
+        engine = MagicMock()
+        return PipPalBridge(engine, {})
+
+    def test_returns_task_id(self):
+        """install_default_voice_async returns ok=True + task_id immediately."""
+        bridge = self._make_bridge()
+        with patch("pippal.web_ui.bridge.default_piper_voice",
+                   return_value={"id": "x", "lang": "en", "name": "x",
+                                 "quality": "medium", "label": "X",
+                                 "url_base": "x", "size_mb": 0}), \
+             patch.object(bridge, "_stream_voice_with_progress",
+                          return_value="x.onnx"):
+            result = bridge.install_default_voice_async()
+        assert result.get("ok") is True
+        assert "task_id" in result and result["task_id"]
+
+    def test_not_unknown_method(self):
+        """install_default_voice_async must NOT return __error__: unknown method."""
+        bridge = self._make_bridge()
+        with patch("pippal.web_ui.bridge.default_piper_voice",
+                   return_value={"id": "x", "lang": "en", "name": "x",
+                                 "quality": "medium", "label": "X",
+                                 "url_base": "x", "size_mb": 0}), \
+             patch.object(bridge, "_stream_voice_with_progress",
+                          return_value="x.onnx"):
+            result = bridge.install_default_voice_async()
+        assert "__error__" not in result
+
+    def test_task_tracked_in_voice_tasks(self):
+        """The returned task_id is present in _voice_tasks immediately."""
+        import time
+        bridge = self._make_bridge()
+        done = threading.Event()
+
+        def slow_stream(voice, is_cancelled, set_progress):
+            done.wait(timeout=5)
+            return "x.onnx"
+
+        with patch("pippal.web_ui.bridge.default_piper_voice",
+                   return_value={"id": "x", "lang": "en", "name": "x",
+                                 "quality": "medium", "label": "X",
+                                 "url_base": "x", "size_mb": 0}), \
+             patch.object(bridge, "_stream_voice_with_progress",
+                          side_effect=slow_stream):
+            result = bridge.install_default_voice_async()
+            task_id = result["task_id"]
+            status = bridge.voice_install_status(task_id)
+        done.set()
+        assert status.get("running") is True or not status.get("done", True)
+        time.sleep(0.05)
 
 
 # ---------------------------------------------------------------------------

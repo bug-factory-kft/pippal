@@ -71,7 +71,7 @@ class PipPalBridge(DiagSettingsBridgeMixin):
         self._on_hotkey_change = on_hotkey_change
         self._on_engine_change = on_engine_change
         self._install_lock = threading.Lock()
-        # Bug 2: async voice install task registry (progress + cancel).
+        # Async voice install task registry (progress + cancel).
         self._voice_task_lock = threading.Lock()
         self._voice_tasks: dict[str, Any] = {}
 
@@ -176,9 +176,8 @@ class PipPalBridge(DiagSettingsBridgeMixin):
             except Exception:
                 pass
         else:
-            # No host hook (served/E2E mode): drop the backend cache
-            # directly so the next synth honours the new config — same
-            # net effect as the settings on_engine_change hook.
+            # No host hook (served/E2E mode): drop backend cache so next synth
+            # honours the new config — same effect as on_engine_change hook.
             try:
                 self.engine.reset_backend()
             except Exception:
@@ -228,23 +227,14 @@ class PipPalBridge(DiagSettingsBridgeMixin):
         with self._install_lock:
             v = self._voice_by_id(voice_id)
             filename = install_piper_voice(v)
-        # Install-completion signal back into onboarding/activation: make
-        # the just-installed voice the configured voice on the SAME shared
-        # config dict that onboarding.build_activation_readiness reads, so
-        # the readiness / onboarding surface flips to ready immediately.
-        # Mirrors install_default_voice below — the shared onboarding logic
-        # is reused untouched.
+        # Set the installed voice on the shared config dict so onboarding's
+        # readiness check flips to ready immediately after install.
         self.config["voice"] = filename
         try:
             self.engine.reset_backend()
         except Exception:
             pass
         return {"ok": True, "installed": filename}
-
-    # ------------------------------------------------------------------
-    # Bug 2: async voice install with progress reporting.
-    # The sync install_voice above is preserved for back-compat.
-    # ------------------------------------------------------------------
 
     def _stream_voice_with_progress(
         self,
@@ -254,11 +244,9 @@ class PipPalBridge(DiagSettingsBridgeMixin):
     ) -> str:
         """Download a Piper voice pair (.onnx + .onnx.json) in chunks.
 
-        Reports download progress via ``set_progress(pct=..., status=...)``
-        and checks ``is_cancelled()`` on every chunk so the user can abort
-        mid-download.  Raises ``InterruptedError`` on cancel; re-raises any
-        network error unchanged.  Uses atomic ``.part`` rename so a partial
-        download never leaves broken voice files in place.
+        Reports progress via ``set_progress(pct=..., status=...)``, checks
+        ``is_cancelled()`` on every chunk.  Uses atomic ``.part`` rename so
+        a partial download never leaves broken files in place.
         """
         import os as _os
         import urllib.request as _urlreq
@@ -322,27 +310,24 @@ class PipPalBridge(DiagSettingsBridgeMixin):
         _os.replace(str(json_part), str(json_dest))
         return filename
 
-    def install_voice_async(self, voice_id: str) -> dict[str, Any]:
-        """Start a named Piper voice install on a background thread.
+    def _start_voice_install_async(
+        self,
+        voice_getter: Callable[[], dict[str, Any]],
+        *,
+        start_msg: str = "Starting…",
+    ) -> dict[str, Any]:
+        """Internal: start a voice download on a background thread; return task_id.
 
-        Returns ``{"ok": True, "task_id": str}`` immediately.  Poll progress
-        via :meth:`voice_install_status`; cancel via
-        :meth:`cancel_voice_install`.  Back-compat: if the caller doesn't
-        find a ``task_id`` in the response it should fall back to the sync
-        :meth:`install_voice`.
+        ``voice_getter`` is called on the thread to resolve the voice dict.
+        Returns ``{"ok": True, "task_id": str}`` immediately.
         """
         import uuid
 
         task_id = uuid.uuid4().hex
         with self._voice_task_lock:
             self._voice_tasks[task_id] = {
-                "running": True,
-                "pct": 0.0,
-                "status": "Starting…",
-                "error": "",
-                "done": False,
-                "cancelled": False,
-                "installed": None,
+                "running": True, "pct": 0.0, "status": start_msg,
+                "error": "", "done": False, "cancelled": False, "installed": None,
             }
 
         def _is_cancelled() -> bool:
@@ -361,9 +346,13 @@ class PipPalBridge(DiagSettingsBridgeMixin):
 
         def _run() -> None:
             try:
-                voice = self._voice_by_id(voice_id)
+                voice = voice_getter()
                 filename = self._stream_voice_with_progress(voice, _is_cancelled, _set)
                 self.config["voice"] = filename
+                try:
+                    save_config(self.config)
+                except Exception:
+                    pass
                 try:
                     self.engine.reset_backend()
                 except Exception:
@@ -387,6 +376,30 @@ class PipPalBridge(DiagSettingsBridgeMixin):
 
         threading.Thread(target=_run, daemon=True).start()
         return {"ok": True, "task_id": task_id}
+
+    def install_voice_async(self, voice_id: str) -> dict[str, Any]:
+        """Start a named Piper voice install on a background thread.
+
+        Returns ``{"ok": True, "task_id": str}`` immediately.  Poll progress
+        via :meth:`voice_install_status`; cancel via
+        :meth:`cancel_voice_install`.  Back-compat: if the caller doesn't
+        find a ``task_id`` in the response it should fall back to the sync
+        :meth:`install_voice`.
+        """
+        return self._start_voice_install_async(lambda: self._voice_by_id(voice_id))
+
+    def install_default_voice_async(self) -> dict[str, Any]:
+        """Start the default Piper voice install on a background thread.
+
+        Returns ``{"ok": True, "task_id": str}`` immediately.  Poll progress
+        via :meth:`voice_install_status`; cancel via
+        :meth:`cancel_voice_install`.  Back-compat: sync
+        :meth:`install_default_voice` remains for callers that don't handle
+        a task_id.
+        """
+        return self._start_voice_install_async(
+            default_piper_voice, start_msg="Downloading default voice…"
+        )
 
     def voice_install_status(self, task_id: str) -> dict[str, Any]:
         """Return current state of a background voice install task.
@@ -513,18 +526,14 @@ class PipPalBridge(DiagSettingsBridgeMixin):
     def engine_state(self) -> dict[str, Any]:
         snap: dict[str, Any] = {
             "brand_name": self.config.get("brand_name", "PipPal"),
-            # Karaoke offset (ms): the Tk overlay applies it as the chunk
-            # start offset; the web overlay shifts the highlight cursor.
             "karaoke_offset_ms": int(self.config.get("karaoke_offset_ms", 0) or 0),
         }
         if self.overlay is not None and hasattr(self.overlay, "snapshot"):
             snap.update(self.overlay.snapshot())
         with self.engine.lock:
             snap["is_speaking"] = bool(self.engine.is_speaking)
-            # Read the backing field directly instead of calling the is_paused
-            # property: the property acquires engine.lock itself, which would
-            # deadlock on the non-reentrant Lock we already hold here.
-            # The value is identical — we own the lock so _is_paused is stable.
+            # Read _is_paused directly (not via property) to avoid a deadlock:
+            # the is_paused property acquires engine.lock, which we already hold.
             snap["is_paused"] = bool(self.engine._is_paused)
             snap["backend_name"] = self.engine._backend_name
             backend_cls = self.engine._backend_cls
@@ -579,26 +588,6 @@ class PipPalBridge(DiagSettingsBridgeMixin):
         if self._on_close_window is not None:
             self._on_close_window()
         return {"ok": True}
-
-    def _active_webview_window(self) -> Any:
-        """Return the active pywebview window, or ``None``.
-
-        Uses ``webview.active_window()`` to resolve which window the user
-        is actually interacting with.  Imported lazily so the bridge
-        stays importable in headless/CI environments.
-        Mirrors Pro bridge.py ~lines 174-204.
-        """
-        try:
-            import webview  # type: ignore[import-untyped]
-        except Exception:
-            return None
-        try:
-            win = webview.active_window()
-            if win is not None:
-                return win
-        except Exception:
-            pass
-        return None
 
     def open_url(self, url: str) -> dict[str, Any]:
         webbrowser.open(str(url))
