@@ -1,0 +1,159 @@
+# Build the PipPal (free) Windows installer and upload it as a workflow
+# artifact.  Only members with repo write access can trigger this workflow.
+#
+# Trigger: manual (workflow_dispatch) only.
+#
+# Pipeline
+# --------
+# 1. Checkout + Python 3.13
+# 2. Download the real Piper binary (rhasspy/piper 2023.11.14-2) and extract
+#    it into piper/ — replaces the 14-byte stub committed for dev.
+# 3. pip install the package + runtime deps + PyInstaller.
+# 4. pyinstaller packaging/pippal.spec  -> dist/PipPal/
+# 5. Install Inno Setup via Chocolatey.
+# 6. ISCC packaging/installer/pippal.iss  -> dist/PipPal-Setup-0.3.0.exe
+# 7. Upload the installer as a workflow artifact (retained 30 days).
+# 8. If a v0.3.0 GitHub Release already exists, attach the installer to it.
+
+name: Build Windows Installer
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build-installer:
+    runs-on: windows-latest
+    permissions:
+      contents: write   # needed for gh release upload
+
+    steps:
+      # ------------------------------------------------------------------
+      # 1. Checkout + Python
+      # ------------------------------------------------------------------
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.13
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      # ------------------------------------------------------------------
+      # 2. Download the real Piper Windows binary
+      #    The committed piper/piper.exe is a 14-byte stub for dev
+      #    (piper/ is .gitignored; this step materialises the real binary).
+      # ------------------------------------------------------------------
+      - name: Download and extract Piper binary
+        shell: pwsh
+        run: |
+          $piperUrl  = "https://github.com/rhasspy/piper/releases/download/2023.11.14-2/piper_windows_amd64.zip"
+          $zipPath   = "$env:RUNNER_TEMP\piper.zip"
+          $extractTo = "$env:RUNNER_TEMP\piper_extract"
+
+          Write-Host "Downloading Piper from $piperUrl ..."
+          Invoke-WebRequest -Uri $piperUrl -OutFile $zipPath
+
+          Write-Host "Extracting ..."
+          Expand-Archive -Force $zipPath -DestinationPath $extractTo
+
+          # The archive extracts as piper\piper.exe + siblings.
+          # Copy everything into the repo's piper\ directory (creating it if
+          # missing — it is .gitignored so it won't be present after checkout).
+          New-Item -ItemType Directory -Force -Path "piper" | Out-Null
+          Copy-Item -Recurse -Force "$extractTo\piper\*" "piper\"
+
+          $size = (Get-Item "piper\piper.exe").Length
+          Write-Host "piper\piper.exe: $size bytes"
+          if ($size -lt 100000) { throw "piper.exe looks like a stub (< 100 KB)" }
+
+      # ------------------------------------------------------------------
+      # 3. Install Python dependencies
+      # ------------------------------------------------------------------
+      - name: Install package and build dependencies
+        shell: pwsh
+        run: |
+          python -m pip install --upgrade pip
+          # Install the pippal package itself (editable so all submodules resolve)
+          pip install -e ".[dev]"
+          # Runtime deps that pyproject.toml declares but aren't in [dev]:
+          pip install pywebview pystray keyboard pyperclip Pillow
+          # Build tooling
+          pip install pyinstaller
+
+      # ------------------------------------------------------------------
+      # 4. Build with PyInstaller
+      # ------------------------------------------------------------------
+      - name: Run PyInstaller
+        run: pyinstaller --noconfirm packaging/pippal.spec
+
+      - name: Verify PyInstaller output
+        shell: pwsh
+        run: |
+          $exe = "dist\PipPal\PipPal.exe"
+          if (-not (Test-Path $exe)) {
+            throw "PipPal.exe not found at $exe — PyInstaller may have failed silently."
+          }
+          $size = (Get-Item $exe).Length
+          Write-Host "dist\PipPal\PipPal.exe: $size bytes"
+
+      # ------------------------------------------------------------------
+      # 5. Install Inno Setup
+      # ------------------------------------------------------------------
+      - name: Install Inno Setup via Chocolatey
+        run: choco install innosetup -y --no-progress
+
+      # ------------------------------------------------------------------
+      # 6. Compile the installer
+      # ------------------------------------------------------------------
+      - name: Compile Inno Setup installer
+        shell: pwsh
+        run: |
+          $iscc = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) {
+            # Chocolatey may install a different version — try to locate it.
+            $iscc = Get-ChildItem "C:\Program Files (x86)\Inno Setup*" -Filter ISCC.exe -Recurse |
+                    Select-Object -First 1 -ExpandProperty FullName
+            if (-not $iscc) { throw "ISCC.exe not found after choco install innosetup." }
+          }
+          Write-Host "ISCC: $iscc"
+          & $iscc "packaging\installer\pippal.iss"
+          if ($LASTEXITCODE -ne 0) { throw "ISCC failed with exit code $LASTEXITCODE" }
+
+          $installer = "dist\PipPal-Setup-0.3.0.exe"
+          if (-not (Test-Path $installer)) {
+            throw "Installer not found at $installer after ISCC run."
+          }
+          $size = (Get-Item $installer).Length
+          Write-Host "dist\PipPal-Setup-0.3.0.exe: $size bytes"
+
+      # ------------------------------------------------------------------
+      # 7. Upload installer as a workflow artifact (30-day retention)
+      # ------------------------------------------------------------------
+      - name: Upload installer artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: PipPal-Setup-0.3.0
+          path: dist/PipPal-Setup-0.3.0.exe
+          retention-days: 30
+
+      # ------------------------------------------------------------------
+      # 8. Attach to GitHub Release (only if v0.3.0 release already exists)
+      # ------------------------------------------------------------------
+      - name: Attach to GitHub Release (if v0.3.0 exists)
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $tag       = "v0.3.0"
+          $installer = "dist\PipPal-Setup-0.3.0.exe"
+
+          # gh release view exits non-zero when the tag/release doesn't exist.
+          gh release view $tag 2>$null
+          if ($LASTEXITCODE -eq 0) {
+            Write-Host "Release $tag found — attaching installer ..."
+            gh release upload $tag $installer --clobber
+            Write-Host "Attached: $installer -> $tag"
+          } else {
+            Write-Host "Release $tag not found — skipping gh release upload."
+            Write-Host "The installer is still available as a workflow artifact above."
+          }
