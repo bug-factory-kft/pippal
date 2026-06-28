@@ -42,8 +42,6 @@ DIAG_MAX_TOTAL_BYTES: int = 20 * 1024 * 1024  # 20 MB
 # ---------------------------------------------------------------------------
 
 EVT_DOC_IMPORT = "document.import"
-EVT_AI_ACTION = "ai.action"
-EVT_OLLAMA_REQUEST = "ollama.request"
 EVT_SYNTH_START = "synth.start"
 EVT_SYNTH_STOP = "synth.stop"
 EVT_PLAYBACK_CHUNK = "playback.chunk"

@@ -82,7 +82,6 @@ def test_set_diag_level_configures_process_even_when_save_fails(
 ) -> None:
     """Core bridge: configure_diagnostics must be called BEFORE save_config."""
     import pippal.config as cfg_mod
-
     import pippal.diagnostics as diag
 
     config: dict[str, Any] = {"diag_log_level": "off"}
@@ -126,7 +125,6 @@ def test_set_diag_level_round_trip_reload(
     config_path = data_root / "config.json"
 
     import pippal.config as cfg_mod
-
     import pippal.diagnostics as diag
 
     def _save(cfg: dict[str, Any], path: Path = config_path) -> None:

@@ -265,7 +265,11 @@ class TestOffModeAndIdempotency:
 
     def test_delete_logs_removes_all(self, isolated_diag_dir: Path):
         from pippal.diagnostics import (
-            EVT_DOC_IMPORT, configure_diagnostics, delete_logs, event, list_log_files,
+            EVT_DOC_IMPORT,
+            configure_diagnostics,
+            delete_logs,
+            event,
+            list_log_files,
         )
 
         configure_diagnostics("trace")

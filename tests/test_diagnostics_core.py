@@ -124,9 +124,9 @@ def test_no_network_import_in_core_diagnostics_modules() -> None:
     import sys
 
     # Import the core diagnostics modules
-    import pippal.diag_async  # noqa: F401
-    import pippal.diag_core_bridge  # noqa: F401
-    import pippal.diag_trace  # noqa: F401
+    import pippal.diag_async
+    import pippal.diag_core_bridge
+    import pippal.diag_trace
     import pippal.diagnostics  # noqa: F401
 
     # Only check for non-stdlib HTTP/network packages that would indicate

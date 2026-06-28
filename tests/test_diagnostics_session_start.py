@@ -125,7 +125,7 @@ def test_emit_session_start_includes_system_metadata(_isolated_diag: Path) -> No
     content = _all_diag_bytes(_isolated_diag).decode("utf-8", errors="replace")
     lines = [json.loads(ln) for ln in content.splitlines() if ln.strip()]
     start_lines = [o for o in lines if o.get("evt") == EVT_APP_START]
-    assert start_lines, f"No app.start event found"
+    assert start_lines, "No app.start event found"
 
     evt = start_lines[0]
     assert "os_platform" in evt
@@ -147,8 +147,8 @@ def test_emit_session_start_metadata_values_are_not_user_text(_isolated_diag: Pa
     import json
 
     from pippal.diagnostics import (
-        EVT_APP_START,
         _IDENTIFIER_VALUE_RE,
+        EVT_APP_START,
         configure_diagnostics,
         emit_session_start,
     )

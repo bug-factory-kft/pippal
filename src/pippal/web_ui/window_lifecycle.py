@@ -1,10 +1,9 @@
-"""Window lifecycle operations for the PipPal Pro web UI.
+"""Window lifecycle operations for the PipPal web UI.
 
-Extracted VERBATIM from :mod:`pippal_pro.web_ui.windows` so that
-``windows.py`` stays under the line-count guard and remains directly
-file-path-loadable by the regression test harness (which loads
-``windows.py`` via :func:`importlib.util.spec_from_file_location` with a
-synthetic module name and therefore has NO package context).
+Extracted from ``windows.py`` so that it stays under the line-count guard
+and remains directly file-path-loadable by the regression test harness
+(which loads ``windows.py`` via :func:`importlib.util.spec_from_file_location`
+with a synthetic module name and therefore has NO package context).
 
 Each function takes the :class:`WebWindowManager` instance as its first
 argument (``mgr``) and reads/writes its state (``mgr._windows``,
@@ -16,10 +15,9 @@ parameter so the bodies live in a sibling module.
 ``windows.py`` calls these through a lazy ``_lifecycle()`` shim (absolute
 import with a file-path fallback) so the file-path loader still works.
 
-Behaviour preserved: #248 (transparency / DWM corner wiring), #265 /
-ISSUE 2 (overlay no-activate on cold create + re-show), #280 / #2 / #4
-(overlay re-anchor), #302 / BUG2 (overlay never-destroy in ``hide``),
-#249 (load_url on re-open), #261 / #284 (hide-not-destroy surfaces).
+Behaviour preserved: DWM corner wiring, overlay no-activate on cold create
+and re-show, overlay re-anchor, overlay never-destroy in ``hide``,
+load_url on re-open, hide-not-destroy surfaces.
 """
 
 from __future__ import annotations
@@ -29,58 +27,21 @@ from typing import Any
 import webview
 
 _SURFACES: dict[str, dict[str, Any]] = {
-    "settings": {"title": "PipPal Pro", "width": 600, "height": 760},
+    "settings": {"title": "PipPal", "width": 600, "height": 760},
     "voices": {"title": "Voices", "width": 820, "height": 640},
-    "onboarding": {"title": "PipPal Pro", "width": 540, "height": 560},
-    "notices": {"title": "PipPal Pro - Open-source licences", "width": 760, "height": 620},
-    "release": {"title": "PipPal Pro - What's new", "width": 780, "height": 620},
-    "moods": {"title": "PipPal Pro - Moods", "width": 540, "height": 620},
-    # Wave 2 — document import (F1 PDF/TXT + F4 cleanup).
-    "import": {"title": "PipPal Pro - Import document", "width": 680, "height": 700},
-    # Wave 3 — listen-later queue (F3).
-    "queue": {"title": "PipPal Pro - Listen Later", "width": 680, "height": 700},
-    # R3 — read history / recent view.
-    "recent": {"title": "PipPal Pro - History", "width": 680, "height": 700},
-    # Play-sample preview (#248): compact transparent panel sized to its
-    # content.  Uses the overlay A2 pattern: transparent=True so the
-    # page's panel owns the visible surface; no opaque host background.
-    "sample": {
-        "title": "PipPal Pro",
-        "width": 480,
-        "height": 220,
-        "frameless": True,
-        "easy_drag": True,
-        "transparent": True,
-    },
+    "onboarding": {"title": "PipPal", "width": 540, "height": 560},
+    "notices": {"title": "PipPal - Open-source licences", "width": 760, "height": 620},
     # The reader overlay / mini-player is a NORMAL opaque frameless window
     # — built the same way as the Settings window (solid dark background
     # #13151c, no transparency machinery, fully clickable).
     #
-    # Re-architecture (#248 decisive fix): the previous transparent /
-    # WS_EX_LAYERED / colour-key approach was fundamentally broken on this
-    # pywebview 6.x + WebView2 stack:
-    #   1. The layered colour-key made the host CLICK-THROUGH — buttons
-    #      did not respond.
-    #   2. The window was not draggable.
-    #   3. Rounded corners required fragile DWM hacks.
-    #   4. No proper header/body/footer structure — short content collapsed.
-    #
-    # The fix: make the overlay a normal opaque frameless window with the
-    # dark Settings background (#13151c).  Dragging is handled by the
-    # pywebview-drag-region mechanism (same as Settings/other windows via
-    # easy_drag=False + .pywebview-drag-region on the header).  This
-    # trivially fixes all four regressions — no transparency, no click-
-    # through, no size fragility, stable layout.
-    #
-    # Window dimensions: comfortable mini-player size.  NOT DPI-fragile
-    # (no transparency margin to compensate for).
-    #   width:  560 px — wider mini-player: transport buttons + label have
-    #           comfortable breathing room, body text fits several words per
-    #           line (#280: was 420 px, which felt narrow).
-    #   height: 200 px — header(44px) + body(flex:1, min 80px) + footer(40px)
-    #                    + padding + border
+    # The overlay uses the normal opaque frameless approach: dragging via
+    # pywebview-drag-region on the header, fully clickable, stable layout.
+    # Dimensions sized for comfortable mini-player use:
+    #   width:  560 px — transport buttons + label with breathing room.
+    #   height: 200 px — header(44px) + body(flex) + footer(40px) + padding.
     "overlay": {
-        "title": "PipPal Pro",
+        "title": "PipPal",
         "width": 560,
         "height": 200,
         "on_top": True,
@@ -115,16 +76,13 @@ def make_window(mgr: Any, surface: str, *, hidden: bool = False) -> Any:
     if position is not None:
         kwargs.update(position)
     if spec.get("on_top") and not hidden:
-        # EDIT 2: only carry the TOPMOST band on NON-hidden windows.  The
-        # pre-warmed overlay is created hidden=True at startup; setting on_top
-        # on a hidden window means the live HWND is already TOPMOST, and the
-        # TOPMOST / foreground z-order shuffle in bring_to_foreground (on the
-        # Settings toast-reopen path) surfaces the hidden topmost overlay,
-        # causing an empty overlay pop.  Deferring on_top to the visible-show
-        # path (open() → _show_no_activate → SetWindowPos(HWND_TOPMOST)) means
-        # the pre-warmed overlay starts with normal z-order and is only pinned
-        # topmost when a genuine read shows it.  EDIT 1 is the primary fix;
-        # this is defense-in-depth (belt-and-braces hardening, #265/#284 safe).
+        # Only carry the TOPMOST band on NON-hidden windows.  The pre-warmed
+        # overlay is created hidden=True at startup; setting on_top on a hidden
+        # window means the live HWND is already TOPMOST, and the z-order shuffle
+        # in bring_to_foreground can surface the hidden overlay causing an empty
+        # pop.  Deferring on_top to the visible-show path means the pre-warmed
+        # overlay starts with normal z-order and is only pinned topmost when a
+        # genuine read shows it.
         kwargs["on_top"] = True
     if spec.get("transparent"):
         kwargs["transparent"] = True
@@ -132,8 +90,8 @@ def make_window(mgr: Any, surface: str, *, hidden: bool = False) -> Any:
     # create_window; child-window z-order is managed by the OS on
     # Windows for windows in the same process without explicit
     # parent wiring.  The kwarg was removed to prevent a
-    # TypeError → HTTP 500 when open_moods_window (and other
-    # secondary-window openers) are called via the bridge server.
+    # TypeError → HTTP 500 when secondary-window openers are called via
+    # the bridge server.
     win = webview.create_window(**kwargs)
 
     # Lifecycle trace (metadata-only): which surface was opened.  Non-blocking;
@@ -147,15 +105,14 @@ def make_window(mgr: Any, surface: str, *, hidden: bool = False) -> Any:
         pass
 
     if spec.get("transparent"):
-        # #248 — the WebView2 ``DefaultBackgroundColor = Transparent``
+        # The WebView2 ``DefaultBackgroundColor = Transparent`` that
         # pywebview applies for ``transparent=True`` does NOT make the
-        # WinForms host Form transparent on this stack, so the host
-        # paints an opaque #f0f0f0 rectangle behind the panel.  Apply a
-        # Win32 layered colour-key to the host HWND once the native
-        # window exists so the empty host area genuinely shows the
-        # desktop through (only the rounded panel paints).  Wired on
-        # both ``shown`` and ``loaded`` (whichever fires; idempotent)
-        # because ``native``/``Handle`` is only valid after creation.
+        # WinForms host Form transparent — the host paints an opaque
+        # #f0f0f0 rectangle behind the panel.  Apply a Win32 layered
+        # colour-key to the host HWND once the native window exists so
+        # the empty host area genuinely shows the desktop through.
+        # Wired on both ``shown`` and ``loaded`` (idempotent) because
+        # ``native``/``Handle`` is only valid after creation.
         def _apply_transparency() -> None:
             mgr._apply_layered_colorkey(win)
 
@@ -172,19 +129,11 @@ def make_window(mgr: Any, surface: str, *, hidden: bool = False) -> Any:
         except Exception:
             pass
     else:
-        # #248 — apply Win11 DWM rounded corners to all non-transparent
-        # frameless windows (overlay, settings, voices, etc.).
-        #
-        # Windows 11 auto-rounds FRAMED windows via DWM, but FRAMELESS
-        # windows (pywebview uses FormBorderStyle.None) do NOT get rounded
-        # corners automatically — they need an explicit
-        # DwmSetWindowAttribute(DWMWA_WINDOW_CORNER_PREFERENCE,
-        # DWMWCP_ROUND) call.  This is why the overlay had square corners
-        # while Settings appeared rounded after the re-arch: both are
-        # frameless, and neither had the call, but the overlay (on_top)
-        # may have a subtly different DWM treatment on some Win11 builds.
-        # Applying the explicit call uniformly to all frameless opaque
-        # windows makes all corners match on every Win11 version.
+        # Apply Win11 DWM rounded corners to all non-transparent frameless
+        # windows (overlay, settings, voices, etc.).  Windows 11 auto-rounds
+        # FRAMED windows via DWM, but FRAMELESS windows need an explicit
+        # DwmSetWindowAttribute(DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_ROUND)
+        # call to get consistent rounded corners on all Win11 builds.
         def _apply_round_corners() -> None:
             mgr._apply_dwm_round_corners(win)
 
@@ -277,14 +226,13 @@ def open(mgr: Any, surface: str) -> None:
     without re-running wireFooter(), so button listeners survive
     hide->show cycles intact.
 
-    This supersedes the #319 nonce-reload (``load_url(&_t=<ms>)``),
+    This supersedes the nonce-reload (``load_url(&_t=<ms>)``) approach,
     which was a documented pywebview anti-pattern: ``load_url`` tears
-    down the ``js_api`` bridge (GitHub issues #238, #1674, #1290) and
-    causes a blank/empty window on reopen.  The bridge SURVIVES
-    ``hide()->show()`` without reload (#1218).
+    down the ``js_api`` bridge and causes a blank/empty window on reopen.
+    The bridge SURVIVES ``hide()->show()`` without reload.
 
-    #249 data freshness: preserved -- ``__pippalRefresh`` re-fetches
-    ``get_config()`` / ``get_queue()`` / etc. on every reopen.
+    Data freshness is preserved: ``__pippalRefresh`` re-fetches
+    ``get_config()`` / etc. on every reopen.
 
     The overlay branch is byte-unchanged (already no-reload).
     """
@@ -296,23 +244,19 @@ def open(mgr: Any, surface: str) -> None:
         if existing is not None:
             try:
                 if surface != "overlay":
-                    # No-reload reopen (Approach c -- supersedes #319 nonce).
-                    # The bridge survives hide()->show(); load_url breaks it.
-                    # In-place refresh is fired below via evaluate_js.
+                    # No-reload reopen: the bridge survives hide()->show();
+                    # load_url breaks it.  In-place refresh is fired below.
                     pass
                 else:
-                    # #280 re-anchor: the reader overlay must ALWAYS
-                    # re-open at its default active-screen anchor, NEVER
-                    # at the position the user last dragged it to. The
-                    # _window_position() default path is only consulted
-                    # on FIRST creation (_make_window); on this re-show
-                    # path the live window still carries the dragged
-                    # coordinates, so we explicitly MOVE it back to the
-                    # overlay anchor BEFORE showing. The move runs before
-                    # _show_no_activate so it never activates/steals the
-                    # foreground (#265): move() only repositions; the
-                    # subsequent SW_SHOWNOACTIVATE + SWP_NOACTIVATE keep
-                    # the user's app in the foreground during capture.
+                    # Overlay re-anchor: the reader overlay re-opens at its
+                    # default active-screen anchor, not the user-dragged
+                    # position.  _window_position() is only consulted on first
+                    # creation (_make_window); on this re-show path the live
+                    # window still carries the dragged coordinates, so we
+                    # explicitly MOVE it back before showing.  The move runs
+                    # before _show_no_activate so it never steals the
+                    # foreground: move() only repositions; the subsequent
+                    # SW_SHOWNOACTIVATE keeps the user's app focused.
                     anchor = mgr._overlay_position(spec)
                     if anchor is not None:
                         try:
@@ -335,24 +279,19 @@ def open(mgr: Any, surface: str) -> None:
                         )
                     except Exception:
                         pass
-                # ISSUE 2 — for the overlay, immediately RE-ASSERT a
-                # topmost no-activate state so the pop does not hold the
-                # foreground: the user's app keeps focus/caret while the
-                # overlay shows the loader (belt-and-braces for #265).
-                # show()/restore() above keep pywebview's own window
-                # state consistent; _show_no_activate then drops the
-                # foreground steal via Win32 (no-op off Windows / in
-                # tests, where it just leaves the shown window visible).
+                # For the overlay, immediately re-assert a topmost no-activate
+                # state so the pop does not steal the foreground: the user's
+                # app keeps focus while the overlay shows the loader.
+                # show()/restore() above keep pywebview's own window state;
+                # _show_no_activate then drops the foreground steal via Win32.
                 if surface == "overlay":
                     mgr._show_no_activate(existing)
-                    # A2 — trigger-driven JS fast-kick: immediately after
-                    # re-showing the overlay window, call the guarded global
-                    # that forces _setTickRate(true) + a synchronous tick().
-                    # This ensures the JS poll notices the new engine state
-                    # (loading/thinking) INSTANTLY instead of waiting up to
-                    # 2000 ms for the next slow idle heartbeat.  The guard
-                    # (&&) makes it a no-op if the overlay JS hasn't rendered
-                    # yet (cold create) or on the core public frontend where
+                    # Trigger-driven JS fast-kick: immediately after re-showing
+                    # the overlay, call the guarded global that forces
+                    # _setTickRate(true) + a synchronous tick() so the JS poll
+                    # notices the new engine state INSTANTLY instead of waiting
+                    # up to 2000 ms for the next slow idle heartbeat.  The guard
+                    # (&&) makes it a no-op if overlay JS hasn't rendered yet or
                     # the function is absent — always safe to evaluate.
                     try:
                         existing.evaluate_js(
@@ -360,15 +299,13 @@ def open(mgr: Any, surface: str) -> None:
                             " && window.__pippalOverlayKick()"
                         )
                     except Exception:
-                        # evaluate_js is best-effort — a failure (e.g. the
-                        # WebView2 context not yet ready) must never block the
-                        # overlay re-show.  The slow poll is the fallback.
+                        # evaluate_js is best-effort; a failure must never
+                        # block the overlay re-show.  The slow poll is the
+                        # fallback.
                         pass
-                # #248 — re-assert the layered colour-key on every
-                # re-show of a transparent surface: the WebView2
-                # repaint on show/restore can drop the host's layered
-                # transparency, so re-applying here keeps the overlay
-                # host transparent across hide → re-show cycles.
+                # Re-assert the layered colour-key on every re-show of a
+                # transparent surface: the WebView2 repaint on show/restore
+                # can drop the host's layered transparency.
                 if spec.get("transparent"):
                     mgr._schedule_transparency(existing)
                 # Mark the reopen path taken.  Return is deferred to
@@ -404,17 +341,14 @@ def hide(mgr: Any, surface: str) -> None:
     and the live page (and its CDP target) survives. Falls back to
     destroy if the platform window can't hide.
 
-    BUG2 — the OVERLAY is the EXCEPTION to that fall-through.  The
-    overlay window is frequently the foreground / last live pywebview
-    window; destroying it (the historical fall-through when
-    ``win.hide()`` raised) takes the GUI loop's last window with it and
-    the WHOLE app disappears.  So for the overlay we NEVER destroy on a
-    failed hide: we keep the window object in the live set (the GUI loop
-    keeps a window) and swallow the hide error.  Other surfaces keep the
-    original destroy fall-through (a transient settings/sample window is
-    safe to tear down).  This guarantees at least one window always
-    keeps the GUI loop alive across a reading→thinking→reading
-    document switch."""
+    The OVERLAY is the exception to the fall-through: the overlay window
+    is frequently the foreground / last live pywebview window; destroying
+    it takes the GUI loop's last window with it and the WHOLE app
+    disappears.  For the overlay we NEVER destroy on a failed hide: we
+    keep the window object in the live set and swallow the hide error.
+    Other surfaces keep the original destroy fall-through (a transient
+    settings window is safe to tear down).  This guarantees at least one
+    window always keeps the GUI loop alive across reading cycles."""
     with mgr._lock:
         win = mgr._windows.get(surface)
     if win is None:
@@ -423,11 +357,9 @@ def hide(mgr: Any, surface: str) -> None:
         win.hide()
     except Exception:
         if surface == "overlay":
-            # NEVER destroy the overlay: it is (typically) the
-            # foreground / last live window and destroying it kills the
-            # pywebview GUI loop → the app vanishes (BUG2).  Keep it in
-            # the live-window set and swallow the hide failure; the next
-            # read re-shows it and the GUI loop stays alive.
+            # NEVER destroy the overlay: it is (typically) the foreground /
+            # last live window and destroying it kills the pywebview GUI loop.
+            # Keep it in the live-window set and swallow the hide failure.
             return
         try:
             win.destroy()
@@ -449,14 +381,15 @@ def surface_for_window(mgr: Any, win: Any) -> str | None:
 def close(mgr: Any, surface: str) -> None:
     """Close a specific surface window by name. Thread-safe.
 
-    For the ``settings`` and ``onboarding`` surfaces this hides the
-    window instead of destroying it so the tray app keeps running and
-    can re-open the window on demand (X-button / Finish-setup →
-    tray → First-run-check).  All other surfaces are destroyed.
+    For the ``settings``, ``onboarding``, and ``voices`` surfaces this hides
+    the window instead of destroying it so the tray app keeps running and
+    can re-open the window on demand (X-button / Finish-setup → tray →
+    First-run-check).  All other surfaces are destroyed.
 
-    The ``onboarding`` surface hides on close (#261: Finish setup
-    hides to tray so ``windows.open("onboarding")`` can re-show it;
-    destroying would require a full ``_make_window`` on each re-open).
+    ``onboarding`` hides so ``windows.open("onboarding")`` can re-show it;
+    destroying would require a full ``_make_window`` on each re-open.
+    ``voices`` hides for instant WebView2 reuse on next open.
+    ``notices`` is destroyed on close (lightweight surface).
 
     This is the preferred target for ``on_close_window`` wiring so the
     X button in any surface closes *that* window, not the last-opened
@@ -469,16 +402,10 @@ def close(mgr: Any, surface: str) -> None:
     if surface in (
         "settings",
         "onboarding",
-        # #284 — frequently-used surfaces: hide instead of destroy so
-        # the next open() reuses the existing WebView2 window instantly
-        # (show/restore + evaluate_js(__pippalRefresh)) rather than paying
-        # 1-2 s for a full WebView2 init on every hotkey press.
-        "moods",
+        # Frequently-used surfaces: hide instead of destroy so the next
+        # open() reuses the existing WebView2 window instantly rather than
+        # paying 1-2 s for a full WebView2 init on every hotkey press.
         "voices",
-        "import",
-        "queue",
-        "release",
-        "recent",
     ):
         try:
             win.hide()
@@ -530,31 +457,27 @@ def shutdown(mgr: Any) -> None:
 def run(mgr: Any) -> None:
     """Block on the pywebview GUI loop until all windows close.
 
-    BUG 1 — on a NORMAL (already-activated) launch the app must start
-    straight to the TRAY: no Settings window is popped (the startup tray
-    toast tells the user where the app is; the tray menu + global hotkeys
-    open windows on demand).  But pywebview needs at least one live window
-    to keep its GUI loop alive, so when no surface was opened during
-    startup (e.g. first-run onboarding did NOT fire) we create the Settings
-    window HIDDEN — the loop stays alive, nothing visible pops, and the
-    tray "Settings…" item / a hotkey later show()s this same window.
+    On a NORMAL (already-activated) launch the app must start straight to
+    the TRAY: no Settings window is popped (the startup tray toast tells
+    the user where the app is; the tray menu + global hotkeys open windows
+    on demand).  But pywebview needs at least one live window to keep its
+    GUI loop alive, so when no surface was opened during startup (e.g.
+    first-run onboarding did NOT fire) we create the Settings window HIDDEN
+    — the loop stays alive, nothing visible pops, and the tray "Settings…"
+    item / a hotkey later show()s this same window.
 
     First-run / onboarding is unaffected: app_web.main() still calls
     ``open("onboarding")`` before run(), so on first run a window already
     exists in ``mgr._windows`` and this hidden-fallback is skipped.
 
-    PRE-WARM (spec C4/S3): the reader overlay window is created HIDDEN here
-    at startup — mirroring the hidden ``settings`` fallback above — so the
-    FIRST ``windows.open("overlay")`` (a read / AI / WAV trigger) hits the
-    warm show()+``__pippalOverlayKick`` re-show path in :func:`open` instead
-    of a COLD ``webview.create_window`` that costs ~1-2 s of WebView2 init
-    (#284). Created with ``hidden=True`` it NEVER pops visibly at startup —
-    its ``shown``/no-activate handler only fires on the first real show. It
-    also preserves BUG2: this pre-warmed window lives in ``mgr._windows``
-    and the overlay branch of :func:`hide` is hide-not-destroy, so the
-    lifecycle never destroys it. Best-effort: a pre-warm failure must never
-    block startup (the cold-create path in :func:`open` is the fallback and
-    still runs its own fast-kick on re-show)."""
+    PRE-WARM: the reader overlay window is created HIDDEN here at startup
+    — mirroring the hidden ``settings`` fallback above — so the FIRST
+    ``windows.open("overlay")`` hits the warm show()+``__pippalOverlayKick``
+    re-show path instead of a cold ``webview.create_window`` (~1-2 s).
+    Created with ``hidden=True`` it NEVER pops visibly at startup.
+    The overlay branch of :func:`hide` is hide-not-destroy so the lifecycle
+    never destroys it.  Best-effort: a pre-warm failure must never block
+    startup; the cold-create path in :func:`open` is the fallback."""
     if not mgr._windows:
         win = mgr._make_window("settings", hidden=True)
         with mgr._lock:

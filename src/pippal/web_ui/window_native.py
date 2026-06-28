@@ -5,8 +5,8 @@ explicit arguments and touch no ``WebWindowManager`` instance state.
 ``windows.py`` calls them through lazy imports (at call-time, not at
 module top level) so that ``import pippal`` remains headless-safe (H3).
 
-Behaviour: #248 (DWM rounded corners + layered colour-key transparency)
-and #265 (``show_no_activate`` overlay focus-steal fix).
+Behaviour: DWM rounded corners + layered colour-key transparency,
+and ``show_no_activate`` overlay focus-steal fix.
 """
 
 from __future__ import annotations
@@ -14,13 +14,12 @@ from __future__ import annotations
 import sys
 from typing import Any
 
-# Win32 constants kept for the ``sample`` surface which still uses the
-# layered colour-key transparency approach (#248).
+# Win32 constants for the layered colour-key transparency approach.
 _GWL_EXSTYLE = -20
 _WS_EX_LAYERED = 0x00080000
 _LWA_COLORKEY = 0x00000001
 
-# DWM rounded-corner constants (#248 overlay fix).
+# DWM rounded-corner constants.
 # Windows 11 auto-rounds normal (framed) windows via DWM, but frameless
 # windows (FormBorderStyle.None) do NOT get rounded corners automatically.
 # Explicit DWMWA_WINDOW_CORNER_PREFERENCE=DWMWCP_ROUND is required.
@@ -33,8 +32,7 @@ _DWMWCP_ROUND = 2  # always round (matches system corner radius)
 # keeps its default ``SystemColors.Control`` BackColor (#f0f0f0 on the
 # default light theme), so the host renders as an OPAQUE light rectangle
 # behind the page's panel.  Colour-keying that exact host colour with a
-# layered window makes the empty area genuinely transparent — used only for
-# the ``sample`` surface; the overlay is now a normal opaque window.
+# layered window makes the empty area genuinely transparent.
 _HOST_COLORKEY = 0x00F0F0F0  # COLORREF 0x00BBGGRR for RGB #f0f0f0
 
 
@@ -60,7 +58,7 @@ def host_hwnd(win: Any) -> int | None:
 
 
 def apply_dwm_round_corners(win: Any) -> None:
-    """Apply Win11 DWM rounded corners to a frameless pywebview window (#248).
+    """Apply Win11 DWM rounded corners to a frameless pywebview window.
 
     Windows 11 auto-rounds FRAMED windows via DWM, but FRAMELESS windows
     (pywebview uses FormBorderStyle.None) do NOT get rounded corners
@@ -96,7 +94,7 @@ def apply_dwm_round_corners(win: Any) -> None:
 
 
 def apply_layered_colorkey(win: Any) -> None:
-    """Make a transparent-spec host genuinely transparent (#248).
+    """Make a transparent-spec host genuinely transparent.
 
     Adds ``WS_EX_LAYERED`` to the host window and colour-keys the
     opaque WinForms BackColor (#f0f0f0) so the empty host area shows
@@ -131,12 +129,12 @@ def apply_layered_colorkey(win: Any) -> None:
 
 
 def show_no_activate(win: Any) -> bool:
-    """Show *win* WITHOUT stealing foreground focus (#265).
+    """Show *win* WITHOUT stealing foreground focus.
 
     ``pywebview``'s ``show()`` / ``restore()`` ACTIVATE the window, which
-    steals the foreground. For the reader overlay that is exactly what
-    #265 must avoid (a selection-read must not have focus yanked during
-    capture) and it is jarring for the user. Instead we drive Win32
+    steals the foreground. For the reader overlay that must be avoided: a
+    selection-read must not have focus yanked during capture, and the
+    activation is jarring for the user. Instead we drive Win32
     ``ShowWindow(hwnd, SW_SHOWNOACTIVATE)`` + a topmost
     ``SetWindowPos`` with ``SWP_NOACTIVATE`` so the overlay pops on top
     instantly while the user's app keeps the foreground/caret. Returns

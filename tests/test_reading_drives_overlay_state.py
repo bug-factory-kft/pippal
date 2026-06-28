@@ -30,7 +30,6 @@ from pippal import playback as _playback
 from pippal.engine import TTSEngine
 from pippal.web_ui.overlay_state import WebOverlay
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
