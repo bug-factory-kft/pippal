@@ -22,6 +22,7 @@ from enum import Enum
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from . import plugins
 from .config import DEFAULT_CONFIG
 from .engines.base import TTSBackend
 from .paths import TEMP_DIR
@@ -32,7 +33,6 @@ from .timing import (
     PLAYBACK_POLL_S,
     PREFETCH_DRAIN_S,
 )
-from . import plugins
 from .wav_utils import safe_unlink, wav_duration
 
 if TYPE_CHECKING:  # pragma: no cover
