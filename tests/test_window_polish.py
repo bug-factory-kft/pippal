@@ -148,22 +148,23 @@ class TestDragRegionPresence:
         assert "titlebar-drag" in html
 
     def test_overlay_css_has_pywebview_drag_region(self):
-        """overlay.css must define the .overlay-drag-region with drag."""
-        css = (_WEBUI / "css" / "overlay.css").read_text(encoding="utf-8")
+        """surfaces.css must define the .overlay-drag-region with drag."""
+        css = (_WEBUI / "css" / "surfaces.css").read_text(encoding="utf-8")
         assert "pywebview-drag-region" in css
 
     def test_overlay_css_has_no_drag_on_obtn(self):
-        """overlay.css must mark .obtn as no-drag so button clicks work."""
-        css = (_WEBUI / "css" / "overlay.css").read_text(encoding="utf-8")
+        """surfaces.css must mark .obtn as no-drag so button clicks work."""
+        css = (_WEBUI / "css" / "surfaces.css").read_text(encoding="utf-8")
         # The transport buttons must carry no-drag
         assert "no-drag" in css
 
     def test_overlay_css_has_no_drag_on_close(self):
-        """overlay.css must mark .overlay-close as no-drag."""
-        css = (_WEBUI / "css" / "overlay.css").read_text(encoding="utf-8")
+        """surfaces.css must mark .overlay-close as no-drag."""
+        css = (_WEBUI / "css" / "surfaces.css").read_text(encoding="utf-8")
         assert ".overlay-close" in css
         # The close button section should have no-drag
-        close_idx = css.index(".overlay-close")
+        # Find the main .overlay-close rule (not the .overlay-close svg combined selector)
+        close_idx = css.index("body.overlay-mode .overlay-head .overlay-close {")
         snippet = css[close_idx:close_idx + 200]
         assert "no-drag" in snippet
 
@@ -182,8 +183,8 @@ class TestDragRegionPresence:
         assert "data-dragging" not in js
 
     def test_theme_css_has_titlebar_drag_rule(self):
-        """theme.css must define .titlebar-drag with drag region."""
-        css = (_WEBUI / "css" / "theme.css").read_text(encoding="utf-8")
+        """surfaces.css must define .titlebar-drag with drag region."""
+        css = (_WEBUI / "css" / "surfaces.css").read_text(encoding="utf-8")
         assert ".titlebar-drag" in css
         assert "pywebview-drag-region" in css or "app-region: drag" in css
 
