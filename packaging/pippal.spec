@@ -93,6 +93,15 @@ if PIPER_DIR.exists():
                     rel = sub.relative_to(PIPER_DIR).parent
                     datas.append((str(sub), str(Path("piper") / rel)))
 
+# --- third-party notices -------------------------------------------------
+# notices.py::resolve_notices_path checks INSTALL_ROOT/"docs/THIRD_PARTY.md".
+# INSTALL_ROOT == sys._MEIPASS when frozen (= dist/PipPal/_internal/), so we
+# bundle the file into the "docs/" subdirectory inside _MEIPASS so the path
+# INSTALL_ROOT/"docs/THIRD_PARTY.md" resolves correctly in the frozen app.
+_NOTICES_SRC = REPO_ROOT / "docs" / "THIRD_PARTY.md"
+if _NOTICES_SRC.exists():
+    datas.append((str(_NOTICES_SRC), "docs"))
+
 # --- pywebview data files ------------------------------------------------
 # pywebview ships its own PyInstaller hook that pulls in the edgechromium
 # backend's bundled WebView2 interop assemblies + WebView2Loader.dll on
