@@ -16,7 +16,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
 
-from .paths import CMD_SERVER_PORT
+from .paths import CMD_PORT_FILE, CMD_SERVER_PORT
 
 
 class _SingleInstanceHTTPServer(ThreadingHTTPServer):
@@ -123,6 +123,75 @@ def _env_token() -> str | None:
     tok = os.environ.get(_ENV_TOKEN)
     return tok if tok else None
 
+
+# --- Port persistence and connect-first helpers -------------------------
+#
+# The running instance writes its actually-bound port to CMD_PORT_FILE so
+# that a second startup can discover it via connect-first probe rather than
+# inferring it from a well-known default.  This is the key piece that makes
+# the single-instance detection robust when the default port (51677) is
+# inside an OS-excluded TCP range (Hyper-V / WSL2 / Docker reservations).
+
+
+def read_cmd_port_file() -> int | None:
+    """Return the port recorded by the running instance, or None."""
+    try:
+        text = CMD_PORT_FILE.read_text(encoding="utf-8").strip()
+        port = int(text)
+        if 1 <= port <= 65535:
+            return port
+        return None
+    except Exception:
+        return None
+
+
+def write_cmd_port_file(port: int) -> None:
+    """Atomically persist *port* so the next startup can find us."""
+    try:
+        CMD_PORT_FILE.parent.mkdir(parents=True, exist_ok=True)
+        tmp = CMD_PORT_FILE.with_name(".cmd_port.tmp")
+        tmp.write_text(str(port), encoding="utf-8")
+        tmp.replace(CMD_PORT_FILE)
+    except Exception:
+        pass  # Best-effort; a missing file just means probe falls back to default.
+
+
+def resolve_candidate_port() -> int:
+    """Return the port to probe for a running instance.
+
+    Priority order:
+    1. ``PIPPAL_CMD_SERVER_PORT`` env (E2E harness / explicit override).
+    2. Value persisted in ``CMD_PORT_FILE`` by a running instance
+       (covers the fallback-port case where the default was excluded).
+    3. The compiled-in default ``CMD_SERVER_PORT`` (51677).
+    """
+    env_port = _env_port_override()
+    if env_port is not None:
+        return env_port
+    file_port = read_cmd_port_file()
+    if file_port is not None:
+        return file_port
+    return CMD_SERVER_PORT
+
+
+def probe_running_instance(port: int, timeout: float = 0.4) -> bool:
+    """Return True if a live PipPal instance is listening on *port*.
+
+    Sends a GET /ping and checks for HTTP 200.  The short *timeout* keeps
+    startup snappy even when nothing is there.
+    """
+    import urllib.error
+    import urllib.request
+
+    try:
+        with urllib.request.urlopen(
+            f"http://127.0.0.1:{port}/ping", timeout=timeout
+        ) as resp:
+            return 200 <= getattr(resp, "status", 200) < 300
+    except Exception:
+        return False
+
+
 # Caps to keep a malicious or accidental client from freezing the engine.
 MAX_READ_FILE_BYTES = 200 * 1024     # 200 KB
 MAX_READ_TEXT_BYTES = 200 * 1024
@@ -177,12 +246,25 @@ def start_command_server(
     stale listener from another test/instance cannot answer this one.
     The actually-bound port is written back to ``PIPPAL_CMD_SERVER_PORT``
     so the harness can target exactly this instance.
+
+    Bind-with-fallback (production default port only): when the caller
+    uses the default ``CMD_SERVER_PORT`` and the OS refuses to bind it
+    (e.g. Hyper-V / WSL2 excluded-port range, ``WinError 10013``), the
+    server falls back to an OS-assigned free port (port 0) rather than
+    returning ``None``.  The actually-bound port is persisted to
+    ``CMD_PORT_FILE`` so the next startup's connect-first probe finds the
+    right address.  Callers that pass an explicit non-default port keep the
+    old contract (``None`` on bind failure) so existing tests are unaffected.
     """
+    # Track whether we're in "production default" mode before any override.
+    # Only in this mode do we apply bind-with-fallback and port persistence.
+    _production_mode = (port == CMD_SERVER_PORT)
+
     # Only consult the env override when the caller didn't request a
     # specific non-default port — production callers (app.py) always pass
     # the default, so this is where the opt-in applies without ever
     # changing an explicit port a real caller chose.
-    if port == CMD_SERVER_PORT:
+    if _production_mode:
         env_port = _env_port_override()
         if env_port is not None:
             port = env_port
@@ -370,14 +452,37 @@ def start_command_server(
     try:
         srv = _SingleInstanceHTTPServer(("127.0.0.1", port), CmdHandler)
     except OSError as e:
-        print(f"[cmd-server] cannot bind {port}: {e}", file=sys.stderr)
-        return None
+        if not _production_mode:
+            # Explicit non-default port: preserve the existing contract.
+            print(f"[cmd-server] cannot bind {port}: {e}", file=sys.stderr)
+            return None
+        # Production default port failed (e.g. WinError 10013 excluded-port
+        # range, or WinError 10048 transient in-use). Fall back to an
+        # OS-assigned free port — never mistake this for "already running".
+        print(
+            f"[cmd-server] cannot bind {port} ({e}); falling back to free port",
+            file=sys.stderr,
+        )
+        try:
+            srv = _SingleInstanceHTTPServer(("127.0.0.1", 0), CmdHandler)
+        except OSError as e2:
+            print(f"[cmd-server] cannot bind free port: {e2}", file=sys.stderr)
+            return None
+
+    actual_port = srv.server_address[1]
+
     # Publish the actually-bound port. With an OS-assigned ephemeral
-    # port (env override = 0) this is how the E2E harness learns which
-    # port to target; with the fixed production port it's a harmless
-    # write of the same value. Only done when the env opt-in is active,
-    # so production never touches the environment.
+    # port (env override = 0, or fallback from excluded default) this is
+    # how the E2E harness and the next-startup connect-first probe learn
+    # which port to target.
     if _env_port_override() is not None:
-        os.environ[_ENV_PORT] = str(srv.server_address[1])
+        os.environ[_ENV_PORT] = str(actual_port)
+
+    # Always persist in production mode so the next startup can probe
+    # the right address (crucial when the default port was excluded and
+    # we fell back to a free port).
+    if _production_mode:
+        write_cmd_port_file(actual_port)
+
     threading.Thread(target=srv.serve_forever, daemon=True).start()
     return srv
