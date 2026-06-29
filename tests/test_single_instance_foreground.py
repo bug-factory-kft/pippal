@@ -27,7 +27,7 @@ from pippal.command_server import start_command_server
 class _FakeEngine:
     """Minimal engine stand-in; the signal path does not drive the engine."""
 
-    def read_text_async(self, text: str) -> None:  # noqa: D401
+    def read_text_async(self, text: str) -> None:
         pass
 
 
@@ -45,8 +45,8 @@ class TestSingleInstanceForegroundSignal:
         POST /settings returns 404 and the signal returns False, so the
         window is never raised on second launch.
         """
-        from pippal.web_ui.app_web import _signal_running_instance_to_show
         import pippal.command_server as cs
+        from pippal.web_ui.app_web import _signal_running_instance_to_show
 
         monkeypatch.delenv("PIPPAL_CMD_SERVER_PORT", raising=False)
         monkeypatch.setattr(cs, "CMD_PORT_FILE", tmp_path / ".cmd_port")
@@ -85,8 +85,8 @@ class TestSingleInstanceForegroundSignal:
         OLD broken default in main()), POST /settings returns 404 and the
         signal returns False.  This test documents WHY the fix is needed.
         """
-        from pippal.web_ui.app_web import _signal_running_instance_to_show
         import pippal.command_server as cs
+        from pippal.web_ui.app_web import _signal_running_instance_to_show
 
         monkeypatch.delenv("PIPPAL_CMD_SERVER_PORT", raising=False)
         monkeypatch.setattr(cs, "CMD_PORT_FILE", tmp_path / ".cmd_port")
