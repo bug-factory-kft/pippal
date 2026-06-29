@@ -184,6 +184,10 @@ TEMP_DIR: Path = DATA_ROOT / "temp"
 # Local IPC for the right-click context menu and external integrations.
 CMD_SERVER_PORT: int = 51677
 
+# Persisted port file: the running instance writes the actually-bound port
+# here so a second startup can connect-first (instead of guessing 51677).
+CMD_PORT_FILE: Path = DATA_ROOT / ".cmd_port"
+
 
 def ensure_dirs() -> None:
     """Create runtime-required directories if they don't exist yet.

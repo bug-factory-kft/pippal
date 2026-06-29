@@ -17,7 +17,11 @@ from typing import Any
 import pystray
 
 from .. import plugins
-from ..command_server import start_command_server
+from ..command_server import (
+    probe_running_instance,
+    resolve_candidate_port,
+    start_command_server,
+)
 from ..config import load_config
 from ..engine import TTSEngine
 from ..history import load_history, save_history
@@ -36,25 +40,22 @@ def _selected_piper_missing(config: dict[str, Any]) -> bool:
     return engine_name == "piper" and not PIPER_EXE.exists()
 
 
-def _signal_running_instance_to_show() -> bool:
+def _signal_running_instance_to_show(port: int | None = None) -> bool:
     """Tell the already-running instance to OPEN + foreground its window.
 
     POSTs /settings to the running instance IPC (wired to
     windows.raise_window("settings")).
     Returns True iff HTTP 200; False on any failure.
+
+    *port* is the already-resolved candidate port from
+    :func:`~pippal.command_server.resolve_candidate_port`.  When omitted
+    the resolution is repeated here (covers legacy callers).
     """
-    import os
     import urllib.error
     import urllib.request
 
-    from ..paths import CMD_SERVER_PORT
-
-    # Respect the env-override port so the E2E harness (PIPPAL_CMD_SERVER_PORT)
-    # hits the real running instance rather than the static default port.
-    try:
-        port = int(os.environ.get("PIPPAL_CMD_SERVER_PORT") or CMD_SERVER_PORT)
-    except (ValueError, TypeError):
-        port = CMD_SERVER_PORT
+    if port is None:
+        port = resolve_candidate_port()
 
     url = f"http://127.0.0.1:{port}/settings"
     req = urllib.request.Request(url, data=b"", method="POST")
@@ -298,6 +299,19 @@ def main() -> None:
     windows.set_overlay_controller(overlay)
 
     # ----- Local IPC / single-instance gate -----
+    #
+    # CONNECT-FIRST: probe the candidate port (env → .cmd_port → default
+    # 51677) before trying to bind.  This distinguishes a genuine live
+    # instance from a bind failure caused by an OS-excluded port range
+    # (Hyper-V / WSL2 / Docker reserve ranges, WinError 10013 WSAEACCES).
+    _candidate_port = resolve_candidate_port()
+    if probe_running_instance(_candidate_port):
+        # A live PipPal instance responded — do the existing foreground
+        # behaviour and exit without ever trying to bind.
+        if not _signal_running_instance_to_show(_candidate_port):
+            _foreground_running_window_win32()
+        raise SystemExit(0)
+
     command_callbacks = {
         "settings": lambda: windows.raise_window("settings"),
         "stop": engine.stop,
@@ -308,13 +322,16 @@ def main() -> None:
         "voice-manager": lambda: windows.open("voices"),
         "first-run-check": lambda: windows.raise_window("onboarding"),
     }
+    # BIND-WITH-FALLBACK: start_command_server tries the default/env port
+    # and falls back to a free OS-assigned port if bind fails — it does NOT
+    # return None due to an excluded-port error.  The actually-bound port is
+    # persisted to .cmd_port so the next startup's connect-first probe finds
+    # it.  None is only returned if even the free-port bind fails (rare).
     cmd_server = start_command_server(engine, commands=command_callbacks)
     if cmd_server is None:
-        # Already running: ask the LIVE instance over local IPC to open +
-        # foreground its window, then exit quietly. If the IPC signal cannot
-        # be delivered, fall back to a best-effort direct Win32 foreground of
-        # the running window. NEVER show a message box.
-        if not _signal_running_instance_to_show():
+        # Belt-and-suspenders: if we still can't bind any port, try to
+        # activate whatever might be running (could be a race) and exit.
+        if not _signal_running_instance_to_show(_candidate_port):
             _foreground_running_window_win32()
         raise SystemExit(0)
 

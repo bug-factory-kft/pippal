@@ -19,7 +19,11 @@ import pytest
 from pippal.command_server import (
     ALLOWED_EXTENSIONS,
     MAX_READ_FILE_BYTES,
+    probe_running_instance,
+    read_cmd_port_file,
+    resolve_candidate_port,
     start_command_server,
+    write_cmd_port_file,
 )
 
 
@@ -589,6 +593,196 @@ class TestE2EHermeticityHook:
             while time.time() < deadline and not engine.calls:
                 time.sleep(0.02)
             assert engine.calls == ["hermetic open-file marker"]
+        finally:
+            srv.shutdown()
+            srv.server_close()
+
+
+class TestExcludedPortFallback:
+    """The bind-with-fallback + connect-first fix for excluded/in-use default
+    ports (WinError 10013 WSAEACCES from Hyper-V/WSL2/Docker reserved ranges).
+
+    These tests verify:
+    1. When the default port cannot be bound, the server falls back to a
+       free OS-assigned port and starts listening (NOT treated as "already
+       running").
+    2. When a live instance IS listening on the recorded port, a second
+       startup's connect-first probe detects it (foreground+exit path).
+    3. Port persistence: the bound port is written to CMD_PORT_FILE.
+    4. resolve_candidate_port reads the persisted file when no env is set.
+    """
+
+    def test_fallback_to_free_port_when_default_excluded(
+        self, monkeypatch, tmp_path
+    ):
+        """Simulate an excluded/in-use default port via monkeypatch.
+
+        We intercept the _SingleInstanceHTTPServer constructor to raise
+        WSAEACCES (WinError 10013) for the default port 51677 and verify
+        that start_command_server falls back to a free port (port 0) rather
+        than returning None.
+        """
+        import errno
+        import pippal.command_server as cs
+        from pippal.paths import CMD_SERVER_PORT
+
+        monkeypatch.delenv("PIPPAL_CMD_SERVER_PORT", raising=False)
+        monkeypatch.delenv("PIPPAL_CMD_SERVER_TOKEN", raising=False)
+        # Redirect CMD_PORT_FILE writes to tmp_path.
+        monkeypatch.setattr(cs, "CMD_PORT_FILE", tmp_path / ".cmd_port")
+
+        # Patch _SingleInstanceHTTPServer to raise for the default port.
+        _real_server = cs._SingleInstanceHTTPServer
+
+        def _patched_server(addr, handler):
+            if addr[1] == CMD_SERVER_PORT:
+                # Simulate WinError 10013 WSAEACCES (excluded port).
+                err = OSError(
+                    "[WinError 10013] An attempt was made to access a "
+                    "socket in a way forbidden by its access permissions"
+                )
+                err.errno = errno.EACCES
+                raise err
+            return _real_server(addr, handler)
+
+        monkeypatch.setattr(cs, "_SingleInstanceHTTPServer", _patched_server)
+
+        engine = _FakeEngine()
+        # Must NOT return None — must fall back to a free port.
+        srv = start_command_server(engine)
+        assert srv is not None, (
+            "start_command_server must NOT return None on excluded-port "
+            "bind failure; it should fall back to a free OS-assigned port"
+        )
+        try:
+            bound_port = srv.server_address[1]
+            assert bound_port != CMD_SERVER_PORT, (
+                "Expected a fallback (non-default) port, got the default"
+            )
+            assert bound_port > 0
+
+            # Server is actually serving.
+            time.sleep(0.05)
+            status, _ = _post(bound_port, "/read", {"text": "fallback-ok"})
+            assert status == 200
+            assert engine.calls == ["fallback-ok"]
+
+            # Port was persisted to CMD_PORT_FILE.
+            assert (tmp_path / ".cmd_port").exists()
+            assert int((tmp_path / ".cmd_port").read_text().strip()) == bound_port
+        finally:
+            srv.shutdown()
+            srv.server_close()
+
+    def test_connect_first_detects_live_instance(self, monkeypatch, tmp_path):
+        """When a live instance is listening on the recorded port, the
+        connect-first probe returns True so a second startup can foreground
+        it instead of trying to bind a new port."""
+        import pippal.command_server as cs
+
+        monkeypatch.delenv("PIPPAL_CMD_SERVER_PORT", raising=False)
+        monkeypatch.setattr(cs, "CMD_PORT_FILE", tmp_path / ".cmd_port")
+
+        engine = _FakeEngine()
+        # Start a real server (simulates the first running instance).
+        srv = start_command_server(engine)
+        assert srv is not None
+        try:
+            bound_port = srv.server_address[1]
+            time.sleep(0.05)
+
+            # probe_running_instance should return True for the live server.
+            assert probe_running_instance(bound_port), (
+                "probe_running_instance must return True when the instance "
+                "is listening"
+            )
+
+            # resolve_candidate_port reads the persisted file.
+            candidate = resolve_candidate_port()
+            assert candidate == bound_port
+            assert probe_running_instance(candidate)
+        finally:
+            srv.shutdown()
+            srv.server_close()
+
+    def test_probe_returns_false_when_nothing_listening(self):
+        """probe_running_instance returns False quickly when no server is up."""
+        # Use a free port and immediately release it — nothing will listen.
+        with socket.socket() as s:
+            s.bind(("127.0.0.1", 0))
+            dead_port = s.getsockname()[1]
+        # Socket released; port is free but nothing is listening.
+        assert not probe_running_instance(dead_port, timeout=0.3)
+
+    def test_write_and_read_cmd_port_file(self, monkeypatch, tmp_path):
+        """write_cmd_port_file + read_cmd_port_file round-trip."""
+        import pippal.command_server as cs
+
+        monkeypatch.setattr(cs, "CMD_PORT_FILE", tmp_path / ".cmd_port")
+        write_cmd_port_file(54321)
+        assert read_cmd_port_file() == 54321
+
+    def test_resolve_candidate_port_priority(self, monkeypatch, tmp_path):
+        """resolve_candidate_port: env > .cmd_port file > default."""
+        import pippal.command_server as cs
+        from pippal.paths import CMD_SERVER_PORT
+
+        monkeypatch.setattr(cs, "CMD_PORT_FILE", tmp_path / ".cmd_port")
+
+        # No env, no file -> default.
+        monkeypatch.delenv("PIPPAL_CMD_SERVER_PORT", raising=False)
+        assert resolve_candidate_port() == CMD_SERVER_PORT
+
+        # File set -> file wins over default.
+        write_cmd_port_file(54000)
+        assert resolve_candidate_port() == 54000
+
+        # Env set -> env wins over file.
+        monkeypatch.setenv("PIPPAL_CMD_SERVER_PORT", "55000")
+        assert resolve_candidate_port() == 55000
+
+    def test_fallback_port_persisted_and_probed_across_restart(
+        self, monkeypatch, tmp_path
+    ):
+        """Full lifecycle: first startup falls back to free port, writes
+        .cmd_port; second startup reads .cmd_port, probes successfully,
+        and would foreground+exit rather than trying to bind."""
+        import errno
+        import pippal.command_server as cs
+        from pippal.paths import CMD_SERVER_PORT
+
+        monkeypatch.delenv("PIPPAL_CMD_SERVER_PORT", raising=False)
+        monkeypatch.delenv("PIPPAL_CMD_SERVER_TOKEN", raising=False)
+        monkeypatch.setattr(cs, "CMD_PORT_FILE", tmp_path / ".cmd_port")
+
+        _real_server = cs._SingleInstanceHTTPServer
+
+        def _patched_server(addr, handler):
+            if addr[1] == CMD_SERVER_PORT:
+                err = OSError("excluded")
+                err.errno = errno.EACCES
+                raise err
+            return _real_server(addr, handler)
+
+        monkeypatch.setattr(cs, "_SingleInstanceHTTPServer", _patched_server)
+
+        engine = _FakeEngine()
+        # First "startup" — falls back to free port.
+        srv = start_command_server(engine)
+        assert srv is not None
+        try:
+            bound_port = srv.server_address[1]
+            assert bound_port != CMD_SERVER_PORT
+            time.sleep(0.05)
+
+            # Second "startup" simulation: read candidate from file, probe.
+            candidate = resolve_candidate_port()
+            assert candidate == bound_port
+            # Connect-first: should detect the live instance.
+            assert probe_running_instance(candidate), (
+                "Second startup must detect the running instance via "
+                "connect-first probe on the persisted fallback port"
+            )
         finally:
             srv.shutdown()
             srv.server_close()
