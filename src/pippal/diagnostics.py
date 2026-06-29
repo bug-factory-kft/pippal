@@ -50,6 +50,8 @@ EVT_APP_START = "app.start"
 EVT_APP_EXIT = "app.exit"
 EVT_DOC_IMPORT_ERROR = "document.import.error"
 EVT_AI_ACTION_ERROR = "ai.action.error"
+EVT_AI_ACTION = "ai.action"
+EVT_OLLAMA_REQUEST = "ollama.request"
 EVT_JS = "js"
 
 # ---------------------------------------------------------------------------
