@@ -19,6 +19,7 @@ pre-i18n suite passing as-is.
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 
 from playwright.sync_api import Page, expect
@@ -30,6 +31,15 @@ MARKER_CLOSE = "⟧"
 
 def _en() -> dict:
     return json.loads((WEBUI / "i18n" / "en.json").read_text("utf-8"))
+
+
+def _brand_mark(text: str) -> str:
+    """Mirror ``brandMark()`` in webui/js/app-core.js: the in-app wordmark
+    carries ™ after its first PipPal, while the catalog value stays plain
+    because it is also the OS window title."""
+    if "™" in text:
+        return text
+    return re.sub(r"PipPal(?: Pro)?", lambda m: m.group(0) + "™", text, count=1)
 
 
 def _boot(page: Page, app_url: str, view: str) -> None:
@@ -68,13 +78,19 @@ def test_settings_dynamic_strings_from_catalog(page: Page, app_url: str, step):
     expect(page.get_by_test_id("settings-view-licences")).to_have_text(
         en["settings.notices.view"]
     )
+    expect(page.locator("#brand-name")).to_have_text("PipPal™")
+    expect(page.get_by_test_id("about-trademark")).to_have_text(
+        en["settings.about.trademark"]
+    )
     step.check("settings dynamic strings render byte-identical to en.json")
 
 
 def test_voices_dynamic_strings_from_catalog(page: Page, app_url: str, step):
     en = _en()
     _boot(page, app_url, "voices")
-    expect(page.locator("#brand-name")).to_have_text(en["voices.window_title"])
+    expect(page.locator("#brand-name")).to_have_text(
+        _brand_mark(en["voices.window_title"])
+    )
     # A voice row Install button + empty-filter message both come via t().
     page.get_by_test_id("vm-status").select_option("Installed")
     expect(page.get_by_test_id("vm-empty")).to_have_text(en["voices.empty"])

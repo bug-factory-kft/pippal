@@ -42,6 +42,19 @@ export var SURFACE = params.get("view") || "settings";
 export var INSTALLED_VOICES_CHANGED_EVENT = "pippal-installed-voices-changed";
 export var INSTALLED_VOICES_CHANGED_KEY = "pippal:installed-voices-changed";
 
+// Trademark notice for the in-app wordmark: ™ only, never the registered
+// sign, because the name is not a registered mark yet. Appends ™ to the
+// first "PipPal" (or "PipPal Pro") in a display string such as the titlebar
+// label or the reader-panel label. Only for rendered UI text: window titles,
+// tray tooltips, config.brand_name and the package DisplayName keep the
+// plain reserved name.
+var TRADEMARK = "™";
+export function brandMark(text) {
+  var s = String(text == null ? "" : text);
+  if (s.indexOf(TRADEMARK) !== -1) return s;
+  return s.replace(/PipPal(?: Pro)?/, "$&" + TRADEMARK);
+}
+
 export function toast(msg, isErr) {
   toastEl.textContent = msg;
   toastEl.className = "toast show" + (isErr ? " err" : "");

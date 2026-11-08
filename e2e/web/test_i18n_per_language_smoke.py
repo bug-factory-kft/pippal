@@ -28,6 +28,7 @@ fail here without the test ever mirroring the app's own strings.
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 
 import pytest
@@ -87,6 +88,17 @@ def _expected(lang: str, key: str) -> str:
     return value
 
 
+# Titlebar keys whose painted form carries the ™ notice (``brandMark()`` in
+# webui/js/app-core.js); the catalog value stays plain for the OS window title.
+BRAND_TITLE_KEYS = {"notices.window_title", "voices.window_title"}
+
+
+def _painted(key: str, value: str) -> str:
+    if key not in BRAND_TITLE_KEYS or "™" in value:
+        return value
+    return re.sub(r"PipPal(?: Pro)?", lambda m: m.group(0) + "™", value, count=1)
+
+
 def _wait_ready(page: Page, surface: str) -> None:
     page.wait_for_function(
         "() => document.documentElement.hasAttribute('data-i18n-ready')",
@@ -138,8 +150,9 @@ def test_surface_boots_in_language(
             f"catalog expects {expected!r}"
         )
         if spec["dom"]:
-            assert expected in body_text, (
-                f"{surface}/{lang}: catalog value for {key!r} ({expected!r}) "
+            painted = _painted(key, expected)
+            assert painted in body_text, (
+                f"{surface}/{lang}: catalog value for {key!r} ({painted!r}) "
                 f"not painted in the surface innerText"
             )
     step.check(

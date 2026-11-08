@@ -63,6 +63,7 @@ Width-constrained = short UI chrome (buttons, tray items, window titles, overlay
 | `settings.about.copyright` | © 2026 Bug Factory Kft.  ·  Offline-first by design. | settings · about card | `webui/js/settings.js` | — |
 | `settings.about.tagline` | Your little offline reading buddy. | settings · about card | `webui/js/settings.js` | — |
 | `settings.about.title` | About | settings · about card | `webui/js/settings.js` | — |
+| `settings.about.trademark` | PipPal™ is a trademark of Bug Factory Kft. | settings · about card | `webui/js/settings.js` | — |
 | `settings.reset.confirm_body` | Reset every field to its built-in default? Click Apply or Save afterwards to keep them. | settings · reset flow | `webui/js/settings-footer.js` | — |
 | `settings.reset.confirm_title` | Reset to defaults | settings · reset flow | `webui/js/settings-footer.js` | — |
 | `settings.reset.toast` | Reset to defaults — click Apply or Save to keep them. | settings · reset flow | `webui/js/settings-footer.js` | — |

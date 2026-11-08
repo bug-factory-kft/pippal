@@ -11,6 +11,7 @@ import {
   U,
   API,
   t,
+  brandMark,
   view,
   footer,
   fail,
@@ -84,7 +85,7 @@ export function renderOverlay() {
   var label = U.el("span", {
     class: "ohlabel",
     testid: "overlay-label",
-    text: "PipPal",
+    text: brandMark("PipPal"),
   });
   // Brand area: icon + dot + label wrapped in a drag region.
   // .pywebview-drag-region makes pywebview's WebView2 backend honour the
@@ -322,7 +323,7 @@ export function renderOverlay() {
               ? " thinking"
               : "");
         label.textContent =
-          (s.brand_name || "PipPal") +
+          brandMark(s.brand_name || "PipPal") +
           (s.action_label ? "  ·  " + s.action_label : "");
         // Transport button disabled-states: prev/next stay enabled during
         // synthesis so rapid presses are delivered to the bridge even while
