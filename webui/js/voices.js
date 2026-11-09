@@ -9,6 +9,7 @@ import {
   U,
   API,
   t,
+  brandMark,
   view,
   footer,
   toast,
@@ -71,8 +72,8 @@ function qualLabelFor(code) {
 export function renderVoiceManager() {
   return API.call("get_voice_catalogue").then(function (cat) {
     vmState.all = cat.voices;
-    document.getElementById("brand-name").textContent = t(
-      "voices.window_title",
+    document.getElementById("brand-name").textContent = brandMark(
+      t("voices.window_title"),
     );
     view.innerHTML = "";
     footer.classList.add("hidden");

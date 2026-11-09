@@ -72,6 +72,7 @@
   "settings.about.title": "Sobre",
   "settings.about.tagline": "Seu pequeno companheiro de leitura offline.",
   "settings.about.copyright": "© 2026 Bug Factory Kft.  ·  Offline em primeiro lugar.",
+  "settings.about.trademark": "PipPal™ é uma marca comercial da Bug Factory Kft.",
 
   "settings.reset.confirm_title": "Restaurar padrões",
   "settings.reset.confirm_body": "Restaurar todos os campos para o padrão interno? Depois clique em Aplicar ou Salvar para mantê-los.",

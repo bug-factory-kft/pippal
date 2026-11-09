@@ -72,6 +72,7 @@
   "settings.about.title": "关于",
   "settings.about.tagline": "您小巧的离线阅读伙伴。",
   "settings.about.copyright": "© 2026 Bug Factory Kft.  ·  离线优先设计。",
+  "settings.about.trademark": "PipPal™ 是 Bug Factory Kft. 的商标。",
 
   "settings.reset.confirm_title": "重置为默认值",
   "settings.reset.confirm_body": "将每个字段重置为其内置默认值？之后请点击“应用”或“保存”以保留。",

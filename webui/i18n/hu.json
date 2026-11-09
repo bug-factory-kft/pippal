@@ -72,6 +72,7 @@
   "settings.about.title": "Névjegy",
   "settings.about.tagline": "Az Ön apró offline olvasótársa.",
   "settings.about.copyright": "© 2026 Bug Factory Kft.  ·  Eleve offline-központú.",
+  "settings.about.trademark": "A PipPal™ a Bug Factory Kft. védjegye.",
 
   "settings.reset.confirm_title": "Alaphelyzetbe állítás",
   "settings.reset.confirm_body": "Visszaállítja minden mezőt a beépített alapértelmezett értékére? Utána kattintson az Alkalmaz vagy a Mentés gombra a megtartáshoz.",

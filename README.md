@@ -2,7 +2,7 @@
   <img src="docs/pippal_logo.png" alt="PipPal" width="380">
 </p>
 
-<h1 align="center">PipPal</h1>
+<h1 align="center">PipPal™</h1>
 
 <p align="center"><i>Your little offline reading buddy.</i></p>
 
@@ -176,3 +176,5 @@ voice models) are listed with their respective licences in
 [docs/THIRD_PARTY.md](docs/THIRD_PARTY.md).
 For privacy and terms see [docs/PRIVACY.md](docs/PRIVACY.md) and
 [docs/TERMS.md](docs/TERMS.md).
+
+PipPal™ is a trademark of Bug Factory Kft.

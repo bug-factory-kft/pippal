@@ -5,6 +5,7 @@ import {
   U,
   API,
   t,
+  brandMark,
   view,
   footer,
   toast,
@@ -73,8 +74,9 @@ export function renderSettings() {
     settingsState.defaults = defs;
     settingsState.controls = {};
 
-    document.getElementById("brand-name").textContent =
-      cfg.brand_name || "PipPal";
+    document.getElementById("brand-name").textContent = brandMark(
+      cfg.brand_name || "PipPal",
+    );
 
     view.innerHTML = "";
     footer.classList.remove("hidden");
@@ -380,6 +382,11 @@ export function renderSettings() {
         class: "card-hint",
         style: "margin-top:8px",
         text: t("settings.about.copyright"),
+      }),
+      U.el("div", {
+        class: "card-hint",
+        text: t("settings.about.trademark"),
+        "data-testid": "about-trademark",
       }),
       linkRow,
     ]);
