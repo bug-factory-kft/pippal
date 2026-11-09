@@ -24,7 +24,11 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=7", "pytest-benchmark>=4", "ruff>=0.5", "mypy>=1.8"]
+# pytest-benchmark 5.3.1 is the first release that works with pytest 9.2+:
+# older ones read the private `Node._nodeid`, which pytest 9.2 removed. The
+# self-hosted runner shares one Python tool cache in which other jobs upgrade
+# pytest, so this floor makes `pip install -e .[dev]` upgrade the plugin too.
+dev = ["pytest>=7", "pytest-benchmark>=5.3.1", "ruff>=0.5", "mypy>=1.8"]
 
 [project.scripts]
 pippal = "pippal.web_ui.app_web:main"
