@@ -22,15 +22,26 @@ jobs:
       - uses: actions/setup-python@v5
         with: { python-version: "3.11" }
 
-      - name: Install smoke dependencies
+      # Every job installs into its OWN fresh venv in the job workspace,
+      # created from the setup-python interpreter, and later steps call
+      # only $env:PIPPAL_CI_PYTHON. Never pip-install into the runner's
+      # shared tool-cache Python: this step's former `--upgrade pytest`
+      # there pulled in pytest 9.2 for every later job and broke CI
+      # Benchmarks on main (2026-11-09).
+      - name: Create job venv + install smoke dependencies
         shell: pwsh
         run: |
-          python -m pip install --upgrade pip pytest wheel
+          python -m venv --clear .venv-ci-smoke
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $python = Join-Path $PWD '.venv-ci-smoke\Scripts\python.exe'
+          & $python -m pip install --upgrade pip pytest wheel
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          "PIPPAL_CI_PYTHON=$python" >> $env:GITHUB_ENV
 
       - name: Run install surface smoke
         shell: pwsh
         run: |
-          python -m pytest tests/smoke -q
+          & $env:PIPPAL_CI_PYTHON -m pytest tests/smoke -q
 
   e2e:
     name: Synth pipeline E2E
@@ -82,12 +93,20 @@ jobs:
           Invoke-WebRequest -Uri "$base/$env:VOICE.json" -OutFile "e2e-cache/voices/$env:VOICE.json"
           Get-ChildItem e2e-cache/voices
 
-      - name: Install package + dev extras + faster-whisper
+      - name: Create job venv + install package + dev extras + faster-whisper
+        # Fresh per-job venv; see the install-surface-smoke job.
         shell: pwsh
         run: |
-          python -m pip install --upgrade pip
-          python -m pip install -e ".[dev]"
-          python -m pip install faster-whisper
+          python -m venv --clear .venv-ci-e2e
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $python = Join-Path $PWD '.venv-ci-e2e\Scripts\python.exe'
+          & $python -m pip install --upgrade pip
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & $python -m pip install -e ".[dev]"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & $python -m pip install faster-whisper
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          "PIPPAL_CI_PYTHON=$python" >> $env:GITHUB_ENV
 
       - name: Run E2E suite
         shell: pwsh
@@ -96,7 +115,7 @@ jobs:
           PIPPAL_VOICE_DIR: ${{ github.workspace }}\e2e-cache\voices
           PIPPAL_TEST_VOICE: ${{ env.VOICE }}
         run: |
-          python -m pytest tests/e2e -v -m e2e | Tee-Object -FilePath e2e-output.txt
+          & $env:PIPPAL_CI_PYTHON -m pytest tests/e2e -v -m e2e | Tee-Object -FilePath e2e-output.txt
 
       - name: Format E2E comment
         if: always() && github.event_name == 'pull_request'

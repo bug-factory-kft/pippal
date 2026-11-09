@@ -28,9 +28,19 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y xvfb libtk8.6
 
-      - run: |
-          python -m pip install --upgrade pip
-          python -m pip install -e ".[dev]"
+      # Fresh per-job venv in the job workspace, created from the
+      # setup-python interpreter; later steps call only
+      # $PIPPAL_CI_PYTHON. Never pip-install into the runner's shared
+      # tool-cache Python: upgrades there leak into every later job on
+      # the runner (pytest 9.2 broke CI Benchmarks on main, 2026-11-09).
+      # This job's steps are Linux/bash (apt-get, xvfb-run), hence bin/.
+      - name: Create job venv + install package + dev extras
+        run: |
+          python -m venv --clear .venv-ci-bench-baseline
+          venv_python="$PWD/.venv-ci-bench-baseline/bin/python"
+          "$venv_python" -m pip install --upgrade pip
+          "$venv_python" -m pip install -e ".[dev]"
+          echo "PIPPAL_CI_PYTHON=$venv_python" >> "$GITHUB_ENV"
 
       # `--benchmark-storage=file://bench-baselines` writes under that
       # directory using the runner's machine fingerprint
@@ -40,7 +50,7 @@ jobs:
       - name: Run + save baseline
         run: |
           rm -rf bench-baselines
-          xvfb-run -a python -m pytest tests/benchmarks --benchmark-only \
+          xvfb-run -a "$PIPPAL_CI_PYTHON" -m pytest tests/benchmarks --benchmark-only \
               --benchmark-storage=file://bench-baselines \
               --benchmark-save=baseline \
               --benchmark-columns=mean,stddev,ops \
