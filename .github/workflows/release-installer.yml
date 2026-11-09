@@ -8,7 +8,8 @@
 # 1. Checkout + Python 3.13
 # 2. Download the real Piper binary (rhasspy/piper 2023.11.14-2) and extract
 #    it into piper/ — replaces the 14-byte stub committed for dev.
-# 3. pip install the package + runtime deps + PyInstaller.
+# 3. pip install the package + runtime deps + PyInstaller into a fresh
+#    per-job venv (.venv-ci-installer).
 # 4. pyinstaller packaging/pippal.spec  -> dist/PipPal/
 # 5. Install Inno Setup via Chocolatey.
 # 6. ISCC packaging/installer/pippal.iss  -> dist/PipPal-Setup-0.3.3.exe
@@ -68,17 +69,30 @@ jobs:
 
       # ------------------------------------------------------------------
       # 3. Install Python dependencies
+      #    Everything goes into a fresh job venv in the workspace, created
+      #    from the setup-python interpreter, never into the shared
+      #    tool-cache site-packages (upgrades there leak into later jobs
+      #    on a reused runner). Later steps call only $env:PIPPAL_CI_PYTHON
+      #    and the venv's own pyinstaller.exe.
       # ------------------------------------------------------------------
       - name: Install package and build dependencies
         shell: pwsh
         run: |
-          python -m pip install --upgrade pip
+          python -m venv --clear .venv-ci-installer
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $python = Join-Path $PWD '.venv-ci-installer\Scripts\python.exe'
+          & $python -m pip install --upgrade pip
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           # Install the pippal package itself (editable so all submodules resolve)
-          pip install -e ".[dev]"
+          & $python -m pip install -e ".[dev]"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           # Runtime deps that pyproject.toml declares but aren't in [dev]:
-          pip install pywebview pystray keyboard pyperclip Pillow
+          & $python -m pip install pywebview pystray keyboard pyperclip Pillow
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           # Build tooling
-          pip install pyinstaller
+          & $python -m pip install pyinstaller
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          "PIPPAL_CI_PYTHON=$python" >> $env:GITHUB_ENV
 
       # ------------------------------------------------------------------
       # 3b. Generate the app icon (.ico) from the committed .png.
@@ -88,7 +102,7 @@ jobs:
       - name: Generate app icon (.ico from committed .png)
         shell: pwsh
         run: |
-          python -c "from PIL import Image; Image.open('assets/pippal_icon.png').convert('RGBA').save('assets/pippal_icon.ico', sizes=[(16,16),(24,24),(32,32),(48,48),(64,64),(128,128),(256,256)])"
+          & $env:PIPPAL_CI_PYTHON -c "from PIL import Image; Image.open('assets/pippal_icon.png').convert('RGBA').save('assets/pippal_icon.ico', sizes=[(16,16),(24,24),(32,32),(48,48),(64,64),(128,128),(256,256)])"
           if (-not (Test-Path 'assets\pippal_icon.ico')) { throw 'icon generation failed' }
           Write-Host "generated assets\pippal_icon.ico"
 
@@ -96,7 +110,11 @@ jobs:
       # 4. Build with PyInstaller
       # ------------------------------------------------------------------
       - name: Run PyInstaller
-        run: pyinstaller --noconfirm packaging/pippal.spec
+        # The venv's own pyinstaller.exe console script (same entry point
+        # as the former bare `pyinstaller` on PATH).
+        run: |
+          $pyinstaller = Join-Path (Split-Path -Parent $env:PIPPAL_CI_PYTHON) 'pyinstaller.exe'
+          & $pyinstaller --noconfirm packaging/pippal.spec
 
       - name: Verify PyInstaller output
         shell: pwsh

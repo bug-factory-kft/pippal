@@ -47,23 +47,36 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Install package + web deps + Playwright e2e requirements
+      # Fresh per-job venv in the job workspace, created from the
+      # setup-python interpreter; later steps call only
+      # $env:PIPPAL_CI_PYTHON. Never pip-install into the runner's shared
+      # tool-cache Python: upgrades there leak into every later job on
+      # the runner (pytest 9.2 broke CI Benchmarks on main, 2026-11-09).
+      - name: Create job venv + install package + web deps + Playwright e2e requirements
         shell: pwsh
         run: |
-          python -m pip install --upgrade pip
+          python -m venv --clear .venv-ci-web-e2e
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $python = Join-Path $PWD '.venv-ci-web-e2e\Scripts\python.exe'
+          & $python -m pip install --upgrade pip
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           # The package itself (real backend the served UI talks to).
-          python -m pip install -e .
+          & $python -m pip install -e .
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           # Web frontend runtime dep (BSD-3). Not strictly needed in
           # served/headless mode, but install it so the web_ui package
           # imports identically to the desktop path.
-          python -m pip install pywebview
+          & $python -m pip install pywebview
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           # Playwright + pytest-playwright + pytest-html (test-only).
-          python -m pip install -r e2e/web/requirements.txt
+          & $python -m pip install -r e2e/web/requirements.txt
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          "PIPPAL_CI_PYTHON=$python" >> $env:GITHUB_ENV
 
       - name: Install Chromium for Playwright
         shell: pwsh
         run: |
-          python -m playwright install chromium
+          & $env:PIPPAL_CI_PYTHON -m playwright install chromium
 
       - name: Run web Playwright suite (served + headless, VERBOSE)
         shell: pwsh
@@ -102,7 +115,7 @@ jobs:
           #
           # pytest's non-zero exit on any failure still fails this job.
           New-Item -ItemType Directory -Force -Path playwright-report | Out-Null
-          python -m pytest e2e/web `
+          & $env:PIPPAL_CI_PYTHON -m pytest e2e/web `
             -v -rA --log-cli-level=INFO `
             --browser chromium `
             --tracing=on `
