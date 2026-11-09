@@ -6,6 +6,9 @@ install-surface smoke job's ``--upgrade pytest`` pulled in pytest 9.2 and
 broke the Benchmarks job on main, 2026-11-09). Each job therefore runs
 ``python -m venv --clear .venv-ci-<job>`` from the setup-python
 interpreter and calls only that venv's python afterwards.
+
+Caches (pip's, the e2e piper/voice set) stay on the runner itself; GitHub
+Actions cache is not used (BugFactory release contract).
 """
 
 import re
@@ -55,5 +58,12 @@ def test_every_setup_python_job_creates_its_own_venv(workflow: Path) -> None:
     venvs = [line for line in lines if _VENV_CREATE.match(line)]
     assert len(venvs) == setups
     assert len(set(venvs)) == len(venvs), "venv names must be unique per job"
-    # The managed setup-python cache would be a GitHub Actions cache.
-    assert not any(line.startswith("cache:") for line in lines)
+
+
+@pytest.mark.parametrize("workflow", WORKFLOWS, ids=lambda p: p.name)
+def test_no_github_actions_cache(workflow: Path) -> None:
+    # BugFactory contract: caches stay on the owned runner. Neither
+    # actions/cache nor setup-python's managed `cache:` input is allowed.
+    lines = [line for _, line in _code_lines(workflow)]
+    assert not [line for line in lines if re.search(r"uses:\s*actions/cache[@/]", line)]
+    assert not [line for line in lines if line.startswith("cache:")]

@@ -64,34 +64,65 @@ jobs:
       - uses: actions/setup-python@v5
         with: { python-version: "3.11" }
 
-      - name: Cache piper binary + voice
-        id: cache-piper
-        uses: actions/cache@v4
-        with:
-          path: e2e-cache/
-          key: piper-${{ env.PIPER_VERSION }}-${{ env.VOICE }}-v1
-
-      - name: Download piper.exe (cache miss)
-        if: steps.cache-piper.outputs.cache-hit != 'true'
+      # piper.exe + the test voice live in a RUNNER-LOCAL cache, never in
+      # GitHub Actions cache (BugFactory contract: caches stay on the owned
+      # runner). It sits in the runner's own _work root, outside the job
+      # workspace, so every runner carrying `pippal-windows` keeps its own
+      # copy and a runner runs one job at a time (no locking needed). Same
+      # key as the former actions/cache entry. A miss downloads into a
+      # staging dir with retries (a github.com 504 broke a cold run),
+      # checks the set, and only then renames it into place, so an
+      # interrupted fill is never mistaken for a hit. The tests only read
+      # these files, so they use the cache in place (no copy onto C:).
+      - name: Restore piper binary + voice (runner-local cache)
         shell: pwsh
         run: |
-          New-Item -ItemType Directory -Path e2e-cache/piper -Force | Out-Null
-          $url = "https://github.com/rhasspy/piper/releases/download/$env:PIPER_VERSION/piper_windows_amd64.zip"
-          Invoke-WebRequest -Uri $url -OutFile piper.zip
-          Expand-Archive -Path piper.zip -DestinationPath e2e-cache/ -Force
-          Remove-Item piper.zip
-          Get-ChildItem e2e-cache/piper -Recurse | Select-Object -First 5 FullName
-
-      - name: Download voice model (cache miss)
-        if: steps.cache-piper.outputs.cache-hit != 'true'
-        shell: pwsh
-        run: |
-          New-Item -ItemType Directory -Path e2e-cache/voices -Force | Out-Null
-          # Same URL pattern as the in-app Voice Manager builds
-          $base = "https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US/$env:VOICE_NAME/$env:VOICE_QUALITY"
-          Invoke-WebRequest -Uri "$base/$env:VOICE" -OutFile "e2e-cache/voices/$env:VOICE"
-          Invoke-WebRequest -Uri "$base/$env:VOICE.json" -OutFile "e2e-cache/voices/$env:VOICE.json"
-          Get-ChildItem e2e-cache/voices
+          $ProgressPreference = 'SilentlyContinue'
+          if (-not $env:RUNNER_TEMP) { throw 'RUNNER_TEMP is not set' }
+          $key = "piper-$env:PIPER_VERSION-$env:VOICE-v1"
+          $root = Join-Path (Split-Path -Parent $env:RUNNER_TEMP) '_pippal-e2e-cache'
+          $entry = Join-Path $root $key
+          function Test-PiperSet([string]$dir) {
+            $exe = Join-Path $dir 'piper\piper.exe'
+            (Test-Path -LiteralPath $exe -PathType Leaf) -and
+              ((Get-Item -LiteralPath $exe).Length -ge 100000) -and
+              (Test-Path -LiteralPath (Join-Path $dir "voices\$env:VOICE") -PathType Leaf) -and
+              (Test-Path -LiteralPath (Join-Path $dir "voices\$env:VOICE.json") -PathType Leaf)
+          }
+          function Save-WithRetry([string]$uri, [string]$outFile) {
+            for ($attempt = 1; ; $attempt++) {
+              try { Invoke-WebRequest -Uri $uri -OutFile $outFile; return }
+              catch {
+                if ($attempt -ge 4) { throw }
+                Write-Warning "Download attempt $attempt of $uri failed: $($_.Exception.Message); retrying"
+                Start-Sleep -Seconds (15 * $attempt)
+              }
+            }
+          }
+          if (Test-PiperSet $entry) {
+            Write-Host "Runner-local cache hit: $entry"
+          } else {
+            Write-Host "Runner-local cache miss: $entry"
+            New-Item -ItemType Directory -Force -Path $root | Out-Null
+            # Only this workflow writes under $root: drop leftovers of an
+            # interrupted fill and entries for older keys.
+            Get-ChildItem -LiteralPath $root -Directory | Remove-Item -Recurse -Force
+            $stage = Join-Path $root "$key.partial-$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT"
+            New-Item -ItemType Directory -Force -Path (Join-Path $stage 'voices') | Out-Null
+            $zip = Join-Path $stage 'piper.zip'
+            Save-WithRetry "https://github.com/rhasspy/piper/releases/download/$env:PIPER_VERSION/piper_windows_amd64.zip" $zip
+            Expand-Archive -Path $zip -DestinationPath $stage -Force
+            Remove-Item -LiteralPath $zip
+            # Same URL pattern as the in-app Voice Manager builds
+            $base = "https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US/$env:VOICE_NAME/$env:VOICE_QUALITY"
+            Save-WithRetry "$base/$env:VOICE" (Join-Path $stage "voices\$env:VOICE")
+            Save-WithRetry "$base/$env:VOICE.json" (Join-Path $stage "voices\$env:VOICE.json")
+            if (-not (Test-PiperSet $stage)) { throw "Downloaded piper/voice set is incomplete: $stage" }
+            Move-Item -LiteralPath $stage -Destination $entry
+          }
+          Get-ChildItem -LiteralPath (Join-Path $entry 'voices') | Select-Object Name, Length
+          "PIPPAL_PIPER_EXE=$(Join-Path $entry 'piper\piper.exe')" >> $env:GITHUB_ENV
+          "PIPPAL_VOICE_DIR=$(Join-Path $entry 'voices')" >> $env:GITHUB_ENV
 
       - name: Create job venv + install package + dev extras + faster-whisper
         # Fresh per-job venv; see the install-surface-smoke job.
@@ -110,9 +141,9 @@ jobs:
 
       - name: Run E2E suite
         shell: pwsh
+        # PIPPAL_PIPER_EXE / PIPPAL_VOICE_DIR come from the runner-local
+        # cache restore step (GITHUB_ENV).
         env:
-          PIPPAL_PIPER_EXE: ${{ github.workspace }}\e2e-cache\piper\piper.exe
-          PIPPAL_VOICE_DIR: ${{ github.workspace }}\e2e-cache\voices
           PIPPAL_TEST_VOICE: ${{ env.VOICE }}
         run: |
           & $env:PIPPAL_CI_PYTHON -m pytest tests/e2e -v -m e2e | Tee-Object -FilePath e2e-output.txt
