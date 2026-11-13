@@ -269,7 +269,7 @@ class PipPalBridge(PiperSpeakersBridgeMixin, DiagSettingsBridgeMixin):
         import urllib.request as _urlreq
 
         from ..timing import DOWNLOAD_TIMEOUT_S
-        from ..voice_install import _encode_download_url
+        from ..voice_install import _encode_download_url, ensure_loadable_voice_metadata
         from ..voices import voice_filename, voice_url_base
 
         filename = voice_filename(voice)
@@ -319,6 +319,9 @@ class PipPalBridge(PiperSpeakersBridgeMixin, DiagSettingsBridgeMixin):
             if is_cancelled():
                 _cleanup()
                 raise InterruptedError("cancelled")
+            # Never let a config the bundled Piper cannot load replace a
+            # working voice or count as installed.
+            ensure_loadable_voice_metadata(json_part)
         except Exception:
             _cleanup()
             raise

@@ -15,6 +15,17 @@ from .base import TTSBackend
 _NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 
 
+def _last_stderr_line(proc: object) -> str:
+    """Last non-empty line Piper wrote to stderr, bounded for the log."""
+    raw = getattr(proc, "stderr", None)
+    if isinstance(raw, bytes):
+        raw = raw.decode("utf-8", errors="replace")
+    if not isinstance(raw, str):
+        return "no error output"
+    lines = [line.strip() for line in raw.splitlines() if line.strip()]
+    return lines[-1][:300] if lines else "no error output"
+
+
 class PiperBackend(TTSBackend):
     name = "piper"
 
@@ -60,6 +71,13 @@ class PiperBackend(TTSBackend):
         except Exception as e:
             print(f"[piper] error: {e}", file=sys.stderr)
             return False
+        if proc.returncode != 0:
+            # Piper explains a refused model or config on stderr; without
+            # this the only trace of the failure is "Synthesis failed".
+            print(
+                f"[piper] exit code {proc.returncode}: {_last_stderr_line(proc)}",
+                file=sys.stderr,
+            )
         return (
             proc.returncode == 0
             and out_path.exists()

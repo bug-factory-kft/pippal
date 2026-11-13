@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+from functools import lru_cache
 from pathlib import Path
 from typing import TypedDict
 
@@ -124,10 +126,25 @@ LANG_TO_PIPER: dict[str, list[str]] = {
 }
 
 
+#: Immutable upstream commit every catalogue voice is downloaded from.
+#:
+#: ``resolve/main`` is a moving ref. Between 2026-11-09 and 2026-11-13 upstream
+#: retrained voices in place (anna, berta, imre, mihai, amy, faber, ...) and the
+#: new ``.onnx.json`` configs carry multi-codepoint ``phoneme_id_map`` keys
+#: (``"aɪ"``). The bundled ``piper.exe`` aborts on those with ``... is not a
+#: single codepoint``, so every freshly downloaded copy of such a voice ended in
+#: "Synthesis failed". This commit (2026-10-30) is the last one where every
+#: catalogue voice, core and extension, loads in the bundled Piper.
+#:
+#: Bump it only after checking every catalogue voice against the bundled
+#: ``piper.exe`` at the new revision.
+PIPER_VOICES_REVISION = "b4e358ffcb232591bf73a540e70f7de528e4174a"
+
+
 def voice_url_base(v: PiperVoice) -> str:
     base_lang = v["lang"].split("_")[0]
     return (
-        "https://huggingface.co/rhasspy/piper-voices/resolve/main/"
+        f"https://huggingface.co/rhasspy/piper-voices/resolve/{PIPER_VOICES_REVISION}/"
         f"{base_lang}/{v['lang']}/{v['name']}/{v['quality']}/"
     )
 
@@ -144,15 +161,58 @@ def voice_filename(v: PiperVoice) -> str:
 # hard-coding additional engines here.
 
 
+@lru_cache(maxsize=256)
+def _sidecar_has_unloadable_phonemes(path: str, mtime_ns: int, size: int) -> bool:
+    """True when the bundled Piper is certain to reject this sidecar.
+
+    ``piper.exe`` requires every ``phoneme_id_map`` / ``phoneme_map`` key to be
+    exactly one codepoint and exits before synthesizing otherwise. Anything this
+    cannot read or parse is left to Piper, so the answer stays "not known bad".
+    ``mtime_ns`` and ``size`` are part of the cache key only.
+    """
+    try:
+        payload = json.loads(Path(path).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return False
+    if not isinstance(payload, dict):
+        return False
+    for field in ("phoneme_id_map", "phoneme_map"):
+        mapping = payload.get(field)
+        if isinstance(mapping, dict) and any(len(key) != 1 for key in mapping):
+            return True
+    return False
+
+
+def piper_sidecar_is_compatible(metadata: Path) -> bool:
+    """False for a voice config the bundled ``piper.exe`` cannot load.
+
+    Copies of the upstream voices retrained in November 2026 are on disk for
+    anyone who downloaded one while the catalogue still followed ``main``.
+    Reporting them as not installed lets onboarding and the Voice Manager offer
+    the download again, which replaces them with the pinned, working revision.
+    """
+    try:
+        stat = metadata.stat()
+    except OSError:
+        return True
+    return not _sidecar_has_unloadable_phonemes(str(metadata), stat.st_mtime_ns, stat.st_size)
+
+
 def is_installed_voice(filename: str, voices_dir: Path | None = None) -> bool:
-    """True when ``filename`` is a plain Piper .onnx file with sidecar."""
+    """True when ``filename`` is a plain Piper .onnx file with a sidecar the
+    bundled Piper can load."""
     name = (filename or "").strip()
     if not name.endswith(".onnx"):
         return False
     if Path(name).name != name:
         return False
     root = voices_dir or VOICES_DIR
-    return (root / name).is_file() and (root / f"{name}.json").is_file()
+    metadata = root / f"{name}.json"
+    return (
+        (root / name).is_file()
+        and metadata.is_file()
+        and piper_sidecar_is_compatible(metadata)
+    )
 
 
 def installed_voices(voices_dir: Path | None = None) -> list[str]:

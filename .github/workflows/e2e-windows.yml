@@ -76,8 +76,9 @@ jobs:
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Path e2e-cache/voices -Force | Out-Null
-          # Same URL pattern as the in-app Voice Manager builds
-          $base = "https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US/$env:VOICE_NAME/$env:VOICE_QUALITY"
+          # Same URL pattern and pinned upstream commit as the in-app Voice
+          # Manager (pippal.voices.PIPER_VOICES_REVISION); never the moving main.
+          $base = "https://huggingface.co/rhasspy/piper-voices/resolve/b4e358ffcb232591bf73a540e70f7de528e4174a/en/en_US/$env:VOICE_NAME/$env:VOICE_QUALITY"
           Invoke-WebRequest -Uri "$base/$env:VOICE" -OutFile "e2e-cache/voices/$env:VOICE"
           Invoke-WebRequest -Uri "$base/$env:VOICE.json" -OutFile "e2e-cache/voices/$env:VOICE.json"
           Get-ChildItem e2e-cache/voices

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 import pytest
@@ -14,7 +15,8 @@ class TestVoiceUrlBase:
             "name": "ljspeech", "quality": "high", "label": "x",
         }
         assert voices.voice_url_base(v) == (
-            "https://huggingface.co/rhasspy/piper-voices/resolve/main/"
+            "https://huggingface.co/rhasspy/piper-voices/resolve/"
+            "b4e358ffcb232591bf73a540e70f7de528e4174a/"
             "en/en_US/ljspeech/high/"
         )
 
@@ -24,9 +26,62 @@ class TestVoiceUrlBase:
             "name": "anna", "quality": "medium", "label": "x",
         }
         assert voices.voice_url_base(v) == (
-            "https://huggingface.co/rhasspy/piper-voices/resolve/main/"
+            "https://huggingface.co/rhasspy/piper-voices/resolve/"
+            "b4e358ffcb232591bf73a540e70f7de528e4174a/"
             "hu/hu_HU/anna/medium/"
         )
+
+    def test_every_catalogue_voice_downloads_from_an_immutable_commit(self):
+        """``resolve/main`` moves: upstream retrained voices in place in
+        November 2026 and the bundled Piper could no longer load a fresh
+        download. Only a full commit hash keeps a shipped build's downloads
+        identical to what was verified."""
+        assert re.fullmatch(r"[0-9a-f]{40}", voices.PIPER_VOICES_REVISION)
+        for v in voices.KNOWN_VOICES:
+            base = voices.voice_url_base(v)
+            assert f"/resolve/{voices.PIPER_VOICES_REVISION}/" in base
+            assert "/resolve/main/" not in base
+
+
+def _write_voice(voices_dir: Path, name: str, sidecar: str) -> None:
+    (voices_dir / name).write_bytes(b"onnx")
+    (voices_dir / f"{name}.json").write_text(sidecar, encoding="utf-8")
+
+
+class TestSidecarCompatibility:
+    """A sidecar the bundled ``piper.exe`` refuses must not count as installed,
+    so the user is offered the download again instead of "Synthesis failed"."""
+
+    GOOD = '{"phoneme_id_map": {"_": [0], "a": [14], "ɪ": [74], "ő": [130]}, "phoneme_map": {}}'
+    # Shape of the configs upstream published for the retrained voices.
+    RETRAINED = '{"phoneme_id_map": {"_": [0], "a": [14], "aɪ": [161], "oʊ": [165]}}'
+
+    def test_single_codepoint_sidecar_is_installed(self, tmp_path: Path):
+        _write_voice(tmp_path, "hu_HU-anna-medium.onnx", self.GOOD)
+        assert voices.is_installed_voice("hu_HU-anna-medium.onnx", voices_dir=tmp_path)
+        assert voices.installed_voices(voices_dir=tmp_path) == ["hu_HU-anna-medium.onnx"]
+
+    def test_multi_codepoint_phoneme_keys_are_not_installed(self, tmp_path: Path):
+        _write_voice(tmp_path, "hu_HU-anna-medium.onnx", self.RETRAINED)
+        _write_voice(tmp_path, "en_US-ljspeech-high.onnx", self.GOOD)
+        assert not voices.is_installed_voice("hu_HU-anna-medium.onnx", voices_dir=tmp_path)
+        assert voices.installed_voices(voices_dir=tmp_path) == ["en_US-ljspeech-high.onnx"]
+
+    def test_multi_codepoint_phoneme_map_keys_are_not_installed(self, tmp_path: Path):
+        _write_voice(tmp_path, "x.onnx", '{"phoneme_id_map": {"a": [1]}, "phoneme_map": {"ab": ["a"]}}')
+        assert not voices.is_installed_voice("x.onnx", voices_dir=tmp_path)
+
+    @pytest.mark.parametrize("sidecar", ["", "{}", "not json", "[]", '{"phoneme_id_map": []}'])
+    def test_sidecars_piper_must_judge_itself_stay_installed(self, tmp_path: Path, sidecar: str):
+        _write_voice(tmp_path, "x.onnx", sidecar)
+        assert voices.is_installed_voice("x.onnx", voices_dir=tmp_path)
+
+    def test_replacing_the_sidecar_is_noticed(self, tmp_path: Path):
+        _write_voice(tmp_path, "x.onnx", self.RETRAINED)
+        assert not voices.is_installed_voice("x.onnx", voices_dir=tmp_path)
+        # A re-download swaps in the pinned revision's (longer) config.
+        _write_voice(tmp_path, "x.onnx", self.GOOD)
+        assert voices.is_installed_voice("x.onnx", voices_dir=tmp_path)
 
 
 def test_voice_filename():

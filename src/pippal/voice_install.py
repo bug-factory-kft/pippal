@@ -17,9 +17,27 @@ from .paths import VOICES_DIR
 from .timing import DOWNLOAD_TIMEOUT_S
 from .voices import (
     PiperVoice,
+    piper_sidecar_is_compatible,
     voice_filename,
     voice_url_base,
 )
+
+
+class IncompatibleVoiceError(RuntimeError):
+    """A downloaded voice config the bundled Piper cannot load."""
+
+
+def ensure_loadable_voice_metadata(metadata: Path) -> None:
+    """Refuse a downloaded sidecar the bundled ``piper.exe`` cannot load.
+
+    Runs on the ``.part`` file before it replaces anything: a voice that
+    already works on disk is never overwritten by one that could only end in
+    "Synthesis failed", and such a download never counts as installed.
+    """
+    if not piper_sidecar_is_compatible(metadata):
+        raise IncompatibleVoiceError(
+            f"{metadata.name}: this voice config cannot be loaded by the bundled Piper"
+        )
 
 
 def _encode_download_url(url: str) -> str:
@@ -72,6 +90,7 @@ def install_piper_voice(
     try:
         download(base + filename, part_onnx)
         download(base + f"{filename}.json", part_meta)
+        ensure_loadable_voice_metadata(part_meta)
         os.replace(str(part_onnx), str(onnx))
         os.replace(str(part_meta), str(meta))
     except Exception:
