@@ -108,3 +108,68 @@ def test_install_piper_voice_removes_partial_files_on_failure(tmp_path: Path) ->
     assert (tmp_path / filename).exists() is False
     assert (tmp_path / f"{filename}.json").exists() is False
     assert list(tmp_path.glob("*.part")) == []
+
+
+RETRAINED_SIDECAR = '{"phoneme_id_map": {"_": [0], "a": [14], "aɪ": [161]}}'
+WORKING_SIDECAR = '{"phoneme_id_map": {"_": [0], "a": [14], "ɪ": [74]}}'
+
+
+def test_install_piper_voice_refuses_config_the_bundled_piper_cannot_load(
+    tmp_path: Path,
+) -> None:
+    """A download with multi-codepoint phoneme keys (the upstream retrain of
+    November 2026) must fail at install time and leave the working voice that
+    is already on disk untouched."""
+    voice = _portuguese_voice()
+    filename = voice_filename(voice)
+    (tmp_path / filename).write_bytes(b"working model")
+    (tmp_path / f"{filename}.json").write_text(WORKING_SIDECAR, encoding="utf-8")
+
+    def fake_download(url: str, dest: Path) -> None:
+        if url.endswith(".json"):
+            dest.write_text(RETRAINED_SIDECAR, encoding="utf-8")
+        else:
+            dest.write_bytes(b"retrained model")
+
+    with pytest.raises(voice_install.IncompatibleVoiceError, match="bundled Piper"):
+        voice_install.install_piper_voice(
+            voice,
+            voices_dir=tmp_path,
+            streaming_download=fake_download,
+        )
+
+    assert (tmp_path / filename).read_bytes() == b"working model"
+    assert (tmp_path / f"{filename}.json").read_text(encoding="utf-8") == WORKING_SIDECAR
+    assert list(tmp_path.glob("*.part")) == []
+
+
+def test_bridge_voice_download_refuses_config_the_bundled_piper_cannot_load(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Same guard on the Voice Manager download path."""
+    import urllib.request
+
+    from pippal.web_ui import bridge as bridge_module
+
+    voice = _portuguese_voice()
+    filename = voice_filename(voice)
+    (tmp_path / filename).write_bytes(b"working model")
+    (tmp_path / f"{filename}.json").write_text(WORKING_SIDECAR, encoding="utf-8")
+
+    def fake_urlopen(url: str, timeout: float):
+        body = RETRAINED_SIDECAR.encode() if url.endswith(".json") else b"retrained model"
+        response = _Response([body])
+        response.headers = {}  # type: ignore[attr-defined]
+        return response
+
+    monkeypatch.setattr(bridge_module, "VOICES_DIR", tmp_path)
+    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+    bridge = bridge_module.PipPalBridge.__new__(bridge_module.PipPalBridge)
+
+    with pytest.raises(voice_install.IncompatibleVoiceError):
+        bridge._stream_voice_with_progress(voice, lambda: False, lambda **_kw: None)
+
+    assert (tmp_path / filename).read_bytes() == b"working model"
+    assert (tmp_path / f"{filename}.json").read_text(encoding="utf-8") == WORKING_SIDECAR
+    assert list(tmp_path.glob("*.part")) == []
