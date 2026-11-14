@@ -1,5 +1,21 @@
 # PipPal Changelog
 
+## 0.3.4 - 2026-11-14
+
+Release date: 2026-11-14
+
+- Voice downloads: Piper voices now come from a pinned, verified revision of
+  the upstream voice collection instead of its moving `main` branch. Upstream
+  retraining had replaced several voices, including Hungarian and Romanian
+  ones, with files the bundled Piper engine cannot load, which ended in
+  "Synthesis failed".
+- Voice recovery: an installed voice whose configuration the bundled Piper
+  engine cannot load no longer counts as installed, so it is offered for
+  download again. A download with such a configuration is refused before it
+  can replace a working voice.
+- Diagnostics: a failed Piper run logs its exit code and its last error line.
+- Branding: the in-app wordmark and the About card carry the trademark notice.
+
 ## 0.3.3 - 2026-07-31
 
 Release date: 2026-07-31
